@@ -10,6 +10,9 @@ import { Allowlist } from "./security/allowlist.js";
 import { GuardedApp } from "./security/guard.js";
 import { ConfigResolver } from "./config/resolver.js";
 import { isSelfCheck, reconcile } from "./gatekeeper/handler.js";
+import { syncSettings } from "./settings/apply.js";
+import { validatePullRequest } from "./settings/validate.js";
+import { serve } from "./approval/silverPlatter.js";
 import { loadEnv, type WoodhouseEnv } from "./lib/env.js";
 
 export interface AppOptions {
@@ -32,27 +35,58 @@ export function createApp(options: AppOptions = {}) {
       "Woodhouse reporting for duty",
     );
 
-    // ---------------------------------------------------------------- config
-    // Keep the cache honest: any push to a config file invalidates the repo's
-    // entry immediately rather than waiting for the TTL to lapse.
-    guarded.on("push", "config-invalidate", async (context, scope) => {
+    // ------------------------------------------------------------- settings
+    guarded.on("push", "settings-sync", async (context, scope) => {
       if (scope.repo === undefined) return;
 
-      const touched = context.payload.commits.some((commit) =>
-        [...commit.added, ...commit.modified, ...commit.removed].some((path) =>
-          path.endsWith("woodhouse.yml") || path.endsWith("woodhouse.yaml"),
+      const payload = context.payload;
+
+      // Only the default branch defines configuration. Reacting to every
+      // branch would let an unreviewed feature branch rewrite settings.
+      const defaultRef = `refs/heads/${payload.repository.default_branch}`;
+      if (payload.ref !== defaultRef) return;
+      if (payload.deleted) return;
+
+      const touchedConfig = payload.commits.some((commit) =>
+        [...commit.added, ...commit.modified, ...commit.removed].some(
+          (path) =>
+            path.endsWith("woodhouse.yml") || path.endsWith("woodhouse.yaml"),
         ),
       );
-      if (!touched) return;
 
-      // A push to the owner's `.github` repo changes the baseline for every
-      // repository, so the whole cache for that owner must go.
-      if (scope.repo === ".github") {
-        resolver.invalidate(scope.owner, ".github");
-        scope.log.info("Baseline config changed; invalidating owner cache");
+      // Keep the cache honest before reading it back.
+      if (touchedConfig) {
+        if (scope.repo === ".github") {
+          // The baseline changed, so every repository this owner has is now
+          // stale, not merely `.github`.
+          resolver.invalidateOwner(scope.owner);
+          scope.log.info("Baseline configuration changed; cleared owner cache");
+        } else {
+          resolver.invalidate(scope.owner, scope.repo);
+        }
       }
-      resolver.invalidate(scope.owner, scope.repo);
-      scope.log.info("Invalidated cached configuration");
+
+      const { config, sources } = await resolver.resolve(
+        context.octokit as never,
+        scope.owner,
+        scope.repo,
+        scope.log,
+      );
+
+      if (!config.settings.enabled) return;
+
+      scope.log.debug({ sources }, "Running settings sync");
+
+      await syncSettings(
+        {
+          octokit: context.octokit,
+          owner: scope.owner,
+          repo: scope.repo,
+          log: scope.log,
+          dryRun: env.dryRun,
+        },
+        config,
+      );
     });
 
     // ------------------------------------------------------------ gatekeeper
@@ -130,6 +164,67 @@ export function createApp(options: AppOptions = {}) {
           scope.owner,
           scope.repo,
           sha,
+        );
+      },
+    );
+
+    // -------------------------------------------------------- silver platter
+    guarded.on(
+      ["pull_request.opened", "pull_request.reopened"],
+      "silver-platter",
+      async (context, scope) => {
+        if (scope.repo === undefined) return;
+
+        const pr = context.payload.pull_request;
+
+        const { config } = await resolver.resolve(
+          context.octokit as never,
+          scope.owner,
+          scope.repo,
+          scope.log,
+        );
+
+        await serve(
+          {
+            octokit: context.octokit,
+            log: scope.log,
+            dryRun: env.dryRun,
+          },
+          scope.owner,
+          scope.repo,
+          {
+            number: pr.number,
+            author: pr.user.login,
+            draft: pr.draft ?? false,
+            state: pr.state,
+            headSha: pr.head.sha,
+          },
+          config.autoApproval,
+        );
+      },
+    );
+
+    // --------------------------------------------------- config validation
+    guarded.on(
+      [
+        "pull_request.opened",
+        "pull_request.reopened",
+        "pull_request.synchronize",
+      ],
+      "config-validation",
+      async (context, scope) => {
+        if (scope.repo === undefined) return;
+
+        await validatePullRequest(
+          {
+            octokit: context.octokit,
+            log: scope.log,
+            dryRun: env.dryRun,
+          },
+          scope.owner,
+          scope.repo,
+          context.payload.pull_request.number,
+          context.payload.pull_request.head.sha,
         );
       },
     );

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: woodhouse
+  namespace: woodhouse
+  labels:
+    app.kubernetes.io/name: woodhouse
+spec:
+  # ClusterIP only. The tunnel connects outbound from cloudflared; nothing
+  # should be reachable from the LAN, and there is no Ingress on purpose.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: woodhouse
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

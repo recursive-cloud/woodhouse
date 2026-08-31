@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: woodhouse
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml
+  # secret.example.yaml is deliberately NOT listed. Create the real secret
+  # out of band (see the comments in that file).
+
+images:
+  - name: ghcr.io/REPLACE_ME/woodhouse
+    newTag: latest
+
+# Rolls the deployment automatically whenever the allowlist or log level
+# changes, instead of leaving a stale pod running the old configuration.
+configMapGenerator: []
+generatorOptions:
+  disableNameSuffixHash: false

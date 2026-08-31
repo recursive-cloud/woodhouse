@@ -90,9 +90,118 @@ export const repositorySchema = z
       .optional(),
     description: z.string().optional(),
     homepage: z.string().optional(),
-    topics: z.array(z.string()).optional(),
-    private: z.boolean().optional(),
-    archived: z.boolean().optional(),
+    topics: z.array(z.string().trim().min(1)).optional(),
+
+    // Deliberately NOT exposed: `private` and `archived`.
+    //
+    // Flipping visibility to private permanently deletes every fork, and
+    // archiving makes a repository read-only in a way this bot could not then
+    // undo (it would lose write access to its own config). Neither is a
+    // reasonable outcome of a YAML typo in a file that cascades across every
+    // repository you own. Change those two by hand.
+  })
+  .strict()
+  .default({});
+
+/**
+ * Classic branch protection, keyed by branch name.
+ *
+ * Kept separate from rulesets because GitHub applies both independently and
+ * most homelab repos only need one of them.
+ */
+export const branchProtectionSchema = z
+  .object({
+    required_status_checks: z
+      .object({
+        strict: z.boolean().default(false),
+        contexts: z.array(z.string().trim().min(1)).default([]),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    enforce_admins: z.boolean().nullable().optional(),
+    required_pull_request_reviews: z
+      .object({
+        required_approving_review_count: z.number().int().min(0).max(6).optional(),
+        dismiss_stale_reviews: z.boolean().optional(),
+        require_code_owner_reviews: z.boolean().optional(),
+        require_last_push_approval: z.boolean().optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    required_linear_history: z.boolean().optional(),
+    allow_force_pushes: z.boolean().nullable().optional(),
+    allow_deletions: z.boolean().optional(),
+    required_conversation_resolution: z.boolean().optional(),
+    lock_branch: z.boolean().optional(),
+    block_creations: z.boolean().optional(),
+  })
+  .strict();
+
+export const labelSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    /** Six hex digits; a leading `#` is accepted and stripped on apply. */
+    color: z
+      .string()
+      .trim()
+      .regex(/^#?[0-9a-fA-F]{6}$/, "must be a six-digit hex colour")
+      .optional(),
+    description: z.string().max(100).optional(),
+    /** Rename an existing label to `name`. */
+    from: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+/**
+ * Repository rulesets.
+ *
+ * `rules` is intentionally loose: the rule union is large, versioned, and
+ * GitHub extends it regularly. Pinning it here would reject valid new rule
+ * types. The `type` discriminant is required so obvious mistakes are still
+ * caught, and GitHub validates the rest on write.
+ */
+export const rulesetSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    target: z.enum(["branch", "tag", "push"]).default("branch"),
+    enforcement: z.enum(["active", "evaluate", "disabled"]).default("active"),
+    bypass_actors: z
+      .array(
+        z
+          .object({
+            actor_id: z.number().int().nullable().optional(),
+            actor_type: z.enum([
+              "Integration",
+              "OrganizationAdmin",
+              "RepositoryRole",
+              "Team",
+              "DeployKey",
+            ]),
+            bypass_mode: z.enum(["always", "pull_request"]).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    conditions: z.record(z.unknown()).optional(),
+    rules: z
+      .array(z.object({ type: z.string().trim().min(1) }).passthrough())
+      .default([]),
+  })
+  .strict();
+
+export const settingsSchema = z
+  .object({
+    /**
+     * Master switch. Off by default: installing this app must not silently
+     * start rewriting repository settings until it is explicitly asked to.
+     */
+    enabled: z.boolean().default(false),
+    /** Remove labels that exist on the repo but are absent from config. */
+    pruneLabels: z.boolean().default(false),
+    /** Delete rulesets managed by us but no longer present in config. */
+    pruneRulesets: z.boolean().default(false),
   })
   .strict()
   .default({});
@@ -105,7 +214,11 @@ export const woodhouseConfigSchema = z
      */
     inherit: z.boolean().default(true),
 
+    settings: settingsSchema,
     repository: repositorySchema,
+    branchProtection: z.record(branchProtectionSchema).default({}),
+    labels: z.array(labelSchema).default([]),
+    rulesets: z.array(rulesetSchema).default([]),
     gatekeeper: gatekeeperSchema,
     autoApproval: autoApprovalSchema,
   })
@@ -115,6 +228,11 @@ export const woodhouseConfigSchema = z
 export type WoodhouseConfig = z.infer<typeof woodhouseConfigSchema>;
 export type GatekeeperConfig = WoodhouseConfig["gatekeeper"];
 export type AutoApprovalConfig = WoodhouseConfig["autoApproval"];
+export type SettingsConfig = WoodhouseConfig["settings"];
+export type RepositoryConfig = WoodhouseConfig["repository"];
+export type BranchProtectionConfig = z.infer<typeof branchProtectionSchema>;
+export type LabelConfig = z.infer<typeof labelSchema>;
+export type RulesetConfig = z.infer<typeof rulesetSchema>;
 
 /** Fully-defaulted config, used when no file exists anywhere in the cascade. */
 export function defaultConfig(): WoodhouseConfig {

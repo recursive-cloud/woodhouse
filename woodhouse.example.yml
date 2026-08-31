@@ -1,0 +1,102 @@
+# Example baseline configuration.
+#
+# Place this at `woodhouse.yml` in your owner-level `.github` repository to
+# apply it to every repository you own, and override it per-repository with
+# `.github/woodhouse.yml`.
+#
+# Local settings win. Objects merge; arrays replace wholesale, so a repository
+# can narrow an inherited list rather than only ever extending it.
+
+# Set `inherit: false` in a repository's local file to ignore this baseline
+# entirely rather than merging with it.
+
+settings:
+  # Off by default. Nothing is written to repository settings until this is
+  # explicitly turned on.
+  enabled: true
+
+  # Delete labels that exist on the repository but are absent here. Leave off
+  # until you are confident the label list below is complete.
+  pruneLabels: false
+  pruneRulesets: false
+
+repository:
+  has_issues: true
+  has_wiki: false
+  has_projects: false
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  allow_auto_merge: true
+  delete_branch_on_merge: true
+  squash_merge_commit_title: PR_TITLE
+  squash_merge_commit_message: PR_BODY
+  topics:
+    - homelab
+
+  # `private` and `archived` are not configurable on purpose: going private
+  # deletes every fork, and archiving would lock the bot out of its own config.
+
+labels:
+  - name: bug
+    color: d73a4a
+    description: Something is not working
+  - name: dependencies
+    color: 0366d6
+    description: Dependency updates
+  - name: "won't fix"
+    color: ffffff
+    # Renames an existing label. Safe to leave in place: it is skipped once
+    # the rename has already happened.
+    from: wontfix
+
+branchProtection:
+  main:
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: true
+    required_status_checks:
+      strict: true
+      contexts:
+        # Requiring only this one check is the point of the gatekeeper: it
+        # consolidates every other check into a single required entry, so this
+        # list stops needing maintenance as workflows come and go.
+        - woodhouse/white-glove
+    enforce_admins: false
+    required_conversation_resolution: true
+    allow_force_pushes: false
+    allow_deletions: false
+
+  # Branches that do not exist are skipped silently, so a shared baseline can
+  # name both `main` and `master` without erroring on repos that have one.
+
+gatekeeper:
+  enabled: true
+
+  # Checks that must report success explicitly. Unlike ordinary checks these
+  # may not be skipped or neutral, and if one never reports at all the
+  # white-glove check stays pending rather than passing.
+  strictChecks: []
+  #  - build
+  #  - test
+
+  # Advisory checks to leave out of the verdict entirely.
+  ignoredChecks:
+    - codecov/patch
+    - codecov/project
+
+autoApproval:
+  enabled: true
+  allowedActors:
+    - renovate[bot]
+    - dependabot[bot]
+
+  # Pull requests touching these paths are never auto-approved. The defaults
+  # cover the config files themselves, which matters: without that, anyone in
+  # allowedActors could self-approve a change adding themselves more rights.
+  protectedPaths:
+    - .github/woodhouse.yml
+    - .github/woodhouse.yaml
+    - .github/workflows/
+
+rulesets: []

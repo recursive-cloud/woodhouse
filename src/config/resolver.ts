@@ -135,6 +135,15 @@ export class ConfigResolver {
     this.cache.deleteByPrefix(`${owner.toLowerCase()}/${repo.toLowerCase()}@`);
   }
 
+  /**
+   * Drop every cached entry for an owner. Needed when the baseline in the
+   * owner's `.github` repository changes, since that affects the resolved
+   * config of every repository they own, not just `.github` itself.
+   */
+  invalidateOwner(owner: string): void {
+    this.cache.deleteByPrefix(`${owner.toLowerCase()}/`);
+  }
+
   async resolve(
     client: ContentsClient,
     owner: string,

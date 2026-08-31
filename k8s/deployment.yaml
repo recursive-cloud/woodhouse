@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: woodhouse
+  namespace: woodhouse
+  labels:
+    app.kubernetes.io/name: woodhouse
+spec:
+  replicas: 1
+
+  # Recreate, not RollingUpdate. Woodhouse serialises work per commit with an
+  # in-process lock, so two pods running at once could both decide there is no
+  # existing white-glove check and create duplicates. A few seconds of downtime
+  # during a deploy is harmless: GitHub retries webhook deliveries, and they can
+  # be redelivered by hand from the App's Advanced tab.
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: woodhouse
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: woodhouse
+      annotations:
+        # Roll the pod automatically when the allowlist changes.
+        checksum/config: "replace-with-configmap-hash-or-let-kustomize-do-it"
+    spec:
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: woodhouse
+          image: ghcr.io/REPLACE_ME/woodhouse:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: woodhouse
+            - secretRef:
+                name: woodhouse
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop: ["ALL"]
+
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              # No CPU limit on purpose: throttling a webhook handler adds
+              # latency for no benefit on a homelab node. Memory is capped
+              # because a leak should kill the pod rather than the node.
+              memory: 256Mi
+
+          # The process listens immediately and has nothing to warm up, so
+          # startup is fast; the probe is mainly here to catch a bad config
+          # that makes the process exit on boot.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 10
+            periodSeconds: 3
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+
+          volumeMounts:
+            # readOnlyRootFilesystem is on, so anything needing to write gets
+            # an explicit emptyDir. Node occasionally uses TMPDIR.
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+
+      # Give in-flight webhook handlers a moment to finish before SIGKILL.
+      terminationGracePeriodSeconds: 30

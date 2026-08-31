@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: woodhouse
+  namespace: woodhouse
+data:
+  # The installation allowlist. Events from any other owner are dropped before
+  # a token is even minted. There is no wildcard, and an empty value stops the
+  # pod from starting rather than allowing everything.
+  ALLOWED_INSTALLATION_TARGETS: '["my-github-username","my-homelab-org"]'
+
+  LOG_LEVEL: "info"
+  PORT: "3000"
+
+  # Set to "true" for the first run against real repositories: every decision
+  # is evaluated and logged, but nothing is written back to GitHub.
+  DRY_RUN: "false"
