@@ -1,0 +1,32 @@
+{
+  "name": "woodhouse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A personal butler for GitHub repositories: settings sync, auto-approval, and check consolidation.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/app.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "pino": "^10.3.1",
+    "probot": "^13.4.7",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
