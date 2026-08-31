@@ -9,6 +9,7 @@ coverage
 .env.*
 !.env.example
 k8s
+assets
 README.md
 prompt.txt
 .gitignore

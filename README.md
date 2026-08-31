@@ -1,4 +1,12 @@
+<div align="center">
+
+<img src="assets/woodhouse-readme.jpeg" alt="Woodhouse" width="180">
+
 # Woodhouse
+
+**A personal butler for your GitHub repositories.**
+
+</div>
 
 A self-hosted GitHub App that keeps repository settings consistent, approves
 pull requests from trusted actors, and consolidates every CI check into a
@@ -79,6 +87,14 @@ Create an App at `https://github.com/settings/apps/new` with:
 
 Then set the webhook URL to your Cloudflare Tunnel hostname with the path
 `/api/github/webhooks`.
+
+**Logo.** Upload [`assets/woodhouse.jpeg`](assets/woodhouse.jpeg) under the
+App's *Display information*. It is 1024×1024 and 704 KB, within GitHub's
+square/1 MB limit.
+
+The App slug can be anything; Woodhouse resolves its own bot login at runtime
+via `GET /app` and caches it, so the "have I already approved this commit?"
+check keeps working whatever you name it.
 
 ## Running it
 
