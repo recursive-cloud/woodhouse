@@ -8,7 +8,7 @@
 
 services:
   woodhouse:
-    image: ghcr.io/recursive-cloud/woodhouse:30a80b9
+    image: ghcr.io/recursive-cloud/woodhouse:e54dba2
     # Pin the commit SHA rather than `latest`. Portainer will not notice a
     # moving tag has changed, and an unexpected restart pulling a different
     # build is exactly the surprise you do not want from a bot with admin
