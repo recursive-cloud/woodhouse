@@ -1,0 +1,112 @@
+# Woodhouse — single-container deployment for Docker Compose / Portainer.
+#
+#   1. cp .env.example .env   and fill it in
+#   2. docker compose up -d
+#
+# Nothing is published to the host: cloudflared reaches the container over the
+# shared Docker network, so the webhook endpoint is never exposed to the LAN.
+
+services:
+  woodhouse:
+    image: ghcr.io/recursive-cloud/woodhouse:30a80b9
+    # Pin the commit SHA rather than `latest`. Portainer will not notice a
+    # moving tag has changed, and an unexpected restart pulling a different
+    # build is exactly the surprise you do not want from a bot with admin
+    # scopes. Bump this line deliberately.
+
+    container_name: woodhouse
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      # Anything set here overrides .env. Useful for per-host tweaks.
+      NODE_ENV: production
+
+    # The webhook port, reachable only from other containers on this network.
+    expose:
+      - "3000"
+
+    # Uncomment ONLY for local debugging without a tunnel. Binding to loopback
+    # rather than 0.0.0.0 keeps it off the LAN even then.
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+
+    networks:
+      - woodhouse
+
+    # Matches the Kubernetes securityContext: non-root, read-only root
+    # filesystem, no capabilities, no privilege escalation.
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    tmpfs:
+      # read_only is on, so give Node somewhere to write if it needs to.
+      - /tmp:rw,noexec,nosuid,size=32m
+
+    # The image is distroless: no shell, no curl, no wget. The healthcheck
+    # therefore runs Node directly, in exec form so no shell is involved.
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    stop_grace_period: 30s
+
+    logging:
+      # Logs are single-line JSON on stdout. Cap them so a chatty LOG_LEVEL
+      # cannot fill the host disk.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    deploy:
+      resources:
+        limits:
+          # Memory only. Throttling a webhook handler adds latency for no
+          # benefit; a leak should kill the container, not the host.
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # If cloudflared already runs elsewhere, delete this and instead attach that
+  # container to the `woodhouse` network (see the note at the bottom of the
+  # file). Point the tunnel's public hostname at:
+  #
+  #     http://woodhouse:3000
+  #
+  # and set the GitHub App webhook URL to
+  # https://<hostname>/api/github/webhooks
+  # ---------------------------------------------------------------------------
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   container_name: woodhouse-tunnel
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run
+  #   environment:
+  #     TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+  #   networks:
+  #     - woodhouse
+  #   depends_on:
+  #     woodhouse:
+  #       condition: service_healthy
+
+networks:
+  woodhouse:
+    driver: bridge
+    # To reach this from a cloudflared container managed by another compose
+    # stack, replace the two lines above with:
+    #
+    #   external: true
+    #   name: <the network cloudflared is already on>

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { loadEnv, parseAllowedTargets, ConfigurationError } from "../src/lib/env.js";
+import {
+  ConfigurationError,
+  loadEnv,
+  parseAllowedTargets,
+  parseBaselineRepo,
+} from "../src/lib/env.js";
 
 describe("parseAllowedTargets", () => {
   it("parses a JSON array", () => {
@@ -104,5 +109,32 @@ describe("loadEnv", () => {
     expect(loadEnv({ ...baseEnv, DRY_RUN: "true" }).dryRun).toBe(true);
     expect(loadEnv({ ...baseEnv, DRY_RUN: "no" }).dryRun).toBe(false);
     expect(loadEnv({ ...baseEnv }).dryRun).toBe(false);
+  });
+});
+
+describe("parseBaselineRepo", () => {
+  it("defaults to .github-private", () => {
+    // Not `.github`: that repo must be public for several built-in GitHub
+    // features, and the baseline holds the auto-approval actor list.
+    expect(parseBaselineRepo(undefined)).toBe(".github-private");
+    expect(parseBaselineRepo("  ")).toBe(".github-private");
+  });
+
+  it("accepts an override", () => {
+    expect(parseBaselineRepo(".github")).toBe(".github");
+    expect(parseBaselineRepo("org-config")).toBe("org-config");
+  });
+
+  it("rejects an owner/repo pair", () => {
+    // The owner is always the installation account; accepting a qualified
+    // name would silently read from somewhere other than intended.
+    expect(() => parseBaselineRepo("someone-else/.github")).toThrow(
+      /repository name only/,
+    );
+  });
+
+  it("rejects invalid repository names", () => {
+    expect(() => parseBaselineRepo("has space")).toThrow(ConfigurationError);
+    expect(() => parseBaselineRepo("../escape")).toThrow(ConfigurationError);
   });
 });

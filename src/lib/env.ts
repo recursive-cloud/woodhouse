@@ -6,11 +6,14 @@
  * (and possibly wide-open) security posture.
  */
 
+import { DEFAULT_BASELINE_REPO } from "../config/resolver.js";
+
 export interface WoodhouseEnv {
   readonly appId: string;
   readonly privateKey: string;
   readonly webhookSecret: string;
   readonly allowedInstallationTargets: readonly string[];
+  readonly baselineRepo: string;
   readonly port: number;
   readonly host: string | undefined;
   readonly webhookPath: string;
@@ -113,6 +116,35 @@ function parseBool(value: string | undefined, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
+/**
+ * Repository holding the owner-wide baseline config. Defaults to
+ * `.github-private` so the config is not forced public alongside the
+ * community health files that live in `.github`.
+ */
+export function parseBaselineRepo(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_BASELINE_REPO;
+
+  const value = raw.trim();
+
+  // A slash almost certainly means someone wrote "owner/repo". The owner is
+  // always the installation account, so accepting it would silently read from
+  // somewhere other than intended.
+  if (value.includes("/")) {
+    throw new ConfigurationError(
+      `BASELINE_REPO must be a repository name only, not "${value}". ` +
+        "The owner is always the installation account.",
+    );
+  }
+
+  if (!/^[A-Za-z0-9-_.]+$/.test(value)) {
+    throw new ConfigurationError(
+      `BASELINE_REPO is not a valid repository name: "${value}".`,
+    );
+  }
+
+  return value;
+}
+
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): WoodhouseEnv {
   const logLevel = (env.LOG_LEVEL ?? "info").toLowerCase();
   if (!(LOG_LEVELS as readonly string[]).includes(logLevel)) {
@@ -133,6 +165,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): WoodhouseEnv {
     allowedInstallationTargets: parseAllowedTargets(
       env.ALLOWED_INSTALLATION_TARGETS,
     ),
+    baselineRepo: parseBaselineRepo(env.BASELINE_REPO),
     port,
     host: env.HOST,
     webhookPath: env.WEBHOOK_PATH ?? "/api/github/webhooks",

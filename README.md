@@ -24,7 +24,7 @@ dropped. Handlers are registered through a guard wrapper rather than on the
 Probot instance directly, so a new listener cannot accidentally skip the check.
 
 **Cascading settings sync.** On a push to the default branch, Woodhouse merges
-`woodhouse.yml` from your owner-level `.github` repository with
+`woodhouse.yml` from your owner-level `.github-private` repository with
 `.github/woodhouse.yml` from the repository itself, and reconciles repository
 options, topics, labels, branch protection and rulesets. Settings are diffed
 before writing, so an unchanged repository costs no write calls.
@@ -55,6 +55,19 @@ See [`woodhouse.example.yml`](./woodhouse.example.yml) for a fully commented
 baseline. Local settings override the inherited baseline; objects merge, and
 arrays are **replaced** rather than concatenated so a repository can narrow an
 inherited list, not just extend it.
+
+| Layer | Location |
+| --- | --- |
+| Baseline (owner-wide) | `woodhouse.yml` in the owner's `.github-private` repo |
+| Local (per repository) | `.github/woodhouse.yml` |
+
+The baseline lives in `.github-private`, not `.github`, because `.github` has
+to be **public** for GitHub's community-health and org-profile features to
+apply to public repositories — and this config lists who may auto-approve pull
+requests. Set `BASELINE_REPO` to override the location.
+
+Both the baseline repo and the repositories being managed must be included in
+the App installation, or Woodhouse cannot read them.
 
 Unknown keys are rejected. A misspelled `allowedActor` that silently did
 nothing would be a security problem, not a cosmetic one — so pull requests that
@@ -115,6 +128,7 @@ is evaluated and logged, but nothing is written back to GitHub.
 | `PRIVATE_KEY` | yes | raw PEM or base64 of it |
 | `WEBHOOK_SECRET` | yes | |
 | `ALLOWED_INSTALLATION_TARGETS` | yes | JSON array or comma-separated. No wildcard; empty is a startup error |
+| `BASELINE_REPO` | no | default `.github-private` |
 | `PORT` | no | default 3000 |
 | `LOG_LEVEL` | no | default `info` |
 | `DRY_RUN` | no | default `false` |
@@ -144,6 +158,25 @@ you either:
 
   In Portainer this is a registry entry under *Registries* → *Custom registry*.
 
+### Docker Compose
+
+[`docker-compose.yml`](./docker-compose.yml) is ready for Portainer. Copy
+`.env.example` to `.env`, fill it in, and:
+
+```bash
+docker compose up -d
+```
+
+Nothing is published to the host — cloudflared reaches the container over the
+shared Docker network. Point the tunnel's public hostname at
+`http://woodhouse:3000` and set the App's webhook URL to
+`https://<hostname>/api/github/webhooks`.
+
+The image tag is pinned to a commit SHA rather than `latest`, deliberately:
+Portainer will not notice a moving tag has changed, and an unexpected restart
+pulling a different build is not a surprise you want from a bot holding admin
+scopes.
+
 ### Kubernetes
 
 ```bash
@@ -165,6 +198,12 @@ to Redis first.
 
 There is no Ingress: the Service is ClusterIP and cloudflared connects to it
 from inside the cluster.
+
+## Testing against real repositories
+
+[`docs/test-plan.md`](docs/test-plan.md) walks through validating an
+installation end to end, ordered so the reversible behaviour is proven before
+settings sync is allowed to write anything.
 
 ## Development
 

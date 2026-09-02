@@ -1,8 +1,13 @@
 # Example baseline configuration.
 #
-# Place this at `woodhouse.yml` in your owner-level `.github` repository to
-# apply it to every repository you own, and override it per-repository with
-# `.github/woodhouse.yml`.
+# Place this at `woodhouse.yml` in your owner-level `.github-private`
+# repository to apply it to every repository you own, and override it
+# per-repository with `.github/woodhouse.yml`.
+#
+# `.github-private` rather than `.github`: the latter has to be public for
+# GitHub's community-health and org-profile features to apply to public
+# repositories, and this file lists who may auto-approve pull requests.
+# Override the location with the BASELINE_REPO environment variable.
 #
 # Local settings win. Objects merge; arrays replace wholesale, so a repository
 # can narrow an inherited list rather than only ever extending it.

@@ -9,6 +9,10 @@ data:
   # pod from starting rather than allowing everything.
   ALLOWED_INSTALLATION_TARGETS: '["my-github-username","my-homelab-org"]'
 
+  # Repository holding the owner-wide baseline config. Not `.github`, which
+  # must be public for several built-in GitHub features to work.
+  BASELINE_REPO: ".github-private"
+
   LOG_LEVEL: "info"
   PORT: "3000"
 

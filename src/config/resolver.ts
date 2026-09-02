@@ -23,8 +23,20 @@ import {
 } from "./schema.js";
 import { TtlCache } from "../lib/cache.js";
 
-/** Repository that holds an owner's baseline config, by GitHub convention. */
-export const BASELINE_REPO = ".github";
+/**
+ * Repository holding an owner's baseline config.
+ *
+ * `.github-private` rather than `.github`: the `.github` repository has to be
+ * public for several built-in GitHub features (default community health files,
+ * the public org profile) to apply to public repositories, and this config
+ * contains the auto-approval actor list and branch protection rules. Those do
+ * not belong in a repository you may be obliged to make public.
+ *
+ * `.github-private` is an existing GitHub convention for the member-only org
+ * profile README, so it is a natural home for owner-scoped private config.
+ * Override with the BASELINE_REPO environment variable.
+ */
+export const DEFAULT_BASELINE_REPO = ".github-private";
 export const BASELINE_PATHS = ["woodhouse.yml", "woodhouse.yaml"] as const;
 export const LOCAL_PATHS = [
   ".github/woodhouse.yml",
@@ -115,16 +127,25 @@ export interface ResolverOptions {
   /** Cache entry lifetime. Short by default; push events invalidate directly. */
   readonly ttlMs?: number;
   readonly maxEntries?: number;
+  /** Repository holding the owner-wide baseline. */
+  readonly baselineRepo?: string;
 }
 
 export class ConfigResolver {
   private readonly cache: TtlCache<ResolvedConfig>;
+  readonly baselineRepo: string;
 
   constructor(options: ResolverOptions = {}) {
+    this.baselineRepo = options.baselineRepo ?? DEFAULT_BASELINE_REPO;
     this.cache = new TtlCache<ResolvedConfig>({
       ttlMs: options.ttlMs ?? 5 * 60_000,
       maxEntries: options.maxEntries ?? 500,
     });
+  }
+
+  /** True when a push to this repo changes the baseline for the whole owner. */
+  isBaselineRepo(repo: string): boolean {
+    return repo.toLowerCase() === this.baselineRepo.toLowerCase();
   }
 
   private static key(owner: string, repo: string, ref: string | undefined) {
@@ -170,9 +191,20 @@ export class ConfigResolver {
     // Fetched in parallel: they are independent and this halves the latency
     // added to every event.
     const [baseline, local] = await Promise.all([
-      // The baseline always comes from the default branch of `.github`; pinning
-      // it to the current repo's ref would be meaningless.
-      fetchLayer(client, owner, BASELINE_REPO, BASELINE_PATHS, undefined, log),
+      // The baseline always comes from the default branch of the baseline
+      // repository; pinning it to the current repo's ref would be meaningless.
+      // Skipped entirely when the repo *is* the baseline, which would
+      // otherwise merge the file into itself.
+      this.isBaselineRepo(repo)
+        ? Promise.resolve(undefined)
+        : fetchLayer(
+            client,
+            owner,
+            this.baselineRepo,
+            BASELINE_PATHS,
+            undefined,
+            log,
+          ),
       fetchLayer(client, owner, repo, LOCAL_PATHS, ref, log),
     ]);
 

@@ -24,12 +24,13 @@ export function createApp(options: AppOptions = {}) {
 
   return function woodhouse(app: Probot): void {
     const allowlist = new Allowlist(env.allowedInstallationTargets);
-    const resolver = new ConfigResolver();
+    const resolver = new ConfigResolver({ baselineRepo: env.baselineRepo });
     const guarded = new GuardedApp(app, allowlist);
 
     app.log.info(
       {
         allowedInstallationTargets: allowlist.describe(),
+        baselineRepo: env.baselineRepo,
         dryRun: env.dryRun,
       },
       "Woodhouse reporting for duty",
@@ -56,7 +57,7 @@ export function createApp(options: AppOptions = {}) {
 
       // Keep the cache honest before reading it back.
       if (touchedConfig) {
-        if (scope.repo === ".github") {
+        if (resolver.isBaselineRepo(scope.repo)) {
           // The baseline changed, so every repository this owner has is now
           // stale, not merely `.github`.
           resolver.invalidateOwner(scope.owner);
