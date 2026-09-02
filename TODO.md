@@ -27,6 +27,21 @@ Deferred work, roughly in the order it is worth doing.
       validation errors, so the problem is visible without opening the Checks
       tab. Should upsert a single comment rather than adding one per push.
 
+## Auto-approval gaps found while writing the test plan
+
+- [ ] **Re-approve on `synchronize`.** Only `opened` and `reopened` are
+      handled, and approvals are pinned to the head SHA. Renovate force-pushes
+      to its branches on every rebase, so a Renovate PR is approved once at
+      open and then goes stale on the next update — which undercuts the main
+      reason for having auto-approval. Handling `synchronize` fixes it, but
+      needs care: it means re-inspecting the diff on every push, and the
+      protected-path check must run again each time (it already would, since
+      the decision is recomputed from scratch).
+
+- [ ] **Handle `pull_request.ready_for_review`.** A PR opened as a draft is
+      never auto-approved, even once it is marked ready, because no further
+      `opened` event fires. One-line addition.
+
 ## Developer experience
 
 - [ ] **mise for local tooling.** Pin the Node version and expose the common
