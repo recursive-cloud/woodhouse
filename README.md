@@ -127,6 +127,23 @@ docker build -t woodhouse:latest .
 
 Multi-stage, ending on distroless — no shell, no package manager, non-root.
 
+CI publishes multi-arch (`linux/amd64`, `linux/arm64`) images to
+`ghcr.io/recursive-cloud/woodhouse` on every push to `main`, tagged with the
+short commit SHA plus a moving `latest`. **Pin the SHA** in a compose file;
+`latest` exists for convenience during early testing.
+
+The package is **private** by default, so a pull will fail with `denied` until
+you either:
+
+- make it public — GHCR package → *Package settings* → *Change visibility*; or
+- authenticate the host, using a PAT with `read:packages`:
+
+  ```bash
+  echo "$GHCR_PAT" | docker login ghcr.io -u YOUR_USERNAME --password-stdin
+  ```
+
+  In Portainer this is a registry entry under *Registries* → *Custom registry*.
+
 ### Kubernetes
 
 ```bash

@@ -59,6 +59,11 @@ Deferred work, roughly in the order it is worth doing.
       keep the GHCR package listing clean. Worth revisiting together with
       cosign signing and SBOM generation.
 
+- [ ] **`docker/*` actions still target Node 20.** CI logs a deprecation
+      warning for `setup-qemu-action`, `setup-buildx-action`, `login-action`,
+      `metadata-action` and `build-push-action`. These are already the latest
+      released majors, so this is upstream — recheck periodically.
+
 - [ ] **Shared state for multi-replica operation.** Work is serialised per
       commit with an in-process lock (`src/lib/mutex.ts`), and the config cache
       is in-process too. Both would need to move to Redis before running more
