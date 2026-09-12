@@ -7,6 +7,7 @@ import {
   type ExistingLabel,
 } from "../src/settings/plan.js";
 import { repositorySchema } from "../src/config/schema.js";
+import { describeForbidden } from "../src/settings/apply.js";
 
 const repo = (o: Record<string, unknown>) => repositorySchema.parse(o);
 
@@ -186,5 +187,41 @@ describe("planRulesets", () => {
   it("prunes when enabled", () => {
     const plan = planRulesets([{ id: 1, name: "manual" }], [], true);
     expect(plan.delete).toEqual([{ id: 1, name: "manual" }]);
+  });
+});
+
+describe("describeForbidden", () => {
+  it("names the plan limitation when GitHub hints at it", () => {
+    // Neither branch protection nor rulesets work on a private repo on Free,
+    // so a bare 403 here sends people looking at App permissions for nothing.
+    const text = describeForbidden(
+      "branch-protection",
+      "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+    );
+    expect(text).toMatch(/public/);
+    expect(text).toMatch(/Free plan a private repository can use neither/);
+  });
+
+  it("mentions the plan caveat for rulesets too", () => {
+    const text = describeForbidden("rulesets", "Not available for this repository");
+    expect(text).toMatch(/neither/);
+  });
+
+  it("still mentions permissions for a plain 403 on a plan-sensitive applier", () => {
+    const text = describeForbidden("branch-protection", "Resource not accessible by integration");
+    expect(text).toMatch(/administration: write/);
+    expect(text).toMatch(/Free plan/);
+  });
+
+  it("does not raise the plan caveat for repository settings", () => {
+    // has_issues and friends work fine on a private free repo.
+    const text = describeForbidden("repository", "Resource not accessible by integration");
+    expect(text).toMatch(/administration: write/);
+    expect(text).not.toMatch(/Free plan/);
+  });
+
+  it("always includes GitHub's own message", () => {
+    expect(describeForbidden("labels", "Resource not accessible by integration"))
+      .toContain("Resource not accessible by integration");
   });
 });

@@ -34,24 +34,17 @@ Deferred work, roughly in the order it is worth doing.
 - [x] **False green when a PR has no checks yet** — done, via a grace period.
       See `gatekeeper.gracePeriodSeconds`.
 
-- [ ] **Branch protection needs a public repo or GitHub Team.** The classic
-      branch protection API is not available on private repositories on the
-      free plan, so `branchProtection` silently cannot apply there. Rulesets
-      *are* available on private repos. Worth detecting the plan and either
-      warning clearly or steering private repos towards `rulesets` instead of
-      failing with an opaque 403.
-
-- [ ] **Grace period timers do not survive a restart.** If the process
-      restarts during the grace window on a PR with no CI, the white-glove
-      check stays `in_progress` until the next push or re-run. A periodic
-      sweep for stale in-progress checks would close this. Low impact while
-      restarts are rare.
+- [x] **Branch protection and rulesets on private Free repositories** — these
+      require the repository to be public, or a paid plan if private. *Neither*
+      mechanism is available on Free with a private repo. Now reported with an
+      explanation instead of a bare 403; see `describeForbidden`.
 
 - [ ] **Always-on workflow as a second signal.** An alternative to the grace
       period: have every managed repository carry a workflow that always runs,
       so a commit never legitimately has zero checks. Best delivered by the
       onboarding PR below rather than as a requirement, since it only works
-      once the repository is already managed.
+      once the repository is already managed, and the grace period already
+      covers the common case.
 
 ## Onboarding pull request
 
@@ -95,8 +88,20 @@ Deferred work, roughly in the order it is worth doing.
       successfully. A bad private key is currently only visible as failing
       deliveries.
 
-- [ ] **Reload App configuration without a restart.** The config file is read
-      once at boot. Adding a tenant means restarting the container.
+## Accepted tradeoffs
+
+Recorded so they are not rediscovered as bugs. Revisit only if the premise
+changes.
+
+- **Grace period timers do not survive a restart.** A restart during the grace
+  window on a pull request with no CI leaves the white-glove check
+  `in_progress` until the next push or manual re-run. Acceptable while this is
+  a single replica; the fix arrives naturally with the datastore that HA would
+  require anyway, which would also make the feature more robust.
+
+- **App configuration is read once at boot.** Adding or changing a tenant means
+  restarting the container. Configuration changes are not expected to be
+  frequent after setup.
 
 ## Deferred / revisit
 

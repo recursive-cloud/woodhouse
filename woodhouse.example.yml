@@ -55,6 +55,9 @@ labels:
     # the rename has already happened.
     from: wontfix
 
+# Branch protection (and rulesets) require the repository to be public, or a
+# paid plan if it is private. On the Free plan a private repository can use
+# neither, and Woodhouse will say so rather than logging a bare 403.
 branchProtection:
   main:
     required_pull_request_reviews:

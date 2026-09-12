@@ -218,6 +218,7 @@ first and read the intended changes before letting it write.
 | 5.10 | Missing branch ignored | Add `branchProtection.nonexistent` | Skipped silently, no failure |
 | 5.11 | Non-default branch ignored | Push to a feature branch | No sync runs |
 | 5.12 | Permission error is legible | Temporarily remove `administration: write` | Log explains the missing permission rather than a bare 403 |
+| 5.13 | Plan limit is legible | Make the repo private, keep a `branchProtection` block | Log explains that both branch protection and rulesets need a public repo or a paid plan — not a bare 403 |
 
 ## Phase 6 — end to end
 
@@ -252,8 +253,10 @@ deliberate choices rather than surprises:
 - **Grace period timers do not survive a restart.** If Woodhouse restarts
   during the grace window on a PR with no CI, the check stays `in_progress`
   until the next push or manual re-run.
-- **Classic branch protection is unavailable on private repos** on the free
-  plan. Use `rulesets` there instead.
+- **Neither branch protection nor rulesets work on a private repo on the Free
+  plan.** Both need the repo to be public, or a paid plan. Make the test
+  repository public to exercise phase 5.9, or expect a clearly-explained
+  failure.
 - **Every check ignored still yields success.** If CI ran but every check is in
   `ignoredChecks`, white-glove passes. This is distinct from the empty case,
   which is now held pending during the grace period.

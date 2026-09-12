@@ -363,6 +363,48 @@ const APPLIERS: {
   { name: "rulesets", run: applyRulesets },
 ];
 
+/**
+ * Explain a 403 in terms an operator can act on.
+ *
+ * A bare "Forbidden" is indistinguishable from a transient fault. There are
+ * two very different causes, and the plan one is easy to lose an afternoon to:
+ * branch protection and rulesets are simply unavailable on private
+ * repositories on the Free plan, so the call fails no matter how the App is
+ * configured.
+ */
+export function describeForbidden(applier: string, message: string): string {
+  // GitHub's own wording for the plan case is the clearest signal available.
+  const looksLikePlanLimit =
+    /upgrade|not available|plan|public repositor/i.test(message);
+
+  const planSensitive =
+    applier === "branch-protection" || applier === "rulesets";
+
+  if (planSensitive && looksLikePlanLimit) {
+    return (
+      `Cannot apply ${applier}: ${message} ` +
+      "Both branch protection and rulesets require the repository to be " +
+      "public, or a paid plan (Pro, Team or Enterprise) if it is private. " +
+      "On the Free plan a private repository can use neither."
+    );
+  }
+
+  if (planSensitive) {
+    return (
+      `Forbidden applying ${applier}: ${message} ` +
+      "Check the App has `administration: write`. Note also that branch " +
+      "protection and rulesets are unavailable on private repositories on " +
+      "the Free plan."
+    );
+  }
+
+  return (
+    `Forbidden applying ${applier}: ${message} ` +
+    "The App is probably missing a permission; `administration: write` is " +
+    "required for repository settings."
+  );
+}
+
 export async function syncSettings(
   ctx: ApplyContext,
   config: WoodhouseConfig,
@@ -383,13 +425,9 @@ export async function syncSettings(
       const message = messageOf(error);
 
       if (status === 403) {
-        // Almost always a missing permission on the App registration. Say so,
-        // rather than emitting a bare 403 that looks like a transient fault.
         ctx.log.error(
-          { applier: applier.name, status },
-          `Forbidden applying ${applier.name}; the GitHub App is probably ` +
-            "missing a permission (administration: write is required for " +
-            "repository settings and branch protection)",
+          { applier: applier.name, status, err: message },
+          describeForbidden(applier.name, message),
         );
       } else {
         ctx.log.error(

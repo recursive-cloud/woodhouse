@@ -69,10 +69,12 @@ requests. Set `BASELINE_REPO` to override the location.
 Both the baseline repo and the repositories being managed must be included in
 the App installation, or Woodhouse cannot read them.
 
-> **Private repositories on the free plan** cannot use classic branch
-> protection, so a `branchProtection` block will not apply there. Repository
-> **rulesets** are available on private repos and are the better choice; see
-> `rulesets` in the example config.
+> **Private repositories on the Free plan** can use neither `branchProtection`
+> nor `rulesets` — both require the repository to be public, or a paid plan
+> (Pro, Team or Enterprise) if it is private. Everything else (repository
+> options, topics, labels, the white-glove check and auto-approval) works
+> regardless. Woodhouse says so explicitly when the API refuses, rather than
+> logging a bare 403.
 
 Unknown keys are rejected. A misspelled `allowedActor` that silently did
 nothing would be a security problem, not a cosmetic one — so pull requests that
