@@ -40,59 +40,41 @@ describe("parseAllowedTargets", () => {
   });
 });
 
-const PEM = "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----";
-
 const baseEnv = {
-  APP_ID: "123",
-  PRIVATE_KEY: PEM,
-  WEBHOOK_SECRET: "shh",
   ALLOWED_INSTALLATION_TARGETS: "me",
 };
 
 describe("loadEnv", () => {
   it("loads a valid environment", () => {
     const env = loadEnv({ ...baseEnv });
-    expect(env.appId).toBe("123");
-    expect(env.privateKey).toContain("BEGIN RSA PRIVATE KEY");
     expect(env.allowedInstallationTargets).toEqual(["me"]);
+    expect(env.appsConfigPath).toBe("config/apps.cjs");
     expect(env.port).toBe(3000);
+    expect(env.baselineRepo).toBe(".github-private");
   });
 
-  it("accepts a base64-encoded private key", () => {
-    const env = loadEnv({
-      ...baseEnv,
-      PRIVATE_KEY: Buffer.from(PEM).toString("base64"),
-    });
-    expect(env.privateKey).toBe(PEM);
+  it("no longer requires App credentials", () => {
+    // Credentials belong to individual Apps now and are assembled by the
+    // configuration file, which may read any variable names the operator's
+    // secret tooling produces.
+    expect(() => loadEnv({ ...baseEnv })).not.toThrow();
   });
 
-  it("un-escapes literal \\n in a single-line key", () => {
-    const env = loadEnv({
-      ...baseEnv,
-      PRIVATE_KEY: PEM.replace(/\n/g, "\\n"),
-    });
-    expect(env.privateKey).toBe(PEM);
+  it("allows an absent allowlist, deferring to per-App config", () => {
+    // Still fail-closed overall: the registry refuses to start an App that
+    // ends up with no allowlist from either source.
+    expect(loadEnv({}).allowedInstallationTargets).toBeUndefined();
   });
 
-  it("rejects a key that is not a PEM", () => {
-    expect(() => loadEnv({ ...baseEnv, PRIVATE_KEY: "nonsense" })).toThrow(
-      /PEM/,
+  it("still rejects a wildcard allowlist", () => {
+    expect(() => loadEnv({ ALLOWED_INSTALLATION_TARGETS: "*" })).toThrow(
+      /wildcard/,
     );
   });
 
-  it.each(["APP_ID", "PRIVATE_KEY", "WEBHOOK_SECRET"])(
-    "requires %s",
-    (key) => {
-      const env: Record<string, string> = { ...baseEnv };
-      delete env[key];
-      expect(() => loadEnv(env)).toThrow(ConfigurationError);
-    },
-  );
-
-  it("requires the allowlist", () => {
-    const env: Record<string, string> = { ...baseEnv };
-    delete env.ALLOWED_INSTALLATION_TARGETS;
-    expect(() => loadEnv(env)).toThrow(/allowlist/);
+  it("honours APPS_CONFIG_PATH", () => {
+    expect(loadEnv({ APPS_CONFIG_PATH: "/etc/woodhouse/apps.cjs" }).appsConfigPath)
+      .toBe("/etc/woodhouse/apps.cjs");
   });
 
   it.each(["0", "70000", "abc"])("rejects invalid PORT %p", (port) => {

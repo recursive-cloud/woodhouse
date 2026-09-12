@@ -46,6 +46,21 @@ export const gatekeeperSchema = z
      * advisory-only checks (coverage reports, preview deployments).
      */
     ignoredChecks: z.array(z.string().trim().min(1)).default([]),
+
+    /**
+     * How long to wait for CI to register *any* check run on a commit before
+     * concluding there is none.
+     *
+     * When a pull request opens, GitHub has usually not created the Actions
+     * check runs yet. Concluding "no checks, therefore success" in that window
+     * produces a green required check on a commit nothing has tested. During
+     * the grace period the check is held pending instead; afterwards, a commit
+     * with genuinely no checks passes so that docs-only repositories are not
+     * deadlocked.
+     *
+     * Raise it if CI is routinely slow to start.
+     */
+    gracePeriodSeconds: z.number().int().min(0).max(900).default(30),
   })
   .strict()
   .default({});

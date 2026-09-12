@@ -12,6 +12,7 @@ import { KeyedMutex } from "../lib/mutex.js";
 import {
   evaluate,
   type CheckRunLike,
+  type EvaluateOptions,
   type Evaluation,
 } from "./evaluate.js";
 import { WHITE_GLOVE_CHECK_NAME, WHITE_GLOVE_TITLE } from "./constants.js";
@@ -149,6 +150,12 @@ export interface ReconcileDeps {
   readonly dryRun: boolean;
 }
 
+export interface ReconcileResult {
+  readonly evaluation: Evaluation;
+  /** The config actually used, so callers can read the grace period. */
+  readonly gatekeeper: GatekeeperConfig;
+}
+
 /**
  * Evaluate a commit and reconcile the white-glove check to match.
  * Serialised per commit to avoid concurrent writes producing duplicates.
@@ -158,7 +165,8 @@ export async function reconcile(
   owner: string,
   repo: string,
   sha: string,
-): Promise<Evaluation | undefined> {
+  options: EvaluateOptions = {},
+): Promise<ReconcileResult | undefined> {
   return mutex.run(`${owner}/${repo}@${sha}`, async () => {
     const { config } = await deps.resolver.resolve(
       deps.octokit as never,
@@ -174,10 +182,15 @@ export async function reconcile(
     }
 
     const runs = await listCheckRuns(deps.octokit, owner, repo, sha);
-    const evaluation = evaluate(runs, gatekeeper);
+    const evaluation = evaluate(runs, gatekeeper, options);
 
     deps.log.debug(
-      { sha, considered: runs.length, outcome: evaluation.outcome },
+      {
+        sha,
+        considered: runs.length,
+        outcome: evaluation.outcome,
+        awaitingStart: evaluation.awaitingStart,
+      },
       "Evaluated commit",
     );
 
@@ -190,7 +203,7 @@ export async function reconcile(
       deps.log,
       deps.dryRun,
     );
-    return evaluation;
+    return { evaluation, gatekeeper };
   });
 }
 

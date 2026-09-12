@@ -27,20 +27,40 @@ Deferred work, roughly in the order it is worth doing.
       validation errors, so the problem is visible without opening the Checks
       tab. Should upsert a single comment rather than adding one per push.
 
-## Auto-approval gaps found while writing the test plan
+## Findings from the first round of real testing
 
-- [ ] **Re-approve on `synchronize`.** Only `opened` and `reopened` are
-      handled, and approvals are pinned to the head SHA. Renovate force-pushes
-      to its branches on every rebase, so a Renovate PR is approved once at
-      open and then goes stale on the next update — which undercuts the main
-      reason for having auto-approval. Handling `synchronize` fixes it, but
-      needs care: it means re-inspecting the diff on every push, and the
-      protected-path check must run again each time (it already would, since
-      the decision is recomputed from scratch).
+- [x] **Re-approve on `synchronize`** — done.
+- [x] **Handle `pull_request.ready_for_review`** — done.
+- [x] **False green when a PR has no checks yet** — done, via a grace period.
+      See `gatekeeper.gracePeriodSeconds`.
 
-- [ ] **Handle `pull_request.ready_for_review`.** A PR opened as a draft is
-      never auto-approved, even once it is marked ready, because no further
-      `opened` event fires. One-line addition.
+- [ ] **Branch protection needs a public repo or GitHub Team.** The classic
+      branch protection API is not available on private repositories on the
+      free plan, so `branchProtection` silently cannot apply there. Rulesets
+      *are* available on private repos. Worth detecting the plan and either
+      warning clearly or steering private repos towards `rulesets` instead of
+      failing with an opaque 403.
+
+- [ ] **Grace period timers do not survive a restart.** If the process
+      restarts during the grace window on a PR with no CI, the white-glove
+      check stays `in_progress` until the next push or re-run. A periodic
+      sweep for stale in-progress checks would close this. Low impact while
+      restarts are rare.
+
+- [ ] **Always-on workflow as a second signal.** An alternative to the grace
+      period: have every managed repository carry a workflow that always runs,
+      so a commit never legitimately has zero checks. Best delivered by the
+      onboarding PR below rather than as a requirement, since it only works
+      once the repository is already managed.
+
+## Onboarding pull request
+
+- [ ] **Open an onboarding PR when the App is installed on a repository.**
+      Acts as the gate before Woodhouse becomes active: the PR adds
+      `.github/woodhouse.yml` (and optionally the always-on workflow above),
+      is validated by the config check like any other change, and merging it
+      is what switches management on. Renovate's onboarding PR is the model.
+      Depends on releases being in place.
 
 ## Developer experience
 
@@ -67,6 +87,16 @@ Deferred work, roughly in the order it is worth doing.
 
 - [ ] **Tag images with the release version** in addition to the commit SHA,
       and switch the compose deployment to a version tag once releases exist.
+
+## Multi-App operation
+
+- [ ] **Per-App health and metrics.** `/healthz` reports the number of Apps
+      served but says nothing about whether each is authenticating
+      successfully. A bad private key is currently only visible as failing
+      deliveries.
+
+- [ ] **Reload App configuration without a restart.** The config file is read
+      once at boot. Adding a tenant means restarting the container.
 
 ## Deferred / revisit
 

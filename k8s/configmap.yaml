@@ -4,9 +4,10 @@ metadata:
   name: woodhouse
   namespace: woodhouse
 data:
-  # The installation allowlist. Events from any other owner are dropped before
-  # a token is even minted. There is no wildcard, and an empty value stops the
-  # pod from starting rather than allowing everything.
+  # Default installation allowlist, applied to any App that does not define its
+  # own. Events from any other owner are dropped before a token is even minted.
+  # There is no wildcard, and an App that ends up with no allowlist at all
+  # stops the pod from starting rather than allowing everything.
   ALLOWED_INSTALLATION_TARGETS: '["my-github-username","my-homelab-org"]'
 
   # Repository holding the owner-wide baseline config. Not `.github`, which

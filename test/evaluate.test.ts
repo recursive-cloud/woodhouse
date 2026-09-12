@@ -232,3 +232,58 @@ describe("evaluate — output", () => {
     ).toBe("2 checks failing");
   });
 });
+
+describe("evaluate — grace period for checks that have not started", () => {
+  it("holds pending on an empty commit while emptyIsPending is set", () => {
+    // The bug this fixes: when a PR opens, GitHub has usually not created the
+    // Actions check runs yet. Concluding success there put a green required
+    // check on a commit nothing had tested.
+    const result = evaluate([], cfg(), { emptyIsPending: true });
+    expect(result.outcome).toBe("pending");
+    expect(result.title).toBe("Waiting for checks to start");
+    expect(result.awaitingStart).toBe(true);
+  });
+
+  it("concludes success on an empty commit once the grace period is over", () => {
+    // Otherwise a docs-only repository with no CI would block forever.
+    const result = evaluate([], cfg(), { emptyIsPending: false });
+    expect(result.outcome).toBe("success");
+    expect(result.awaitingStart).toBe(true);
+  });
+
+  it("defaults to concluding, preserving behaviour for check_run events", () => {
+    expect(evaluate([], cfg()).outcome).toBe("success");
+  });
+
+  it("treats a commit carrying only our own check as not started", () => {
+    const result = evaluate([done(WHITE_GLOVE_CHECK_NAME, "success")], cfg(), {
+      emptyIsPending: true,
+    });
+    expect(result.awaitingStart).toBe(true);
+    expect(result.outcome).toBe("pending");
+  });
+
+  it("is not awaiting start once any other check exists", () => {
+    const result = evaluate([running("build")], cfg(), {
+      emptyIsPending: true,
+    });
+    expect(result.awaitingStart).toBe(false);
+    expect(result.outcome).toBe("pending");
+  });
+
+  it("does not hold pending when checks ran but were all ignored", () => {
+    // CI demonstrably ran, so there is nothing to wait for.
+    const result = evaluate([done("coverage", "failure")], cfg({ ignoredChecks: ["coverage"] }), {
+      emptyIsPending: true,
+    });
+    expect(result.awaitingStart).toBe(false);
+    expect(result.outcome).toBe("success");
+  });
+
+  it("still fails an empty commit that is missing a strict check", () => {
+    const result = evaluate([], cfg({ strictChecks: ["build"] }), {
+      emptyIsPending: false,
+    });
+    expect(result.outcome).toBe("pending");
+  });
+});

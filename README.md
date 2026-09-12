@@ -69,6 +69,11 @@ requests. Set `BASELINE_REPO` to override the location.
 Both the baseline repo and the repositories being managed must be included in
 the App installation, or Woodhouse cannot read them.
 
+> **Private repositories on the free plan** cannot use classic branch
+> protection, so a `branchProtection` block will not apply there. Repository
+> **rulesets** are available on private repos and are the better choice; see
+> `rulesets` in the example config.
+
 Unknown keys are rejected. A misspelled `allowedActor` that silently did
 nothing would be a security problem, not a cosmetic one — so pull requests that
 touch a config file get a `woodhouse/config` check that validates the proposed
@@ -91,7 +96,7 @@ Create an App at `https://github.com/settings/apps/new` with:
 | --- | --- | --- |
 | Administration | Read & write | repository settings, branch protection, rulesets |
 | Checks | Read & write | the white-glove and config checks |
-| Contents | Read-only | reading `woodhouse.yml` |
+| Contents | Read & write | reading `woodhouse.yml`; also required for approvals to satisfy branch protection and for auto-merge |
 | Issues | Read & write | label sync |
 | Pull requests | Read & write | auto-approval |
 | Metadata | Read-only | mandatory |
@@ -109,6 +114,57 @@ The App slug can be anything; Woodhouse resolves its own bot login at runtime
 via `GET /app` and caches it, so the "have I already approved this commit?"
 check keeps working whatever you name it.
 
+## Serving several GitHub Apps
+
+Woodhouse is a **private** App: rather than one public installation anyone can
+add, each user or organisation registers their own. One container can serve
+any number of them.
+
+Probot is used as a library rather than through its `run()` helper. Express
+owns the HTTP surface, and each delivery is routed to the right App using the
+`X-GitHub-Hook-Installation-Target-ID` header before its signature is checked
+— necessarily, since every App has its own webhook secret.
+
+That header is unauthenticated, which is fine: it only selects *which* secret
+to try, and the HMAC check still has to pass with it. A forged value simply
+picks a key the sender cannot produce a valid signature for.
+
+Apps are described by [`config/apps.cjs`](config/apps.cjs), which exports a
+function of the environment. It is code rather than data so you can map
+whatever variable names your secret tooling already produces:
+
+```js
+module.exports = function (env) {
+  return {
+    [env.ORG_A_APP_ID]: {
+      appId: parseInt(env.ORG_A_APP_ID, 10),
+      privateKey: env.ORG_A_PRIVATE_KEY,
+      webhookSecret: env.ORG_A_WEBHOOK_SECRET,
+      allowedInstallationTargets: ["org-a"],
+    },
+    [env.ORG_B_APP_ID]: {
+      appId: parseInt(env.ORG_B_APP_ID, 10),
+      privateKey: env.ORG_B_PRIVATE_KEY,
+      webhookSecret: env.ORG_B_WEBHOOK_SECRET,
+      allowedInstallationTargets: ["org-b"],
+    },
+  };
+};
+```
+
+The map key must be the App ID, since that is what deliveries are matched on;
+a mismatch is a startup error rather than a silently dropped webhook. Each App
+may also set `baselineRepo` and `label`.
+
+Per-App `allowedInstallationTargets` is worth setting when serving more than
+one tenant: it confines each App to its own owners regardless of the global
+`ALLOWED_INSTALLATION_TARGETS`, so a delivery for org A reaching org B's App is
+dropped.
+
+The shipped default is the single-App case and needs no editing — set
+`APP_ID`, `PRIVATE_KEY` and `WEBHOOK_SECRET` and it works. Mount your own file
+over it and set `APPS_CONFIG_PATH` to serve several.
+
 ## Running it
 
 ```bash
@@ -124,11 +180,18 @@ is evaluated and logged, but nothing is written back to GitHub.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `APP_ID` | yes | |
-| `PRIVATE_KEY` | yes | raw PEM or base64 of it |
-| `WEBHOOK_SECRET` | yes | |
-| `ALLOWED_INSTALLATION_TARGETS` | yes | JSON array or comma-separated. No wildcard; empty is a startup error |
+| `APP_ID` | yes* | read by the default config file |
+| `PRIVATE_KEY` | yes* | raw PEM or base64 of it |
+| `WEBHOOK_SECRET` | yes* | |
+| `ALLOWED_INSTALLATION_TARGETS` | yes† | JSON array or comma-separated. No wildcard |
+| `APPS_CONFIG_PATH` | no | default `config/apps.cjs` |
 | `BASELINE_REPO` | no | default `.github-private` |
+
+\* Only for the shipped single-App config. A custom `apps.cjs` may read any
+variable names it likes.
+&nbsp;† Optional if every App defines its own `allowedInstallationTargets`. An
+App that ends up with neither is a startup error — there is no way to run
+without a boundary.
 | `PORT` | no | default 3000 |
 | `LOG_LEVEL` | no | default `info` |
 | `DRY_RUN` | no | default `false` |

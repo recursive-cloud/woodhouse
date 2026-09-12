@@ -64,6 +64,10 @@ COPY --from=prod-deps --chown=nonroot:nonroot /app/node_modules ./node_modules
 COPY --from=build     --chown=nonroot:nonroot /app/dist         ./dist
 COPY --chown=nonroot:nonroot package.json ./
 
+# Default single-App configuration. Mount over this file (or point
+# APPS_CONFIG_PATH elsewhere) to serve several Apps from one container.
+COPY --chown=nonroot:nonroot config ./config
+
 # uid 65532, baked into the distroless nonroot variant.
 USER nonroot
 

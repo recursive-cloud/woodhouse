@@ -162,6 +162,8 @@ appears. **Do not** make it a required check yet.
 | 2.3 | A check fails | `test: [fail-build]` | failure, summary names `build` |
 | 2.4 | Two fail | `test: [fail-build] [fail-test]` | failure listing **both**, not just the first |
 | 2.5 | Still running | `test: [slow]` | pending while `slow` runs, then success |
+| 2.5a | No false green at open | `test: happy path`, watch from the instant the PR opens | Check is **pending** ("Waiting for checks to start") before Actions registers, never success. This was a real bug: it concluded success on the empty check set |
+| 2.5b | Grace period expiry | Open a PR in a repo with no workflows at all | pending for `gatekeeper.gracePeriodSeconds` (default 30), then success — no deadlock |
 | 2.6 | Failure beats pending | `test: [slow] [fail-build]` | failure immediately — does not wait for `slow` |
 | 2.7 | Skipped ignored | `test: happy path` | `optional` is skipped; verdict still success |
 | 2.8 | Skipped counted when strict | Add `optional` to `strictChecks` in the baseline, reopen | failure — "listed in gatekeeper.strictChecks" |
@@ -179,11 +181,12 @@ Reset `strictChecks` to `[]` afterwards.
 | --- | --- | --- | --- |
 | 3.1 | Trusted author | Open a PR as `gunzy83` touching `README.md` | Approving review from `woodhouse[bot]` |
 | 3.2 | Draft refused | Open as draft | No approval; log `pull request is a draft` |
-| 3.3 | Ready for review | Mark the draft ready | Still no approval — only `opened`/`reopened` are handled. *Expected gap; see below* |
+| 3.3 | Ready for review | Mark the draft ready | **Approved** — `ready_for_review` is now handled |
 | 3.4 | **Protected path** | PR editing `.github/woodhouse.yml` | **No approval**, log `modifies protected path`. The privilege-escalation guard |
 | 3.5 | Untrusted author | PR from another account, if available | No approval, log `not in autoApproval.allowedActors` |
 | 3.6 | No double approval | Close and reopen the PR from 3.1 | No second review at the same SHA |
-| 3.7 | New commit re-approves | Push a commit to the PR from 3.1, close/reopen | Fresh approval pinned to the new SHA |
+| 3.7 | New commit re-approves | Push a commit to the PR from 3.1 | Fresh approval pinned to the new SHA, without needing to reopen — `synchronize` is now handled |
+| 3.9 | Protected path on a later push | Push a commit editing `.github/woodhouse.yml` to an already-approved PR | No new approval; the guard re-runs on every push |
 | 3.8 | Disabled | Set `autoApproval.enabled: false` | No approvals |
 
 ## Phase 4 — config validation
@@ -226,19 +229,31 @@ first and read the intended changes before letting it write.
 
 ---
 
+## Phase 7 — multi-App routing
+
+Only relevant once a second App is registered.
+
+| # | Test | Action | Expected |
+| --- | --- | --- | --- |
+| 7.1 | Both Apps start | Boot with two Apps configured | One `Registered GitHub App` line each; `/healthz` reports `apps: 2` |
+| 7.2 | Isolation | Trigger an event in org A | Handled by org A's App only; org B's logs are silent |
+| 7.3 | Cross-tenant rejected | Point org A's App at org B's owner | `decision: rejected`, `not-allowlisted` |
+| 7.4 | Unknown App | POST with an unrecognised target ID header | 404, warning logged |
+| 7.5 | Bad signature | POST signed with the wrong secret | 400, no handler runs |
+| 7.6 | Misconfigured App | Unset one App's `APP_ID` | Container exits 78 naming the App, rather than starting half-configured |
+
 ## Known gaps to confirm, not bugs
 
 These are current design limits worth observing during testing so they are
 deliberate choices rather than surprises:
 
-- **`ready_for_review` is not handled** (3.3). A PR opened as a draft is never
-  auto-approved, even after being marked ready. Adding it is a one-line change
-  if it turns out to be annoying in practice.
-- **`pull_request.synchronize` does not re-approve.** A new commit does not get
-  a fresh automatic approval; the PR must be reopened. This is the safe
-  direction, but may be tedious for Renovate branches that update repeatedly.
 - **Nothing comments on the PR** when config validation fails — the failure is
   only visible in the Checks tab. Tracked in `TODO.md`.
-- **Zero evaluated checks yields success.** If every check on a commit is in
-  `ignoredChecks`, white-glove passes rather than hanging. Intentional, so that
-  docs-only PRs with no CI are not deadlocked.
+- **Grace period timers do not survive a restart.** If Woodhouse restarts
+  during the grace window on a PR with no CI, the check stays `in_progress`
+  until the next push or manual re-run.
+- **Classic branch protection is unavailable on private repos** on the free
+  plan. Use `rulesets` there instead.
+- **Every check ignored still yields success.** If CI ran but every check is in
+  `ignoredChecks`, white-glove passes. This is distinct from the empty case,
+  which is now held pending during the grace period.

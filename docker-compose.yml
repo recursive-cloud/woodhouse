@@ -36,6 +36,13 @@ services:
     networks:
       - woodhouse
 
+    # To serve several GitHub Apps from this one container, mount your own
+    # config over the default. It is CommonJS and receives `env`, so it can
+    # read whatever variable names your secret tooling produces. See
+    # config/apps.cjs for the shape.
+    # volumes:
+    #   - ./apps.cjs:/app/config/apps.cjs:ro
+
     # Matches the Kubernetes securityContext: non-root, read-only root
     # filesystem, no capabilities, no privilege escalation.
     user: "65532:65532"

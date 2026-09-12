@@ -9,10 +9,13 @@
 import { DEFAULT_BASELINE_REPO } from "../config/resolver.js";
 
 export interface WoodhouseEnv {
-  readonly appId: string;
-  readonly privateKey: string;
-  readonly webhookSecret: string;
-  readonly allowedInstallationTargets: readonly string[];
+  /** Path to the CommonJS file describing the GitHub Apps to serve. */
+  readonly appsConfigPath: string;
+  /**
+   * Default allowlist, applied to any App that does not define its own.
+   * Undefined is permitted only when every App defines one.
+   */
+  readonly allowedInstallationTargets: readonly string[] | undefined;
   readonly baselineRepo: string;
   readonly port: number;
   readonly host: string | undefined;
@@ -27,33 +30,6 @@ export class ConfigurationError extends Error {
 
 const LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
 
-function required(env: NodeJS.ProcessEnv, key: string): string {
-  const value = env[key];
-  if (value === undefined || value.trim() === "") {
-    throw new ConfigurationError(
-      `Missing required environment variable ${key}.`,
-    );
-  }
-  return value;
-}
-
-/**
- * The private key is commonly supplied base64-encoded because multi-line env
- * vars are awkward in Kubernetes manifests and Docker. Accept either form.
- */
-function readPrivateKey(env: NodeJS.ProcessEnv): string {
-  const raw = required(env, "PRIVATE_KEY");
-  if (raw.includes("-----BEGIN")) return raw.replace(/\\n/g, "\n");
-
-  const decoded = Buffer.from(raw, "base64").toString("utf8");
-  if (decoded.includes("-----BEGIN")) return decoded;
-
-  throw new ConfigurationError(
-    "PRIVATE_KEY does not look like a PEM key. Provide the raw .pem contents " +
-      "or a base64 encoding of them.",
-  );
-}
-
 /**
  * Accepts either a JSON array (`["a","b"]`) or a comma-separated list (`a,b`).
  *
@@ -64,8 +40,8 @@ function readPrivateKey(env: NodeJS.ProcessEnv): string {
 export function parseAllowedTargets(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === "") {
     throw new ConfigurationError(
-      "ALLOWED_INSTALLATION_TARGETS is required and must list at least one " +
-        "owner. Refusing to start without an installation allowlist.",
+      "An installation allowlist is required and must list at least one " +
+        "owner. Refusing to start without one.",
     );
   }
 
@@ -158,13 +134,17 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): WoodhouseEnv {
     throw new ConfigurationError(`PORT must be a valid port; got "${env.PORT}".`);
   }
 
+  // Credentials are no longer read here: they belong to individual Apps and
+  // are assembled by the configuration file, which may map whatever variable
+  // names the operator's secret tooling produces.
+  const rawTargets = env.ALLOWED_INSTALLATION_TARGETS;
+
   return {
-    appId: required(env, "APP_ID"),
-    privateKey: readPrivateKey(env),
-    webhookSecret: required(env, "WEBHOOK_SECRET"),
-    allowedInstallationTargets: parseAllowedTargets(
-      env.ALLOWED_INSTALLATION_TARGETS,
-    ),
+    appsConfigPath: env.APPS_CONFIG_PATH ?? "config/apps.cjs",
+    allowedInstallationTargets:
+      rawTargets === undefined || rawTargets.trim() === ""
+        ? undefined
+        : parseAllowedTargets(rawTargets),
     baselineRepo: parseBaselineRepo(env.BASELINE_REPO),
     port,
     host: env.HOST,

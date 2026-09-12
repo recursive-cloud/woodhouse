@@ -53,10 +53,24 @@ export interface EvaluatedCheck {
   readonly detail: string;
 }
 
+export interface EvaluateOptions {
+  /**
+   * Hold the verdict at pending when the commit has no check runs at all.
+   *
+   * Set while a pull request is still inside its grace period: GitHub has
+   * usually not created the Actions check runs by the time `pull_request` is
+   * delivered, and concluding success there would green-light a commit that
+   * nothing has tested.
+   */
+  readonly emptyIsPending?: boolean;
+}
+
 export interface Evaluation {
   readonly outcome: Outcome;
   readonly title: string;
   readonly summary: string;
+  /** True when the commit carried no check runs other than our own. */
+  readonly awaitingStart: boolean;
   readonly checks: readonly EvaluatedCheck[];
   readonly counts: {
     readonly passed: number;
@@ -99,6 +113,7 @@ function nameMatches(name: string, list: readonly string[]): boolean {
 export function evaluate(
   runs: readonly CheckRunLike[],
   config: GatekeeperConfig,
+  options: EvaluateOptions = {},
 ): Evaluation {
   const strict = config.strictChecks;
   const ignored = config.ignoredChecks;
@@ -209,6 +224,14 @@ export function evaluate(
     }
   }
 
+  // No check runs at all (ours excluded). Distinct from "every check was
+  // ignored", which still tells us CI ran.
+  const awaitingStart = runs.every((r) => r.name === WHITE_GLOVE_CHECK_NAME);
+
+  if (awaitingStart && options.emptyIsPending === true) {
+    anyPending = true;
+  }
+
   const counts = {
     passed: checks.filter((c) => c.verdict === "passed").length,
     failed: checks.filter((c) => c.verdict === "failed").length,
@@ -225,19 +248,25 @@ export function evaluate(
 
   return {
     outcome,
-    title: buildTitle(outcome, counts),
-    summary: buildSummary(outcome, checks, counts),
+    title: buildTitle(outcome, counts, awaitingStart),
+    summary: buildSummary(outcome, checks, counts, awaitingStart),
+    awaitingStart,
     checks,
     counts,
   };
 }
 
-function buildTitle(outcome: Outcome, counts: Evaluation["counts"]): string {
+function buildTitle(
+  outcome: Outcome,
+  counts: Evaluation["counts"],
+  awaitingStart: boolean,
+): string {
   switch (outcome) {
     case "failure":
       return `${counts.failed} check${counts.failed === 1 ? "" : "s"} failing`;
     case "pending": {
       const waiting = counts.pending + counts.missing;
+      if (waiting === 0 && awaitingStart) return "Waiting for checks to start";
       return `Waiting on ${waiting} check${waiting === 1 ? "" : "s"}`;
     }
     case "success":
@@ -267,6 +296,7 @@ function buildSummary(
   outcome: Outcome,
   checks: readonly EvaluatedCheck[],
   counts: Evaluation["counts"],
+  awaitingStart: boolean,
 ): string {
   const lines: string[] = [];
 
@@ -277,7 +307,11 @@ function buildSummary(
       );
       break;
     case "pending":
-      lines.push("Still waiting for the rest of the results.");
+      lines.push(
+        awaitingStart && counts.pending + counts.missing === 0
+          ? "Waiting to see whether any checks are going to run on this commit."
+          : "Still waiting for the rest of the results.",
+      );
       break;
     case "success":
       lines.push(
