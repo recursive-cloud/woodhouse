@@ -4,7 +4,7 @@ Deferred work, roughly in the order it is worth doing.
 
 ## Housekeeping
 
-- [ ] **License.** Add `LICENSE` (MIT).
+- [x] **License.** Add `LICENSE` (MIT).
 
 ## Configuration authoring
 

@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="assets/woodhouse-readme.jpeg" alt="Woodhouse" width="180">
+<img src="assets/woodhouse-readme.png" alt="Woodhouse" width="240">
 
 # Woodhouse
 
-**A personal butler for your GitHub repositories.**
+**An open-source repository valet providing white-glove automated approvals and check consolidation.**
 
 </div>
 
@@ -227,3 +227,9 @@ plain functions over plain data, and hold the bulk of the test suite.
   we are choosing to ignore.
 - Handler errors are rethrown so the delivery is marked failed in GitHub's UI
   and can be redelivered from the App's Advanced tab.
+
+## Legal & Disclaimer
+
+**Woodhouse** is an independent, community-driven open-source project. 
+
+This software is not affiliated, associated, authorized, endorsed by, or in any way officially connected with FX Network, Floyd County Productions, the creators of the television show *Archer*, or any of their subsidiaries or affiliates. All product and company names, trademarks, and registered trademarks used in this project belong to their respective holders; their use here does not imply any affiliation with or endorsement by them.
