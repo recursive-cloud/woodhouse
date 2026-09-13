@@ -158,10 +158,27 @@ The map key must be the App ID, since that is what deliveries are matched on;
 a mismatch is a startup error rather than a silently dropped webhook. Each App
 may also set `baselineRepo` and `label`.
 
-Per-App `allowedInstallationTargets` is worth setting when serving more than
-one tenant: it confines each App to its own owners regardless of the global
-`ALLOWED_INSTALLATION_TARGETS`, so a delivery for org A reaching org B's App is
-dropped.
+### The allowlist
+
+Each App must end up with an allowlist, from one of two places:
+
+| Source | Applies to |
+| --- | --- |
+| `allowedInstallationTargets` on an App | that App only; takes precedence |
+| `ALLOWED_INSTALLATION_TARGETS` | default for Apps that do not set their own |
+
+**Setting it per App means the environment variable is not needed at all.**
+Setting it in neither is a startup error.
+
+Per-App is worth preferring when serving more than one tenant, since it
+confines each App to its own owners: a delivery for org A that reaches org B's
+App is dropped.
+
+For a private App the allowlist is belt and braces — only the owning account
+can install it, so it should never actually reject anything. It earns its keep
+if an App is made public or installed at the Enterprise level, where one App
+can span many organisations, and as a guard against pointing the wrong
+credentials at the wrong tenant.
 
 The shipped default is the single-App case and needs no editing — set
 `APP_ID`, `PRIVATE_KEY` and `WEBHOOK_SECRET` and it works. Mount your own file

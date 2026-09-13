@@ -218,9 +218,11 @@ export function resolveDefinitions(
 
     if (targets === undefined || targets.length === 0) {
       throw new ConfigurationError(
-        `App ${appId} has no installation allowlist. Set ` +
-          "ALLOWED_INSTALLATION_TARGETS, or give the App its own " +
-          "`allowedInstallationTargets`.",
+        `App ${appId} has no installation allowlist. Set either ` +
+          "`allowedInstallationTargets` on this App in the configuration " +
+          "file, which is all that is needed, or the " +
+          "ALLOWED_INSTALLATION_TARGETS environment variable as a default " +
+          "for every App. Refusing to start without a boundary.",
       );
     }
 

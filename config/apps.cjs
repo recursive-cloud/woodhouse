@@ -35,6 +35,24 @@
  *   };
  *
  * Each App also supports `baselineRepo` and `label` (used in log lines).
+ *
+ * ---------------------------------------------------------------------------
+ * The installation allowlist
+ * ---------------------------------------------------------------------------
+ * Every App must end up with one, from either:
+ *
+ *   - `allowedInstallationTargets` here, which takes precedence; or
+ *   - the ALLOWED_INSTALLATION_TARGETS environment variable, used as the
+ *     default for any App that does not set its own.
+ *
+ * Set it here and the environment variable is not needed at all. Set it in
+ * neither and Woodhouse refuses to start.
+ *
+ * For a private App this is belt and braces: only the owning account can
+ * install it, so the allowlist should never actually reject anything. It earns
+ * its keep if an App is ever made public or converted to an Enterprise
+ * installation, where a single App can span many organisations, and as a guard
+ * against pointing the wrong credentials at the wrong tenant.
  */
 
 module.exports = function (env) {
@@ -43,6 +61,9 @@ module.exports = function (env) {
       appId: parseInt(env.APP_ID, 10),
       privateKey: env.PRIVATE_KEY,
       webhookSecret: env.WEBHOOK_SECRET,
+
+      // Setting this makes ALLOWED_INSTALLATION_TARGETS unnecessary.
+      // allowedInstallationTargets: ["my-user", "my-org"],
     },
   };
 };

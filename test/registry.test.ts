@@ -237,3 +237,43 @@ describe("resolveDefinitions — unset environment variables", () => {
     );
   });
 });
+
+describe("resolveDefinitions — allowlist sources", () => {
+  it("needs no global default when every App sets its own", () => {
+    // The environment variable is genuinely optional; this is the
+    // configuration a multi-tenant deployment should prefer.
+    const apps = resolveDefinitions(
+      {
+        "111": def({ appId: 111, allowedInstallationTargets: ["org-a"] }),
+        "222": def({ appId: 222, allowedInstallationTargets: ["org-b"] }),
+      },
+      { ...defaults, allowedInstallationTargets: undefined },
+    );
+
+    expect(apps).toHaveLength(2);
+    expect(apps[0]!.allowlist.describe()).toEqual(["org-a"]);
+    expect(apps[1]!.allowlist.describe()).toEqual(["org-b"]);
+  });
+
+  it("falls back to the global default per App", () => {
+    const apps = resolveDefinitions(
+      {
+        "111": def({ appId: 111, allowedInstallationTargets: ["org-a"] }),
+        "222": def({ appId: 222 }),
+      },
+      defaults,
+    );
+
+    expect(apps[0]!.allowlist.describe()).toEqual(["org-a"]);
+    expect(apps[1]!.allowlist.describe()).toEqual(["acme"]);
+  });
+
+  it("names both remedies when an App has no allowlist", () => {
+    expect(() =>
+      resolveDefinitions(
+        { "123": def() },
+        { ...defaults, allowedInstallationTargets: undefined },
+      ),
+    ).toThrow(/allowedInstallationTargets.*ALLOWED_INSTALLATION_TARGETS/s);
+  });
+});
