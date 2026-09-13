@@ -2,6 +2,30 @@
 
 Deferred work, roughly in the order it is worth doing.
 
+## Where things stand
+
+All three feature areas are implemented and have been exercised against real
+repositories: installation lockdown, cascading settings sync, the white-glove
+consolidated check, auto-approval, and config validation. Two GitHub Apps run
+in one container. CI builds and publishes a multi-arch image per commit.
+
+Tooling is in place: mise pins the toolchain, hk runs oxfmt and oxlint at
+pre-commit, and a JSON Schema is generated from the zod definitions.
+
+The obvious next chunk is **Releases** — release-please, conventional commit
+enforcement, and version-tagged images. Conventional commits begin at
+`0755843`; everything before that is prose, so the first generated changelog
+will have a gap.
+
+Worth knowing before picking this up:
+
+- Commit `34a57ed` does not satisfy the lint gate it introduces, because the
+  fixes land in `85cb24a`. Only the tip is pushed, so CI never saw it red, but
+  `mise run ci` at that commit will fail. Every other commit is green in
+  isolation.
+- `hk install --mise` is required rather than plain `hk install`, since hk is
+  mise-managed and is otherwise not on `PATH` inside the hook.
+
 ## Housekeeping
 
 - [x] **License.** Add `LICENSE` (MIT).
@@ -21,6 +45,22 @@ Deferred work, roughly in the order it is worth doing.
 - [x] **Comment on pull requests with invalid configuration** — done. A single
       comment, edited in place on each push and deleted once the file
       validates.
+
+- [ ] **Add descriptions to the JSON Schema.** The generated schema currently
+      has 79 nodes and zero `description` fields, so editors offer completion
+      and validation but no hover documentation. The explanatory comments in
+      `src/config/schema.ts` are TSDoc and do not carry through; zod needs
+      `.describe()` (or `.meta({ description })` in v4) on each field for them
+      to reach the schema.
+
+      Worth doing as a single pass over `schema.ts`, since the prose largely
+      exists already and only needs moving. Consider also `.meta({ examples })`
+      for the fiddlier fields — `strictChecks`, `protectedPaths`, `rulesets` —
+      and marking anything deprecated as the config shape evolves, for instance
+      when `allowedActors` gains the owners/staff split.
+
+      Check whether `z.toJSONSchema` emits `title` from `.meta()` too, and
+      whether descriptions survive the `prefault` wrappers on each section.
 
 - [ ] **Offer the schema modeline on new config files.** The validation comment
       suggests the `# yaml-language-server:` line, but nothing adds it. Best
@@ -79,6 +119,12 @@ Deferred work, roughly in the order it is worth doing.
       lines on every run, so `check` fails immediately after `fix` and the hook
       would rewrite docs on alternate commits. Worth retrying at 1.0, and worth
       reporting upstream.
+
+- [ ] **Consider `hk install --global`.** hk recommends installing once into
+      `~/.gitconfig`, where it no-ops in repositories without an `hk.pkl`. This
+      repo uses a per-repo install so nothing outside it was touched. A global
+      install belongs in dotfiles rather than here, but if it is adopted, the
+      per-repo install becomes redundant and hk will skip it automatically.
 
 - [ ] **Slower linters on pre-push.** `hk init` detected actionlint, hadolint,
       zizmor and dclint as applicable here. All are useful and none are fast
