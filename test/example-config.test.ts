@@ -11,9 +11,7 @@ import { parseConfig } from "../src/config/schema.js";
  */
 describe("woodhouse.example.yml", () => {
   it("validates against the schema", () => {
-    const path = fileURLToPath(
-      new URL("../woodhouse.example.yml", import.meta.url),
-    );
+    const path = fileURLToPath(new URL("../woodhouse.example.yml", import.meta.url));
     const result = parseConfig(yaml.load(readFileSync(path, "utf8")));
 
     if (!result.ok) console.error(result.issues);

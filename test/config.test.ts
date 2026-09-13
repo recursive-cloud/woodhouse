@@ -4,9 +4,9 @@ import { parseConfig } from "../src/config/schema.js";
 
 describe("deepMerge", () => {
   it("merges nested objects", () => {
-    expect(
-      deepMerge({ a: { x: 1, y: 2 } }, { a: { y: 3, z: 4 } }),
-    ).toEqual({ a: { x: 1, y: 3, z: 4 } });
+    expect(deepMerge({ a: { x: 1, y: 2 } }, { a: { y: 3, z: 4 } })).toEqual({
+      a: { x: 1, y: 3, z: 4 },
+    });
   });
 
   it("replaces arrays rather than concatenating them", () => {
@@ -47,9 +47,7 @@ describe("deepMerge", () => {
 
 describe("mergeLayers", () => {
   it("applies layers lowest-precedence first", () => {
-    expect(
-      mergeLayers([{ a: 1, b: 1 }, { b: 2, c: 2 }, { c: 3 }]),
-    ).toEqual({ a: 1, b: 2, c: 3 });
+    expect(mergeLayers([{ a: 1, b: 1 }, { b: 2, c: 2 }, { c: 3 }])).toEqual({ a: 1, b: 2, c: 3 });
   });
 });
 
@@ -60,9 +58,7 @@ describe("config schema", () => {
     if (!result.ok) return;
     expect(result.config.gatekeeper.enabled).toBe(true);
     expect(result.config.gatekeeper.strictChecks).toEqual([]);
-    expect(result.config.autoApproval.protectedPaths).toContain(
-      ".github/woodhouse.yml",
-    );
+    expect(result.config.autoApproval.protectedPaths).toContain(".github/woodhouse.yml");
   });
 
   it("rejects unknown keys so typos are not silently ignored", () => {

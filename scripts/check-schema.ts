@@ -15,9 +15,7 @@ let committed: string;
 try {
   committed = readFileSync(target, "utf8");
 } catch {
-  process.stderr.write(
-    `${SCHEMA_FILE} is missing. Run \`npm run schema:generate\`.\n`,
-  );
+  process.stderr.write(`${SCHEMA_FILE} is missing. Run \`npm run schema:generate\`.\n`);
   process.exit(1);
 }
 

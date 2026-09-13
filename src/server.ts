@@ -131,11 +131,7 @@ async function handleWebhook(
   const targetId = req.get(TARGET_ID_HEADER);
   const targetType = req.get(TARGET_TYPE_HEADER);
 
-  if (
-    deliveryId === undefined ||
-    event === undefined ||
-    signature === undefined
-  ) {
+  if (deliveryId === undefined || event === undefined || signature === undefined) {
     res.status(400).json({ error: "missing required GitHub webhook headers" });
     return;
   }
@@ -170,9 +166,7 @@ async function handleWebhook(
     return;
   }
 
-  const payload = Buffer.isBuffer(req.body)
-    ? req.body.toString("utf8")
-    : String(req.body ?? "");
+  const payload = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
 
   try {
     // Verification uses this App's own secret. The target ID header that

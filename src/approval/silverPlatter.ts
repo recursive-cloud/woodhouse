@@ -69,9 +69,7 @@ async function listChangedFiles(
     // A previous_filename means the file was moved; the old location matters
     // just as much for protected-path checks.
     files.push(
-      ...data
-        .map((f) => f.previous_filename)
-        .filter((n): n is string => typeof n === "string"),
+      ...data.map((f) => f.previous_filename).filter((n): n is string => typeof n === "string"),
     );
 
     if (data.length < PER_PAGE) return { files, truncated: false };
@@ -142,10 +140,7 @@ export async function serve(
   );
 
   if (!preliminary.approve) {
-    deps.log.debug(
-      { pr: pr.number, reason: preliminary.reason },
-      "Not auto-approving",
-    );
+    deps.log.debug({ pr: pr.number, reason: preliminary.reason }, "Not auto-approving");
     return false;
   }
 
@@ -169,18 +164,12 @@ export async function serve(
   );
 
   if (!decision.approve) {
-    deps.log.info(
-      { pr: pr.number, reason: decision.reason },
-      "Not auto-approving",
-    );
+    deps.log.info({ pr: pr.number, reason: decision.reason }, "Not auto-approving");
     return false;
   }
 
   if (deps.dryRun) {
-    deps.log.info(
-      { pr: pr.number, dryRun: true },
-      "DRY_RUN: would approve pull request",
-    );
+    deps.log.info({ pr: pr.number, dryRun: true }, "DRY_RUN: would approve pull request");
     return false;
   }
 
@@ -198,9 +187,6 @@ export async function serve(
       "protected paths.\n\n_Woodhouse, at your service._",
   });
 
-  deps.log.info(
-    { pr: pr.number, author: pr.author, sha: pr.headSha },
-    "Approved pull request",
-  );
+  deps.log.info({ pr: pr.number, author: pr.author, sha: pr.headSha }, "Approved pull request");
   return true;
 }

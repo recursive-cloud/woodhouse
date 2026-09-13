@@ -19,13 +19,10 @@ describe("parseAllowedTargets", () => {
     expect(parseAllowedTargets("solo")).toEqual(["solo"]);
   });
 
-  it.each([undefined, "", "   ", "[]", ",,,"])(
-    "refuses empty input %p",
-    (input) => {
-      // Fail-closed: an empty allowlist must never mean "allow everything".
-      expect(() => parseAllowedTargets(input)).toThrow(ConfigurationError);
-    },
-  );
+  it.each([undefined, "", "   ", "[]", ",,,"])("refuses empty input %p", (input) => {
+    // Fail-closed: an empty allowlist must never mean "allow everything".
+    expect(() => parseAllowedTargets(input)).toThrow(ConfigurationError);
+  });
 
   it.each(["*", "all", '["*"]', "me,*"])("refuses wildcard %p", (input) => {
     expect(() => parseAllowedTargets(input)).toThrow(/wildcard/);
@@ -67,14 +64,13 @@ describe("loadEnv", () => {
   });
 
   it("still rejects a wildcard allowlist", () => {
-    expect(() => loadEnv({ ALLOWED_INSTALLATION_TARGETS: "*" })).toThrow(
-      /wildcard/,
-    );
+    expect(() => loadEnv({ ALLOWED_INSTALLATION_TARGETS: "*" })).toThrow(/wildcard/);
   });
 
   it("honours APPS_CONFIG_PATH", () => {
-    expect(loadEnv({ APPS_CONFIG_PATH: "/etc/woodhouse/apps.cjs" }).appsConfigPath)
-      .toBe("/etc/woodhouse/apps.cjs");
+    expect(loadEnv({ APPS_CONFIG_PATH: "/etc/woodhouse/apps.cjs" }).appsConfigPath).toBe(
+      "/etc/woodhouse/apps.cjs",
+    );
   });
 
   it.each(["0", "70000", "abc"])("rejects invalid PORT %p", (port) => {
@@ -82,9 +78,7 @@ describe("loadEnv", () => {
   });
 
   it("rejects an unknown LOG_LEVEL", () => {
-    expect(() => loadEnv({ ...baseEnv, LOG_LEVEL: "chatty" })).toThrow(
-      /LOG_LEVEL/,
-    );
+    expect(() => loadEnv({ ...baseEnv, LOG_LEVEL: "chatty" })).toThrow(/LOG_LEVEL/);
   });
 
   it("parses DRY_RUN", () => {
@@ -110,9 +104,7 @@ describe("parseBaselineRepo", () => {
   it("rejects an owner/repo pair", () => {
     // The owner is always the installation account; accepting a qualified
     // name would silently read from somewhere other than intended.
-    expect(() => parseBaselineRepo("someone-else/.github")).toThrow(
-      /repository name only/,
-    );
+    expect(() => parseBaselineRepo("someone-else/.github")).toThrow(/repository name only/);
   });
 
   it("rejects invalid repository names", () => {

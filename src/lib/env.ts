@@ -58,9 +58,7 @@ export function parseAllowedTargets(raw: string | undefined): string[] {
       );
     }
     if (!Array.isArray(parsed) || parsed.some((v) => typeof v !== "string")) {
-      throw new ConfigurationError(
-        "ALLOWED_INSTALLATION_TARGETS must be an array of strings.",
-      );
+      throw new ConfigurationError("ALLOWED_INSTALLATION_TARGETS must be an array of strings.");
     }
     parts = parsed as string[];
   } else {
@@ -70,9 +68,7 @@ export function parseAllowedTargets(raw: string | undefined): string[] {
   const cleaned = parts.map((p) => p.trim()).filter((p) => p !== "");
 
   if (cleaned.length === 0) {
-    throw new ConfigurationError(
-      "ALLOWED_INSTALLATION_TARGETS contained no usable entries.",
-    );
+    throw new ConfigurationError("ALLOWED_INSTALLATION_TARGETS contained no usable entries.");
   }
 
   // A literal "*" is rejected outright: there is no legitimate reason for a
@@ -113,9 +109,7 @@ export function parseBaselineRepo(raw: string | undefined): string {
   }
 
   if (!/^[A-Za-z0-9-_.]+$/.test(value)) {
-    throw new ConfigurationError(
-      `BASELINE_REPO is not a valid repository name: "${value}".`,
-    );
+    throw new ConfigurationError(`BASELINE_REPO is not a valid repository name: "${value}".`);
   }
 
   return value;

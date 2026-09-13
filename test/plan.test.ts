@@ -13,9 +13,7 @@ const repo = (o: Record<string, unknown>) => repositorySchema.parse(o);
 
 describe("diffRepositorySettings", () => {
   it("returns nothing when already correct", () => {
-    expect(
-      diffRepositorySettings({ has_issues: true }, repo({ has_issues: true })),
-    ).toEqual({});
+    expect(diffRepositorySettings({ has_issues: true }, repo({ has_issues: true }))).toEqual({});
   });
 
   it("returns only the changed fields", () => {
@@ -28,15 +26,13 @@ describe("diffRepositorySettings", () => {
 
   it("distinguishes false from absent", () => {
     // `false` is a real desired value, not "unset"; it must still be sent.
-    expect(
-      diffRepositorySettings({ has_wiki: true }, repo({ has_wiki: false })),
-    ).toEqual({ has_wiki: false });
+    expect(diffRepositorySettings({ has_wiki: true }, repo({ has_wiki: false }))).toEqual({
+      has_wiki: false,
+    });
   });
 
   it("never emits topics through the repository endpoint", () => {
-    expect(
-      diffRepositorySettings({}, repo({ topics: ["a"] })),
-    ).toEqual({});
+    expect(diffRepositorySettings({}, repo({ topics: ["a"] }))).toEqual({});
   });
 });
 
@@ -152,18 +148,18 @@ describe("planLabels", () => {
   });
 
   it("corrects casing of an existing label", () => {
-    const plan = planLabels(
-      existing(["Bug", "ffffff", null]),
-      [{ name: "bug" }],
-      false,
-    );
+    const plan = planLabels(existing(["Bug", "ffffff", null]), [{ name: "bug" }], false);
     expect(plan.update).toHaveLength(1);
   });
 });
 
 describe("planRulesets", () => {
   it("creates a ruleset that does not exist", () => {
-    const plan = planRulesets([], [{ name: "main", target: "branch", enforcement: "active", rules: [] }], false);
+    const plan = planRulesets(
+      [],
+      [{ name: "main", target: "branch", enforcement: "active", rules: [] }],
+      false,
+    );
     expect(plan.create).toHaveLength(1);
   });
 
@@ -173,9 +169,7 @@ describe("planRulesets", () => {
       [{ name: "main", target: "branch", enforcement: "active", rules: [] }],
       false,
     );
-    expect(plan.update).toEqual([
-      { id: 7, ruleset: expect.objectContaining({ name: "main" }) },
-    ]);
+    expect(plan.update).toEqual([{ id: 7, ruleset: expect.objectContaining({ name: "main" }) }]);
     expect(plan.create).toHaveLength(0);
   });
 
@@ -221,7 +215,8 @@ describe("describeForbidden", () => {
   });
 
   it("always includes GitHub's own message", () => {
-    expect(describeForbidden("labels", "Resource not accessible by integration"))
-      .toContain("Resource not accessible by integration");
+    expect(describeForbidden("labels", "Resource not accessible by integration")).toContain(
+      "Resource not accessible by integration",
+    );
   });
 });

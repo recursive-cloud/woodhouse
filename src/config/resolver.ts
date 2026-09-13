@@ -38,10 +38,7 @@ import { TtlCache } from "../lib/cache.js";
  */
 export const DEFAULT_BASELINE_REPO = ".github-private";
 export const BASELINE_PATHS = ["woodhouse.yml", "woodhouse.yaml"] as const;
-export const LOCAL_PATHS = [
-  ".github/woodhouse.yml",
-  ".github/woodhouse.yaml",
-] as const;
+export const LOCAL_PATHS = [".github/woodhouse.yml", ".github/woodhouse.yaml"] as const;
 
 /** Minimal shape of the Octokit client we need; keeps this unit-testable. */
 export interface ContentsClient {
@@ -83,9 +80,7 @@ async function fetchLayer(
   for (const path of paths) {
     try {
       const response = await client.repos.getContent(
-        ref === undefined
-          ? { owner, repo, path }
-          : { owner, repo, path, ref },
+        ref === undefined ? { owner, repo, path } : { owner, repo, path, ref },
       );
 
       const file = response.data as {
@@ -197,14 +192,7 @@ export class ConfigResolver {
       // otherwise merge the file into itself.
       this.isBaselineRepo(repo)
         ? Promise.resolve(undefined)
-        : fetchLayer(
-            client,
-            owner,
-            this.baselineRepo,
-            BASELINE_PATHS,
-            undefined,
-            log,
-          ),
+        : fetchLayer(client, owner, this.baselineRepo, BASELINE_PATHS, undefined, log),
       fetchLayer(client, owner, repo, LOCAL_PATHS, ref, log),
     ]);
 
@@ -212,8 +200,7 @@ export class ConfigResolver {
     const layers: unknown[] = [];
 
     // `inherit: false` in the local config drops the baseline entirely.
-    const inherits =
-      (local?.data as { inherit?: unknown } | undefined)?.inherit !== false;
+    const inherits = (local?.data as { inherit?: unknown } | undefined)?.inherit !== false;
 
     if (baseline !== undefined && inherits) {
       layers.push(baseline.data);

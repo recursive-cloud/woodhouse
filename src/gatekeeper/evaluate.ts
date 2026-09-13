@@ -40,12 +40,7 @@ export interface CheckRunLike {
 
 export type Outcome = "success" | "failure" | "pending";
 
-export type Verdict =
-  | "passed"
-  | "failed"
-  | "pending"
-  | "ignored"
-  | "missing-required";
+export type Verdict = "passed" | "failed" | "pending" | "ignored" | "missing-required";
 
 export interface EvaluatedCheck {
   readonly name: string;
@@ -240,11 +235,7 @@ export function evaluate(
     missing: checks.filter((c) => c.verdict === "missing-required").length,
   };
 
-  const outcome: Outcome = anyFailure
-    ? "failure"
-    : anyPending
-      ? "pending"
-      : "success";
+  const outcome: Outcome = anyFailure ? "failure" : anyPending ? "pending" : "success";
 
   return {
     outcome,
@@ -302,9 +293,7 @@ function buildSummary(
 
   switch (outcome) {
     case "failure":
-      lines.push(
-        "Woodhouse will not be presenting this one. The following checks did not pass:",
-      );
+      lines.push("Woodhouse will not be presenting this one. The following checks did not pass:");
       break;
     case "pending":
       lines.push(
@@ -325,17 +314,9 @@ function buildSummary(
   if (checks.length > 0) {
     lines.push("");
     // Ordered so the actionable items are at the top.
-    const order: Verdict[] = [
-      "failed",
-      "missing-required",
-      "pending",
-      "passed",
-      "ignored",
-    ];
-    const sorted = [...checks].sort(
-      (a, b) =>
-        order.indexOf(a.verdict) - order.indexOf(b.verdict) ||
-        a.name.localeCompare(b.name),
+    const order: Verdict[] = ["failed", "missing-required", "pending", "passed", "ignored"];
+    const sorted = checks.toSorted(
+      (a, b) => order.indexOf(a.verdict) - order.indexOf(b.verdict) || a.name.localeCompare(b.name),
     );
     for (const check of sorted) {
       lines.push(

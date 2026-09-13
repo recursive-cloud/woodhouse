@@ -9,8 +9,7 @@ import {
 } from "../src/apps/registry.js";
 import { ConfigurationError } from "../src/lib/env.js";
 
-const PEM =
-  "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----";
+const PEM = "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----";
 
 const dir = mkdtempSync(join(tmpdir(), "woodhouse-"));
 
@@ -67,13 +66,13 @@ describe("loadAppDefinitions", () => {
       ORG_B_WEBHOOK_SECRET: "b",
     } as NodeJS.ProcessEnv);
 
-    expect(Object.keys(definitions).sort()).toEqual(["111", "222"]);
+    expect(Object.keys(definitions).toSorted()).toEqual(["111", "222"]);
   });
 
   it("reports a missing file clearly", () => {
-    expect(() =>
-      loadAppDefinitions(join(dir, "nope.cjs"), {} as NodeJS.ProcessEnv),
-    ).toThrow(/not found/);
+    expect(() => loadAppDefinitions(join(dir, "nope.cjs"), {} as NodeJS.ProcessEnv)).toThrow(
+      /not found/,
+    );
   });
 
   it("rejects a file that does not export a function", () => {
@@ -85,9 +84,7 @@ describe("loadAppDefinitions", () => {
 
   it("surfaces an error thrown by the config function", () => {
     const path = configFile(`module.exports = function () { throw new Error("boom"); };`);
-    expect(() => loadAppDefinitions(path, {} as NodeJS.ProcessEnv)).toThrow(
-      /threw: boom/,
-    );
+    expect(() => loadAppDefinitions(path, {} as NodeJS.ProcessEnv)).toThrow(/threw: boom/);
   });
 
   it("rejects unknown keys in an App definition", () => {
@@ -128,14 +125,15 @@ describe("resolveDefinitions", () => {
   it("rejects a key that disagrees with its appId", () => {
     // Webhooks are matched on the key, so a mismatch would silently drop
     // every delivery for that App.
-    expect(() => resolveDefinitions({ "999": def({ appId: 123 }) }, defaults))
-      .toThrow(/does not match its appId/);
+    expect(() => resolveDefinitions({ "999": def({ appId: 123 }) }, defaults)).toThrow(
+      /does not match its appId/,
+    );
   });
 
   it("rejects a NaN appId from an unset variable", () => {
-    expect(() =>
-      resolveDefinitions({ undefined: def({ appId: "undefined" }) }, defaults),
-    ).toThrow(/invalid appId/);
+    expect(() => resolveDefinitions({ undefined: def({ appId: "undefined" }) }, defaults)).toThrow(
+      /invalid appId/,
+    );
   });
 
   it("accepts a string appId", () => {
@@ -154,19 +152,13 @@ describe("resolveDefinitions", () => {
 
   it("refuses an App with no allowlist from either source", () => {
     expect(() =>
-      resolveDefinitions(
-        { "123": def() },
-        { ...defaults, allowedInstallationTargets: undefined },
-      ),
+      resolveDefinitions({ "123": def() }, { ...defaults, allowedInstallationTargets: undefined }),
     ).toThrow(/no installation allowlist/);
   });
 
   it("rejects a wildcard in a per-App allowlist", () => {
     expect(() =>
-      resolveDefinitions(
-        { "123": def({ allowedInstallationTargets: ["*"] }) },
-        defaults,
-      ),
+      resolveDefinitions({ "123": def({ allowedInstallationTargets: ["*"] }) }, defaults),
     ).toThrow(/wildcard/);
   });
 
@@ -179,16 +171,13 @@ describe("resolveDefinitions", () => {
   });
 
   it("rejects a private key that is not a PEM", () => {
-    expect(() =>
-      resolveDefinitions({ "123": def({ privateKey: "nonsense" }) }, defaults),
-    ).toThrow(ConfigurationError);
+    expect(() => resolveDefinitions({ "123": def({ privateKey: "nonsense" }) }, defaults)).toThrow(
+      ConfigurationError,
+    );
   });
 
   it("per-App baselineRepo overrides the default", () => {
-    const [app] = resolveDefinitions(
-      { "123": def({ baselineRepo: ".github" }) },
-      defaults,
-    );
+    const [app] = resolveDefinitions({ "123": def({ baselineRepo: ".github" }) }, defaults);
     expect(app!.baselineRepo).toBe(".github");
   });
 
@@ -232,9 +221,7 @@ describe("resolveDefinitions — unset environment variables", () => {
         };
       };
     `);
-    expect(() => loadAppDefinitions(path, {} as NodeJS.ProcessEnv)).toThrow(
-      /is not set/,
-    );
+    expect(() => loadAppDefinitions(path, {} as NodeJS.ProcessEnv)).toThrow(/is not set/);
   });
 });
 
@@ -270,10 +257,7 @@ describe("resolveDefinitions — allowlist sources", () => {
 
   it("names both remedies when an App has no allowlist", () => {
     expect(() =>
-      resolveDefinitions(
-        { "123": def() },
-        { ...defaults, allowedInstallationTargets: undefined },
-      ),
+      resolveDefinitions({ "123": def() }, { ...defaults, allowedInstallationTargets: undefined }),
     ).toThrow(/allowedInstallationTargets.*ALLOWED_INSTALLATION_TARGETS/s);
   });
 });

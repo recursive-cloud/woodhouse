@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decide, pathMatches, type ApprovalRequest } from "../src/approval/policy.js";
 import { autoApprovalSchema, type AutoApprovalConfig } from "../src/config/schema.js";
 
-const cfg = (o: Record<string, unknown> = {}): AutoApprovalConfig =>
-  autoApprovalSchema.parse(o);
+const cfg = (o: Record<string, unknown> = {}): AutoApprovalConfig => autoApprovalSchema.parse(o);
 
 const request = (o: Partial<ApprovalRequest> = {}): ApprovalRequest => ({
   author: "renovate[bot]",
@@ -58,7 +57,9 @@ describe("decide", () => {
   });
 
   it("refuses everything when disabled", () => {
-    expect(decide(request(), cfg({ enabled: false, allowedActors: ["renovate[bot]"] })).approve).toBe(false);
+    expect(
+      decide(request(), cfg({ enabled: false, allowedActors: ["renovate[bot]"] })).approve,
+    ).toBe(false);
   });
 
   it("refuses when allowedActors is empty", () => {
@@ -82,28 +83,20 @@ describe("decide — privilege escalation guards", () => {
   it("refuses a PR that edits the config file", () => {
     // Otherwise a trusted actor could self-approve a change that widens
     // allowedActors, converting one entry into permanent control.
-    const result = decide(
-      request({ changedFiles: [".github/woodhouse.yml"] }),
-      trusted,
-    );
+    const result = decide(request({ changedFiles: [".github/woodhouse.yml"] }), trusted);
     expect(result).toMatchObject({ approve: false });
     expect(result.approve === false && result.reason).toContain("protected path");
   });
 
   it("refuses when only one file of many is protected", () => {
     expect(
-      decide(
-        request({ changedFiles: ["README.md", ".github/woodhouse.yaml"] }),
-        trusted,
-      ).approve,
+      decide(request({ changedFiles: ["README.md", ".github/woodhouse.yaml"] }), trusted).approve,
     ).toBe(false);
   });
 
   it("refuses when the file list was truncated", () => {
     // A huge PR is where a protected-path change is easiest to hide.
-    expect(
-      decide(request({ fileListTruncated: true }), trusted).approve,
-    ).toBe(false);
+    expect(decide(request({ fileListTruncated: true }), trusted).approve).toBe(false);
   });
 
   it("honours custom protectedPaths", () => {
@@ -111,17 +104,15 @@ describe("decide — privilege escalation guards", () => {
       allowedActors: ["renovate[bot]"],
       protectedPaths: [".github/workflows/"],
     });
-    expect(
-      decide(request({ changedFiles: [".github/workflows/ci.yml"] }), config)
-        .approve,
-    ).toBe(false);
+    expect(decide(request({ changedFiles: [".github/workflows/ci.yml"] }), config).approve).toBe(
+      false,
+    );
   });
 
   it("protects config files by default with no config at all", () => {
     const config = cfg({ allowedActors: ["renovate[bot]"] });
-    expect(
-      decide(request({ changedFiles: [".github/woodhouse.yml"] }), config)
-        .approve,
-    ).toBe(false);
+    expect(decide(request({ changedFiles: [".github/woodhouse.yml"] }), config).approve).toBe(
+      false,
+    );
   });
 });

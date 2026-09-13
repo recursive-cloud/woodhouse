@@ -37,10 +37,7 @@ describe("evaluate — basic outcomes", () => {
   );
 
   it("is pending while any check is unfinished", () => {
-    const result = evaluate(
-      [done("build", "success"), running("test")],
-      cfg(),
-    );
+    const result = evaluate([done("build", "success"), running("test")], cfg());
     expect(result.outcome).toBe("pending");
   });
 
@@ -56,17 +53,12 @@ describe("evaluate — precedence", () => {
   it("lets failure win over pending", () => {
     // A failure is terminal; there is no point holding the PR at pending
     // waiting for checks that cannot change the answer.
-    const result = evaluate(
-      [running("slow"), done("build", "failure")],
-      cfg(),
-    );
+    const result = evaluate([running("slow"), done("build", "failure")], cfg());
     expect(result.outcome).toBe("failure");
   });
 
   it("lets pending win over success", () => {
-    expect(
-      evaluate([done("a", "success"), running("b")], cfg()).outcome,
-    ).toBe("pending");
+    expect(evaluate([done("a", "success"), running("b")], cfg()).outcome).toBe("pending");
   });
 
   it("reports every failing check, not just the first", () => {
@@ -82,35 +74,23 @@ describe("evaluate — precedence", () => {
 
 describe("evaluate — skipped and neutral", () => {
   it.each(["skipped", "neutral"])("ignores %s by default", (conclusion) => {
-    const result = evaluate(
-      [done("optional", conclusion), done("build", "success")],
-      cfg(),
-    );
+    const result = evaluate([done("optional", conclusion), done("build", "success")], cfg());
     expect(result.outcome).toBe("success");
     expect(result.counts.ignored).toBe(1);
   });
 
-  it.each(["skipped", "neutral"])(
-    "fails on %s when the check is strict",
-    (conclusion) => {
-      const result = evaluate(
-        [done("build", conclusion)],
-        cfg({ strictChecks: ["build"] }),
-      );
-      expect(result.outcome).toBe("failure");
-      expect(result.summary).toContain("strictChecks");
-    },
-  );
+  it.each(["skipped", "neutral"])("fails on %s when the check is strict", (conclusion) => {
+    const result = evaluate([done("build", conclusion)], cfg({ strictChecks: ["build"] }));
+    expect(result.outcome).toBe("failure");
+    expect(result.summary).toContain("strictChecks");
+  });
 });
 
 describe("evaluate — strictChecks presence", () => {
   it("holds at pending when a strict check never reported", () => {
     // The failure mode this guards against: a workflow that did not trigger at
     // all reads as "nothing wrong" to a naive implementation.
-    const result = evaluate(
-      [done("build", "success")],
-      cfg({ strictChecks: ["security-scan"] }),
-    );
+    const result = evaluate([done("build", "success")], cfg({ strictChecks: ["security-scan"] }));
     expect(result.outcome).toBe("pending");
     expect(result.counts.missing).toBe(1);
     expect(result.summary).toContain("security-scan");
@@ -169,9 +149,7 @@ describe("evaluate — self-reference", () => {
       cfg(),
     );
     expect(result.outcome).toBe("success");
-    expect(result.checks.map((c) => c.name)).not.toContain(
-      WHITE_GLOVE_CHECK_NAME,
-    );
+    expect(result.checks.map((c) => c.name)).not.toContain(WHITE_GLOVE_CHECK_NAME);
   });
 });
 
@@ -197,39 +175,27 @@ describe("evaluate — defensive cases", () => {
   });
 
   it("still blocks on missing strict checks when nothing else ran", () => {
-    expect(evaluate([], cfg({ strictChecks: ["build"] })).outcome).toBe(
-      "pending",
-    );
+    expect(evaluate([], cfg({ strictChecks: ["build"] })).outcome).toBe("pending");
   });
 
   it("does not let duplicate names mask a failure", () => {
     // Two apps may publish the same check name; failure must still win.
-    const result = evaluate(
-      [done("build", "success"), done("build", "failure")],
-      cfg(),
-    );
+    const result = evaluate([done("build", "success"), done("build", "failure")], cfg());
     expect(result.outcome).toBe("failure");
   });
 });
 
 describe("evaluate — output", () => {
   it("puts actionable items first in the summary", () => {
-    const result = evaluate(
-      [done("z-pass", "success"), done("a-fail", "failure")],
-      cfg(),
-    );
-    expect(result.summary.indexOf("a-fail")).toBeLessThan(
-      result.summary.indexOf("z-pass"),
-    );
+    const result = evaluate([done("z-pass", "success"), done("a-fail", "failure")], cfg());
+    expect(result.summary.indexOf("a-fail")).toBeLessThan(result.summary.indexOf("z-pass"));
   });
 
   it("pluralises titles correctly", () => {
-    expect(evaluate([done("a", "failure")], cfg()).title).toBe(
-      "1 check failing",
+    expect(evaluate([done("a", "failure")], cfg()).title).toBe("1 check failing");
+    expect(evaluate([done("a", "failure"), done("b", "failure")], cfg()).title).toBe(
+      "2 checks failing",
     );
-    expect(
-      evaluate([done("a", "failure"), done("b", "failure")], cfg()).title,
-    ).toBe("2 checks failing");
   });
 });
 

@@ -22,9 +22,7 @@ describe("isRequestRejection", () => {
 
   it("recognises a bare signature failure", () => {
     expect(
-      isRequestRejection(
-        Object.assign(new Error("signature does not match"), { status: 400 }),
-      ),
+      isRequestRejection(Object.assign(new Error("signature does not match"), { status: 400 })),
     ).toBe(true);
   });
 

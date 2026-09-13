@@ -40,10 +40,7 @@ export function pathMatches(file: string, pattern: string): boolean {
   return f === p;
 }
 
-export function decide(
-  request: ApprovalRequest,
-  config: AutoApprovalConfig,
-): ApprovalDecision {
+export function decide(request: ApprovalRequest, config: AutoApprovalConfig): ApprovalDecision {
   if (!config.enabled) {
     return { approve: false, reason: "auto-approval is disabled" };
   }
@@ -58,9 +55,7 @@ export function decide(
   }
 
   const author = request.author.toLowerCase();
-  const trusted = config.allowedActors.some(
-    (actor) => actor.trim().toLowerCase() === author,
-  );
+  const trusted = config.allowedActors.some((actor) => actor.trim().toLowerCase() === author);
 
   if (!trusted) {
     return {

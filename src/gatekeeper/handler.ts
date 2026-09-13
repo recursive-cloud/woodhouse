@@ -9,12 +9,7 @@ import type { Logger } from "pino";
 import type { ConfigResolver } from "../config/resolver.js";
 import type { GatekeeperConfig } from "../config/schema.js";
 import { KeyedMutex } from "../lib/mutex.js";
-import {
-  evaluate,
-  type CheckRunLike,
-  type EvaluateOptions,
-  type Evaluation,
-} from "./evaluate.js";
+import { evaluate, type CheckRunLike, type EvaluateOptions, type Evaluation } from "./evaluate.js";
 import { WHITE_GLOVE_CHECK_NAME, WHITE_GLOVE_TITLE } from "./constants.js";
 
 type AnyOctokit = Context<"check_run">["octokit"];
@@ -28,9 +23,7 @@ const mutex = new KeyedMutex();
 const MAX_SUMMARY = 60_000;
 
 function truncate(text: string): string {
-  return text.length <= MAX_SUMMARY
-    ? text
-    : `${text.slice(0, MAX_SUMMARY)}\n\n_(truncated)_`;
+  return text.length <= MAX_SUMMARY ? text : `${text.slice(0, MAX_SUMMARY)}\n\n_(truncated)_`;
 }
 
 /**
@@ -103,8 +96,10 @@ async function upsertCheck(
         };
 
   if (dryRun) {
-    log.info({ sha, outcome: evaluation.outcome, dryRun: true },
-      "DRY_RUN: would write white-glove check");
+    log.info(
+      { sha, outcome: evaluation.outcome, dryRun: true },
+      "DRY_RUN: would write white-glove check",
+    );
     return;
   }
 
@@ -168,12 +163,7 @@ export async function reconcile(
   options: EvaluateOptions = {},
 ): Promise<ReconcileResult | undefined> {
   return mutex.run(`${owner}/${repo}@${sha}`, async () => {
-    const { config } = await deps.resolver.resolve(
-      deps.octokit as never,
-      owner,
-      repo,
-      deps.log,
-    );
+    const { config } = await deps.resolver.resolve(deps.octokit as never, owner, repo, deps.log);
 
     const gatekeeper: GatekeeperConfig = config.gatekeeper;
     if (!gatekeeper.enabled) {
@@ -194,15 +184,7 @@ export async function reconcile(
       "Evaluated commit",
     );
 
-    await upsertCheck(
-      deps.octokit,
-      owner,
-      repo,
-      sha,
-      evaluation,
-      deps.log,
-      deps.dryRun,
-    );
+    await upsertCheck(deps.octokit, owner, repo, sha, evaluation, deps.log, deps.dryRun);
     return { evaluation, gatekeeper };
   });
 }

@@ -45,10 +45,7 @@ function messageOf(error: unknown): string {
  * Repository core settings
  * ---------------------------------------------------------------------- */
 
-async function applyRepository(
-  ctx: ApplyContext,
-  config: WoodhouseConfig,
-): Promise<Change[]> {
+async function applyRepository(ctx: ApplyContext, config: WoodhouseConfig): Promise<Change[]> {
   const { data: current } = await ctx.octokit.repos.get({
     owner: ctx.owner,
     repo: ctx.repo,
@@ -79,15 +76,12 @@ async function applyRepository(
     changes.push({
       resource: "repository",
       action: "update",
-      detail: Object.keys(patch).sort().join(", "),
+      detail: Object.keys(patch).toSorted().join(", "),
     });
   }
 
   const desiredTopics = config.repository.topics;
-  if (
-    desiredTopics !== undefined &&
-    topicsDiffer(current.topics ?? [], desiredTopics)
-  ) {
+  if (desiredTopics !== undefined && topicsDiffer(current.topics ?? [], desiredTopics)) {
     if (!ctx.dryRun) {
       await ctx.octokit.repos.replaceAllTopics({
         owner: ctx.owner,
@@ -110,16 +104,19 @@ async function applyRepository(
  * Labels
  * ---------------------------------------------------------------------- */
 
-async function applyLabels(
-  ctx: ApplyContext,
-  config: WoodhouseConfig,
-): Promise<Change[]> {
+/** GitHub wants six hex digits with no leading `#`. */
+function colour(value: string | undefined): string | undefined {
+  return value?.replace(/^#/, "").toLowerCase();
+}
+
+async function applyLabels(ctx: ApplyContext, config: WoodhouseConfig): Promise<Change[]> {
   if (config.labels.length === 0 && !config.settings.pruneLabels) return [];
 
-  const existing = await ctx.octokit.paginate(
-    ctx.octokit.issues.listLabelsForRepo,
-    { owner: ctx.owner, repo: ctx.repo, per_page: 100 },
-  );
+  const existing = await ctx.octokit.paginate(ctx.octokit.issues.listLabelsForRepo, {
+    owner: ctx.owner,
+    repo: ctx.repo,
+    per_page: 100,
+  });
 
   const plan = planLabels(
     existing.map((l) => ({
@@ -133,7 +130,6 @@ async function applyLabels(
 
   const changes: Change[] = [];
   const base = { owner: ctx.owner, repo: ctx.repo };
-  const colour = (c: string | undefined) => c?.replace(/^#/, "").toLowerCase();
 
   for (const label of plan.create) {
     if (!ctx.dryRun) {
@@ -141,9 +137,7 @@ async function applyLabels(
         ...base,
         name: label.name,
         ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
-        ...(label.description !== undefined
-          ? { description: label.description }
-          : {}),
+        ...(label.description !== undefined ? { description: label.description } : {}),
       });
     }
     changes.push({ resource: "label", action: "create", detail: label.name });
@@ -156,9 +150,7 @@ async function applyLabels(
         name: label.from!,
         new_name: label.name,
         ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
-        ...(label.description !== undefined
-          ? { description: label.description }
-          : {}),
+        ...(label.description !== undefined ? { description: label.description } : {}),
       });
     }
     changes.push({
@@ -175,9 +167,7 @@ async function applyLabels(
         name: label.name,
         new_name: label.name,
         ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
-        ...(label.description !== undefined
-          ? { description: label.description }
-          : {}),
+        ...(label.description !== undefined ? { description: label.description } : {}),
       });
     }
     changes.push({ resource: "label", action: "update", detail: label.name });
@@ -240,13 +230,10 @@ async function applyBranchProtection(
             : {}),
           ...(protection.required_conversation_resolution !== undefined
             ? {
-                required_conversation_resolution:
-                  protection.required_conversation_resolution,
+                required_conversation_resolution: protection.required_conversation_resolution,
               }
             : {}),
-          ...(protection.lock_branch !== undefined
-            ? { lock_branch: protection.lock_branch }
-            : {}),
+          ...(protection.lock_branch !== undefined ? { lock_branch: protection.lock_branch } : {}),
           ...(protection.block_creations !== undefined
             ? { block_creations: protection.block_creations }
             : {}),
@@ -275,16 +262,14 @@ async function applyBranchProtection(
  * Rulesets
  * ---------------------------------------------------------------------- */
 
-async function applyRulesets(
-  ctx: ApplyContext,
-  config: WoodhouseConfig,
-): Promise<Change[]> {
+async function applyRulesets(ctx: ApplyContext, config: WoodhouseConfig): Promise<Change[]> {
   if (config.rulesets.length === 0 && !config.settings.pruneRulesets) return [];
 
-  const existing = await ctx.octokit.paginate(
-    "GET /repos/{owner}/{repo}/rulesets",
-    { owner: ctx.owner, repo: ctx.repo, per_page: 100 },
-  );
+  const existing = await ctx.octokit.paginate("GET /repos/{owner}/{repo}/rulesets", {
+    owner: ctx.owner,
+    repo: ctx.repo,
+    per_page: 100,
+  });
 
   const plan = planRulesets(
     (existing as { id: number; name: string }[]).map((r) => ({
@@ -317,15 +302,12 @@ async function applyRulesets(
 
   for (const { id, ruleset } of plan.update) {
     if (!ctx.dryRun) {
-      await ctx.octokit.request(
-        "PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}",
-        {
-          owner: ctx.owner,
-          repo: ctx.repo,
-          ruleset_id: id,
-          ...ruleset,
-        } as never,
-      );
+      await ctx.octokit.request("PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
+        owner: ctx.owner,
+        repo: ctx.repo,
+        ruleset_id: id,
+        ...ruleset,
+      } as never);
     }
     changes.push({
       resource: "ruleset",
@@ -336,10 +318,11 @@ async function applyRulesets(
 
   for (const { id, name } of plan.delete) {
     if (!ctx.dryRun) {
-      await ctx.octokit.request(
-        "DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}",
-        { owner: ctx.owner, repo: ctx.repo, ruleset_id: id },
-      );
+      await ctx.octokit.request("DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
+        owner: ctx.owner,
+        repo: ctx.repo,
+        ruleset_id: id,
+      });
     }
     changes.push({ resource: "ruleset", action: "delete", detail: name });
   }
@@ -374,11 +357,9 @@ const APPLIERS: {
  */
 export function describeForbidden(applier: string, message: string): string {
   // GitHub's own wording for the plan case is the clearest signal available.
-  const looksLikePlanLimit =
-    /upgrade|not available|plan|public repositor/i.test(message);
+  const looksLikePlanLimit = /upgrade|not available|plan|public repositor/i.test(message);
 
-  const planSensitive =
-    applier === "branch-protection" || applier === "rulesets";
+  const planSensitive = applier === "branch-protection" || applier === "rulesets";
 
   if (planSensitive && looksLikePlanLimit) {
     return (

@@ -41,10 +41,7 @@ describe("schema and runtime agree", () => {
 
   it("both accept the shipped example", () => {
     const doc = yaml.load(
-      readFileSync(
-        fileURLToPath(new URL("../woodhouse.example.yml", import.meta.url)),
-        "utf8",
-      ),
+      readFileSync(fileURLToPath(new URL("../woodhouse.example.yml", import.meta.url)), "utf8"),
     );
     expect(bothAccept(doc)).toEqual({ schema: true, runtime: true });
   });
@@ -91,10 +88,14 @@ describe("schema and runtime agree", () => {
   });
 
   it("both accept a bot login and reject a slashed one", () => {
-    expect(bothAccept({ autoApproval: { allowedActors: ["renovate[bot]"] } }))
-      .toEqual({ schema: true, runtime: true });
-    expect(bothAccept({ autoApproval: { allowedActors: ["org/team"] } }))
-      .toEqual({ schema: false, runtime: false });
+    expect(bothAccept({ autoApproval: { allowedActors: ["renovate[bot]"] } })).toEqual({
+      schema: true,
+      runtime: true,
+    });
+    expect(bothAccept({ autoApproval: { allowedActors: ["org/team"] } })).toEqual({
+      schema: false,
+      runtime: false,
+    });
   });
 
   it("does not require fields that carry defaults", () => {

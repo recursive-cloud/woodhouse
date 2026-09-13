@@ -10,11 +10,7 @@
  * burn rate limit and fill the audit log with no-op events.
  */
 
-import type {
-  LabelConfig,
-  RepositoryConfig,
-  RulesetConfig,
-} from "../config/schema.js";
+import type { LabelConfig, RepositoryConfig, RulesetConfig } from "../config/schema.js";
 
 export interface Change {
   readonly resource: string;
@@ -54,16 +50,15 @@ export function diffRepositorySettings(
  * Topics
  * ---------------------------------------------------------------------- */
 
-/** Topics are a set; order and case are not significant to GitHub. */
-export function topicsDiffer(
-  current: readonly string[],
-  desired: readonly string[],
-): boolean {
-  const norm = (list: readonly string[]) =>
-    [...new Set(list.map((t) => t.toLowerCase()))].sort();
+/** Lowercased, de-duplicated and ordered, so two topic lists can be compared. */
+function normaliseTopics(list: readonly string[]): string[] {
+  return [...new Set(list.map((t) => t.toLowerCase()))].toSorted();
+}
 
-  const a = norm(current);
-  const b = norm(desired);
+/** Topics are a set; order and case are not significant to GitHub. */
+export function topicsDiffer(current: readonly string[], desired: readonly string[]): boolean {
+  const a = normaliseTopics(current);
+  const b = normaliseTopics(desired);
   return a.length !== b.length || a.some((t, i) => t !== b[i]);
 }
 
@@ -122,12 +117,10 @@ export function planLabels(
     claimed.add(target.name.toLowerCase());
 
     const colourChanged =
-      label.color !== undefined &&
-      normaliseColour(label.color) !== normaliseColour(target.color);
+      label.color !== undefined && normaliseColour(label.color) !== normaliseColour(target.color);
 
     const descriptionChanged =
-      label.description !== undefined &&
-      label.description !== (target.description ?? "");
+      label.description !== undefined && label.description !== (target.description ?? "");
 
     // Casing-only differences still warrant an update; GitHub preserves case.
     const caseChanged = label.name !== target.name;

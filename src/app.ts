@@ -53,8 +53,7 @@ export function createApp(options: AppOptions) {
 
       const touchedConfig = payload.commits.some((commit) =>
         [...commit.added, ...commit.modified, ...commit.removed].some(
-          (path) =>
-            path.endsWith("woodhouse.yml") || path.endsWith("woodhouse.yaml"),
+          (path) => path.endsWith("woodhouse.yml") || path.endsWith("woodhouse.yaml"),
         ),
       );
 
@@ -94,45 +93,37 @@ export function createApp(options: AppOptions) {
     });
 
     // ------------------------------------------------------------ gatekeeper
-    guarded.on(
-      "check_run.completed",
-      "white-glove:check_run",
-      async (context, scope) => {
-        if (scope.repo === undefined) return;
+    guarded.on("check_run.completed", "white-glove:check_run", async (context, scope) => {
+      if (scope.repo === undefined) return;
 
-        // Reacting to our own completion would loop forever.
-        if (isSelfCheck(context.payload.check_run.name)) return;
+      // Reacting to our own completion would loop forever.
+      if (isSelfCheck(context.payload.check_run.name)) return;
 
-        const sha = context.payload.check_run.head_sha;
+      const sha = context.payload.check_run.head_sha;
 
-        // A check run has just completed, so the commit demonstrably has
-        // checks: there is no empty-set ambiguity to guard against here.
-        await reconcile(
-          { octokit: context.octokit, ...deps(scope.log) },
-          scope.owner,
-          scope.repo,
-          sha,
-        );
-      },
-    );
+      // A check run has just completed, so the commit demonstrably has
+      // checks: there is no empty-set ambiguity to guard against here.
+      await reconcile(
+        { octokit: context.octokit, ...deps(scope.log) },
+        scope.owner,
+        scope.repo,
+        sha,
+      );
+    });
 
     // A suite can complete having produced no check runs at all - for example
     // when every workflow was filtered out by `paths`. Without this the grace
     // period would be the only thing resolving that case.
-    guarded.on(
-      "check_suite.completed",
-      "white-glove:check_suite",
-      async (context, scope) => {
-        if (scope.repo === undefined) return;
+    guarded.on("check_suite.completed", "white-glove:check_suite", async (context, scope) => {
+      if (scope.repo === undefined) return;
 
-        await reconcile(
-          { octokit: context.octokit, ...deps(scope.log) },
-          scope.owner,
-          scope.repo,
-          context.payload.check_suite.head_sha,
-        );
-      },
-    );
+      await reconcile(
+        { octokit: context.octokit, ...deps(scope.log) },
+        scope.owner,
+        scope.repo,
+        context.payload.check_suite.head_sha,
+      );
+    });
 
     /**
      * Seed the check on a pull request, then look again once CI has had a
@@ -173,24 +164,14 @@ export function createApp(options: AppOptions) {
         `${scope.owner}/${scope.repo}@${sha}`,
         graceMs,
         async () => {
-          await reconcile(
-            { octokit, ...deps(scope.log) },
-            scope.owner,
-            scope.repo,
-            sha,
-          );
+          await reconcile({ octokit, ...deps(scope.log) }, scope.owner, scope.repo, sha);
         },
-        (error) =>
-          scope.log.error({ err: error, sha }, "Grace period recheck failed"),
+        (error) => scope.log.error({ err: error, sha }, "Grace period recheck failed"),
       );
     };
 
     guarded.on(
-      [
-        "pull_request.opened",
-        "pull_request.reopened",
-        "pull_request.synchronize",
-      ],
+      ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
       "white-glove:pull_request",
       async (context, scope) => {
         if (scope.repo === undefined) return;
@@ -272,11 +253,7 @@ export function createApp(options: AppOptions) {
 
     // --------------------------------------------------- config validation
     guarded.on(
-      [
-        "pull_request.opened",
-        "pull_request.reopened",
-        "pull_request.synchronize",
-      ],
+      ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
       "config-validation",
       async (context, scope) => {
         if (scope.repo === undefined) return;

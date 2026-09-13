@@ -28,10 +28,7 @@ export const CONFIG_CHECK_NAME = "woodhouse/config";
 export const COMMENT_MARKER = "<!-- woodhouse:config-validation -->";
 
 /** Any path this app would ever read as configuration. */
-const CONFIG_PATHS = new Set<string>([
-  ...LOCAL_PATHS,
-  ...BASELINE_PATHS.map((p) => p),
-]);
+const CONFIG_PATHS = new Set<string>([...LOCAL_PATHS, ...BASELINE_PATHS.map((p) => p)]);
 
 export function isConfigPath(path: string): boolean {
   return CONFIG_PATHS.has(path);
@@ -61,10 +58,7 @@ export function validateDocument(path: string, source: string): FileVerdict {
       issues: [
         {
           path: "(document)",
-          message:
-            error instanceof yaml.YAMLException
-              ? error.reason
-              : String(error),
+          message: error instanceof yaml.YAMLException ? error.reason : String(error),
         },
       ],
     };
@@ -82,10 +76,7 @@ export function summarise(verdicts: readonly FileVerdict[]): {
   title: string;
   summary: string;
 } {
-  const bad = verdicts.filter((v) => !v.ok) as Extract<
-    FileVerdict,
-    { ok: false }
-  >[];
+  const bad = verdicts.filter((v) => !v.ok) as Extract<FileVerdict, { ok: false }>[];
 
   if (bad.length === 0) {
     return {
@@ -98,10 +89,7 @@ export function summarise(verdicts: readonly FileVerdict[]): {
     };
   }
 
-  const lines: string[] = [
-    "The following problems must be fixed before this can be merged:",
-    "",
-  ];
+  const lines: string[] = ["The following problems must be fixed before this can be merged:", ""];
 
   for (const verdict of bad) {
     lines.push(
@@ -186,10 +174,12 @@ async function syncComment(
   let existing: number | undefined;
 
   try {
-    const comments = await deps.octokit.paginate(
-      deps.octokit.issues.listComments,
-      { owner, repo, issue_number: prNumber, per_page: 100 },
-    );
+    const comments = await deps.octokit.paginate(deps.octokit.issues.listComments, {
+      owner,
+      repo,
+      issue_number: prNumber,
+      per_page: 100,
+    });
     existing = comments.find((c) => c.body?.includes(COMMENT_MARKER))?.id;
   } catch (error) {
     // The check run is the authoritative signal; failing to manage a comment
@@ -229,10 +219,7 @@ async function syncComment(
       });
     }
   } catch (error) {
-    deps.log.warn(
-      { err: error, pr: prNumber },
-      "Could not write configuration comment",
-    );
+    deps.log.warn({ err: error, pr: prNumber }, "Could not write configuration comment");
   }
 }
 
@@ -250,9 +237,7 @@ export async function validatePullRequest(
     per_page: 100,
   });
 
-  const touched = files.filter(
-    (file) => isConfigPath(file.filename) && file.status !== "removed",
-  );
+  const touched = files.filter((file) => isConfigPath(file.filename) && file.status !== "removed");
 
   if (touched.length === 0) return undefined;
 
@@ -272,10 +257,7 @@ export async function validatePullRequest(
     if (blob.type !== "file" || typeof blob.content !== "string") continue;
 
     verdicts.push(
-      validateDocument(
-        file.filename,
-        Buffer.from(blob.content, "base64").toString("utf8"),
-      ),
+      validateDocument(file.filename, Buffer.from(blob.content, "base64").toString("utf8")),
     );
   }
 

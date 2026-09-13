@@ -19,9 +19,10 @@ describe("resolveOwner", () => {
   });
 
   it("falls back to the installation account", () => {
-    expect(
-      resolveOwner({ installation: { account: { login: "acct" } } }),
-    ).toEqual({ owner: "acct", source: "installation.account.login" });
+    expect(resolveOwner({ installation: { account: { login: "acct" } } })).toEqual({
+      owner: "acct",
+      source: "installation.account.login",
+    });
   });
 
   it("never derives the owner from sender", () => {
@@ -38,8 +39,7 @@ describe("resolveOwner", () => {
   );
 
   it("ignores blank logins", () => {
-    expect(resolveOwner({ repository: { owner: { login: "   " } } }).owner)
-      .toBeUndefined();
+    expect(resolveOwner({ repository: { owner: { login: "   " } } }).owner).toBeUndefined();
   });
 });
 

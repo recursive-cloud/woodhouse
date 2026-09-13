@@ -25,9 +25,7 @@ interface MaybePayload {
 }
 
 function asLogin(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== ""
-    ? value.trim()
-    : undefined;
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 }
 
 /**
@@ -97,7 +95,7 @@ export class Allowlist {
 
   /** Describe the allowlist for startup logging. Safe to emit; not a secret. */
   describe(): string[] {
-    return [...this.targets].sort();
+    return [...this.targets].toSorted();
   }
 
   check(payload: unknown): AllowlistDecision {

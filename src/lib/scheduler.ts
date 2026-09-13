@@ -16,10 +16,7 @@ export interface ScheduledTask {
 }
 
 export class Scheduler {
-  private readonly timers = new Map<
-    string,
-    { timer: NodeJS.Timeout; runAt: number }
-  >();
+  private readonly timers = new Map<string, { timer: NodeJS.Timeout; runAt: number }>();
 
   get size(): number {
     return this.timers.size;

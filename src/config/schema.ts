@@ -26,10 +26,7 @@ const githubLogin = z
   .min(1, "must not be empty")
   .max(255)
   // GitHub logins plus bot suffixes, e.g. "renovate[bot]".
-  .regex(
-    /^[A-Za-z0-9-_.]+(\[bot\])?$/,
-    'must be a GitHub login, optionally suffixed with "[bot]"',
-  );
+  .regex(/^[A-Za-z0-9-_.]+(\[bot\])?$/, 'must be a GitHub login, optionally suffixed with "[bot]"');
 
 export const gatekeeperSchema = z
   .object({
@@ -103,12 +100,8 @@ export const repositorySchema = z
     allow_auto_merge: z.boolean().optional(),
     delete_branch_on_merge: z.boolean().optional(),
     allow_update_branch: z.boolean().optional(),
-    squash_merge_commit_title: z
-      .enum(["PR_TITLE", "COMMIT_OR_PR_TITLE"])
-      .optional(),
-    squash_merge_commit_message: z
-      .enum(["PR_BODY", "COMMIT_MESSAGES", "BLANK"])
-      .optional(),
+    squash_merge_commit_title: z.enum(["PR_TITLE", "COMMIT_OR_PR_TITLE"]).optional(),
+    squash_merge_commit_message: z.enum(["PR_BODY", "COMMIT_MESSAGES", "BLANK"]).optional(),
     description: z.string().optional(),
     homepage: z.string().optional(),
     topics: z.array(z.string().trim().min(1)).optional(),
@@ -206,9 +199,7 @@ export const rulesetSchema = z
       )
       .optional(),
     conditions: z.record(z.string(), z.unknown()).optional(),
-    rules: z
-      .array(z.object({ type: z.string().trim().min(1) }).passthrough())
-      .default([]),
+    rules: z.array(z.object({ type: z.string().trim().min(1) }).passthrough()).default([]),
   })
   .strict();
 

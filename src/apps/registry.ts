@@ -21,7 +21,6 @@ import type { Logger } from "pino";
 import { Allowlist } from "../security/allowlist.js";
 import { createApp } from "../app.js";
 import { ConfigurationError, parseAllowedTargets } from "../lib/env.js";
-import { DEFAULT_BASELINE_REPO } from "../config/resolver.js";
 
 /** One App as described by the configuration file. */
 const appDefinitionSchema = z
@@ -30,11 +29,8 @@ const appDefinitionSchema = z
     // the single most likely mistake here. Normalise it so the targeted
     // message in `resolveDefinitions` fires instead of a bare schema error.
     appId: z.preprocess(
-      (value) =>
-        typeof value === "number" && Number.isNaN(value) ? undefined : value,
-      z
-        .union([z.number().int().positive(), z.string().trim().min(1)])
-        .optional(),
+      (value) => (typeof value === "number" && Number.isNaN(value) ? undefined : value),
+      z.union([z.number().int().positive(), z.string().trim().min(1)]).optional(),
     ),
     privateKey: z.string().trim().min(1),
     webhookSecret: z.string().trim().min(1),
@@ -109,9 +105,7 @@ export function loadAppDefinitions(
 
   // Tolerate `export default` shapes from a transpiled file.
   const factory =
-    typeof loaded === "function"
-      ? loaded
-      : (loaded as { default?: unknown } | null)?.default;
+    typeof loaded === "function" ? loaded : (loaded as { default?: unknown } | null)?.default;
 
   if (typeof factory !== "function") {
     throw new ConfigurationError(
@@ -125,9 +119,7 @@ export function loadAppDefinitions(
     produced = (factory as (e: NodeJS.ProcessEnv) => unknown)(env);
   } catch (error) {
     throw new ConfigurationError(
-      `App configuration function threw: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `App configuration function threw: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
@@ -212,9 +204,7 @@ export function resolveDefinitions(
 
     // Each App must end up with an allowlist, from its own definition or the
     // global default. Without one there is no boundary at all.
-    const targets =
-      definition.allowedInstallationTargets ??
-      defaults.allowedInstallationTargets;
+    const targets = definition.allowedInstallationTargets ?? defaults.allowedInstallationTargets;
 
     if (targets === undefined || targets.length === 0) {
       throw new ConfigurationError(

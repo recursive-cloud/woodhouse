@@ -30,8 +30,7 @@ export type GuardedHandler<E extends EmitterWebhookEventName> = (
 ) => Promise<void> | void;
 
 function repoName(payload: unknown): string | undefined {
-  const name = (payload as { repository?: { name?: unknown } } | null)
-    ?.repository?.name;
+  const name = (payload as { repository?: { name?: unknown } } | null)?.repository?.name;
   return typeof name === "string" ? name : undefined;
 }
 

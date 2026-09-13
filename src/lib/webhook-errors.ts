@@ -19,9 +19,6 @@ export function isRequestRejection(error: unknown): boolean {
     const status = (candidate as { status?: unknown } | null)?.status;
     if (status === 400) return true;
     const message = (candidate as { message?: unknown } | null)?.message;
-    return (
-      typeof message === "string" && message.includes("signature does not match")
-    );
+    return typeof message === "string" && message.includes("signature does not match");
   });
 }
-

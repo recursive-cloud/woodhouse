@@ -11,8 +11,7 @@ function isPlainObject(value: unknown): value is Plain {
     value !== null &&
     !Array.isArray(value) &&
     Object.getPrototypeOf(value) !== null &&
-    (Object.getPrototypeOf(value) === Object.prototype ||
-      Object.getPrototypeOf(value) === null)
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
   );
 }
 
@@ -57,8 +56,5 @@ export function deepMerge<T>(base: unknown, override: unknown): T {
 
 /** Merge an ordered list of layers, lowest precedence first. */
 export function mergeLayers<T>(layers: readonly unknown[]): T {
-  return layers.reduce<unknown>(
-    (acc, layer) => deepMerge(acc, layer),
-    {},
-  ) as T;
+  return layers.reduce<unknown>((acc, layer) => deepMerge(acc, layer), {}) as T;
 }

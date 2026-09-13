@@ -16,19 +16,17 @@ const notFound = Object.assign(new Error("Not Found"), { status: 404 });
 
 /** Serves file contents from a `repo:path` map; 404s for anything else. */
 function fakeClient(files: Record<string, string>) {
-  const getContent = vi.fn(
-    async ({ repo, path }: { repo: string; path: string }) => {
-      const key = `${repo}:${path}`;
-      if (!(key in files)) throw notFound;
-      return {
-        data: {
-          type: "file",
-          encoding: "base64",
-          content: Buffer.from(files[key]!).toString("base64"),
-        },
-      };
-    },
-  );
+  const getContent = vi.fn(async ({ repo, path }: { repo: string; path: string }) => {
+    const key = `${repo}:${path}`;
+    if (!(key in files)) throw notFound;
+    return {
+      data: {
+        type: "file",
+        encoding: "base64",
+        content: Buffer.from(files[key]!).toString("base64"),
+      },
+    };
+  });
   return { client: { repos: { getContent } } as ContentsClient, getContent };
 }
 
@@ -62,12 +60,7 @@ describe("ConfigResolver — cascade", () => {
       "app:.github/woodhouse.yml": "repository:\n  has_wiki: false\n",
     });
 
-    const { config } = await new ConfigResolver().resolve(
-      client,
-      "acme",
-      "app",
-      fakeLogger(),
-    );
+    const { config } = await new ConfigResolver().resolve(client, "acme", "app", fakeLogger());
     expect(config.repository.has_wiki).toBe(false);
   });
 
@@ -104,12 +97,7 @@ describe("ConfigResolver — cascade", () => {
     const { client } = fakeClient({
       ".github-private:woodhouse.yaml": "repository:\n  has_wiki: false\n",
     });
-    const { sources } = await new ConfigResolver().resolve(
-      client,
-      "acme",
-      "app",
-      fakeLogger(),
-    );
+    const { sources } = await new ConfigResolver().resolve(client, "acme", "app", fakeLogger());
     expect(sources).toEqual(["acme/.github-private:woodhouse.yaml"]);
   });
 

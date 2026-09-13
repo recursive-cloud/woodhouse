@@ -9,21 +9,16 @@ import {
 import { SCHEMA_MODELINE } from "../src/config/json-schema.js";
 
 describe("isConfigPath", () => {
-  it.each([
-    ".github/woodhouse.yml",
-    ".github/woodhouse.yaml",
-    "woodhouse.yml",
-    "woodhouse.yaml",
-  ])("recognises %s", (path) => {
-    expect(isConfigPath(path)).toBe(true);
-  });
-
-  it.each(["src/woodhouse.yml", "README.md", ".github/dependabot.yml"])(
-    "ignores %s",
+  it.each([".github/woodhouse.yml", ".github/woodhouse.yaml", "woodhouse.yml", "woodhouse.yaml"])(
+    "recognises %s",
     (path) => {
-      expect(isConfigPath(path)).toBe(false);
+      expect(isConfigPath(path)).toBe(true);
     },
   );
+
+  it.each(["src/woodhouse.yml", "README.md", ".github/dependabot.yml"])("ignores %s", (path) => {
+    expect(isConfigPath(path)).toBe(false);
+  });
 });
 
 describe("validateDocument", () => {
@@ -48,10 +43,7 @@ describe("validateDocument", () => {
   });
 
   it("reports a schema error with a usable path", () => {
-    const verdict = validateDocument(
-      "woodhouse.yml",
-      "gatekeeper:\n  enabled: definitely\n",
-    );
+    const verdict = validateDocument("woodhouse.yml", "gatekeeper:\n  enabled: definitely\n");
     expect(verdict.ok).toBe(false);
     if (verdict.ok) return;
     expect(verdict.kind).toBe("schema");
@@ -59,21 +51,18 @@ describe("validateDocument", () => {
   });
 
   it("catches a misspelled key rather than ignoring it", () => {
-    const verdict = validateDocument(
-      "woodhouse.yml",
-      "autoApproval:\n  allowedActor:\n    - me\n",
-    );
+    const verdict = validateDocument("woodhouse.yml", "autoApproval:\n  allowedActor:\n    - me\n");
     expect(verdict.ok).toBe(false);
   });
 
   it("rejects settings that cannot be managed safely", () => {
     // `private` and `archived` are not in the schema on purpose.
-    expect(validateDocument("woodhouse.yml", "repository:\n  private: true\n").ok)
-      .toBe(false);
-    expect(validateDocument("woodhouse.yml", "repository:\n  archived: true\n").ok)
-      .toBe(false);
+    expect(validateDocument("woodhouse.yml", "repository:\n  private: true\n").ok).toBe(false);
+    expect(validateDocument("woodhouse.yml", "repository:\n  archived: true\n").ok).toBe(false);
   });
 });
+
+const badYaml = (path: string) => ({ path, ok: false, kind: "yaml", issues: [] }) as const;
 
 describe("summarise", () => {
   it("passes when every document is valid", () => {
@@ -98,11 +87,7 @@ describe("summarise", () => {
   });
 
   it("pluralises correctly", () => {
-    const bad = (path: string) =>
-      ({ path, ok: false, kind: "yaml", issues: [] }) as const;
-    expect(summarise([bad("a"), bad("b")]).title).toBe(
-      "2 configuration files invalid",
-    );
+    expect(summarise([badYaml("a"), badYaml("b")]).title).toBe("2 configuration files invalid");
   });
 });
 
