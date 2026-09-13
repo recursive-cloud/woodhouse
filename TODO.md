@@ -39,12 +39,20 @@ Deferred work, roughly in the order it is worth doing.
       mechanism is available on Free with a private repo. Now reported with an
       explanation instead of a bare 403; see `describeForbidden`.
 
-- [ ] **Always-on workflow as a second signal.** An alternative to the grace
-      period: have every managed repository carry a workflow that always runs,
-      so a commit never legitimately has zero checks. Best delivered by the
-      onboarding PR below rather than as a requirement, since it only works
-      once the repository is already managed, and the grace period already
-      covers the common case.
+## Before 1.0
+
+- [ ] **Distinguish owners from "the help" in auto-approval.** Split
+      `autoApproval.allowedActors` so human owners and everything else (bots,
+      service accounts) are recognised separately, and tailor the review
+      comment accordingly. For an owner, something in the register of "let me
+      get that for you, sir". For a bot, still addressed to the owner rather
+      than the bot: "sir, just letting you know I am letting the handyman in to
+      fix a few things".
+
+      Needs a decision on the config shape — most likely `allowedActors.owners`
+      and `allowedActors.staff`, with the current flat array still accepted so
+      existing configs keep working. Further customisation of the wording is a
+      post-1.0 stretch goal.
 
 ## Onboarding pull request
 
@@ -82,6 +90,14 @@ Deferred work, roughly in the order it is worth doing.
       and switch the compose deployment to a version tag once releases exist.
 
 ## Multi-App operation
+
+- [ ] **Consider deriving the allowlist from actual installations.** For a
+      private App, `GET /app/installations` is authoritative about which
+      accounts can send events, which would remove the allowlist from
+      configuration entirely for the common case. Rejected for now because it
+      would silently widen the boundary if an App were ever made public, and
+      installations change at runtime. Revisit only if configuring it proves
+      genuinely annoying.
 
 - [ ] **Per-App health and metrics.** `/healthz` reports the number of Apps
       served but says nothing about whether each is authenticating
