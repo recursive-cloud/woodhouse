@@ -10,6 +10,12 @@
  * `.strict()` is used throughout so that typos (`allowedActor` vs
  * `allowedActors`) are surfaced as errors instead of silently ignored — a
  * silently-dropped key in the auto-approval section would be a security bug.
+ *
+ * Sections use `.prefault({})` rather than `.default({})`: in zod 4 a default
+ * is the *output* value and would have to restate every field, whereas a
+ * prefault is fed through the schema so each field's own default applies. The
+ * effect is that omitting a whole section is identical to writing it out with
+ * every key left at its default.
  */
 
 import { z } from "zod";
@@ -63,7 +69,7 @@ export const gatekeeperSchema = z
     gracePeriodSeconds: z.number().int().min(0).max(900).default(30),
   })
   .strict()
-  .default({});
+  .prefault({});
 
 export const autoApprovalSchema = z
   .object({
@@ -83,7 +89,7 @@ export const autoApprovalSchema = z
       .default([".github/woodhouse.yml", ".github/woodhouse.yaml"]),
   })
   .strict()
-  .default({});
+  .prefault({});
 
 export const repositorySchema = z
   .object({
@@ -116,7 +122,7 @@ export const repositorySchema = z
     // repository you own. Change those two by hand.
   })
   .strict()
-  .default({});
+  .prefault({});
 
 /**
  * Classic branch protection, keyed by branch name.
@@ -199,7 +205,7 @@ export const rulesetSchema = z
           .strict(),
       )
       .optional(),
-    conditions: z.record(z.unknown()).optional(),
+    conditions: z.record(z.string(), z.unknown()).optional(),
     rules: z
       .array(z.object({ type: z.string().trim().min(1) }).passthrough())
       .default([]),
@@ -219,7 +225,7 @@ export const settingsSchema = z
     pruneRulesets: z.boolean().default(false),
   })
   .strict()
-  .default({});
+  .prefault({});
 
 export const woodhouseConfigSchema = z
   .object({
@@ -231,14 +237,14 @@ export const woodhouseConfigSchema = z
 
     settings: settingsSchema,
     repository: repositorySchema,
-    branchProtection: z.record(branchProtectionSchema).default({}),
+    branchProtection: z.record(z.string(), branchProtectionSchema).default({}),
     labels: z.array(labelSchema).default([]),
     rulesets: z.array(rulesetSchema).default([]),
     gatekeeper: gatekeeperSchema,
     autoApproval: autoApprovalSchema,
   })
   .strict()
-  .default({});
+  .prefault({});
 
 export type WoodhouseConfig = z.infer<typeof woodhouseConfigSchema>;
 export type GatekeeperConfig = WoodhouseConfig["gatekeeper"];

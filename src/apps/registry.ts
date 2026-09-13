@@ -47,7 +47,7 @@ const appDefinitionSchema = z
   })
   .strict();
 
-const appMapSchema = z.record(appDefinitionSchema);
+const appMapSchema = z.record(z.string(), appDefinitionSchema);
 
 export type AppDefinition = z.infer<typeof appDefinitionSchema>;
 
