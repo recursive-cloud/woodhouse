@@ -1,0 +1,40 @@
+# Local development toolchain. `mise install` sets all of this up.
+#
+# Node is pinned to the same major CI and the Docker image use, so a formatting
+# or lint difference is never down to a different runtime.
+
+[tools]
+node = "22"
+hk = "latest"
+# hk evaluates hk.pkl; pkl is its config language.
+pkl = "latest"
+
+[tasks.install]
+description = "Install dependencies and git hooks"
+run = ["npm ci", "hk install"]
+
+[tasks.test]
+description = "Run the unit tests"
+run = "npm test"
+
+[tasks.typecheck]
+run = "npm run typecheck"
+
+[tasks.lint]
+description = "Lint without modifying anything"
+run = "hk check"
+
+[tasks.fix]
+description = "Apply formatting and lint fixes"
+run = "hk fix"
+
+[tasks.build]
+run = "npm run build"
+
+[tasks.schema]
+description = "Regenerate the JSON Schema from the zod definitions"
+run = "npm run schema:generate"
+
+[tasks.ci]
+description = "Everything CI runs, in the same order"
+depends = ["lint", "typecheck", "test", "build"]

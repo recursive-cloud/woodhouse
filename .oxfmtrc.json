@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": ["**/*.md", "**/*.markdown", "dist/**", "schema/**", "package-lock.json"]
+}

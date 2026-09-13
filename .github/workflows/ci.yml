@@ -16,6 +16,27 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # Same oxfmt and oxlint versions as the pre-commit hook, since both
+      # resolve them from package-lock.json rather than a separate install.
+      - name: Format
+        run: npx oxfmt --check .
+
+      - name: Lint
+        run: npx oxlint
+
   test:
     name: Build and test
     runs-on: ubuntu-latest
@@ -48,7 +69,7 @@ jobs:
   image:
     name: Build and push image
     # Never publish an image that has not passed the suite.
-    needs: test
+    needs: [lint, test]
     # Pull requests from forks cannot access GHCR credentials, and publishing
     # an image for unreviewed code would be a poor idea regardless.
     if: github.event_name == 'push'

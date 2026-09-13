@@ -64,17 +64,31 @@ Deferred work, roughly in the order it is worth doing.
 
 ## Developer experience
 
-- [ ] **mise for local tooling.** Pin the Node version and expose the common
-      tasks (`test`, `lint`, `fmt`, `build`, `dev`) so they are identical
-      locally and in CI.
+- [x] **mise for local tooling** — done. `mise.toml` pins Node, hk and pkl, and
+      exposes `install`, `lint`, `fix`, `test`, `typecheck`, `build` and `ci`.
 
-- [ ] **oxfmt + oxlint.** Formatting and linting, wired into pre-commit via
-      [hk](https://hk.jdx.dev/) against staged files only. Deliberately do not
-      gate the commit on the test suite — tests belong in CI on the PR, and a
-      slow pre-commit hook is a hook people start bypassing with `--no-verify`.
+- [x] **oxfmt + oxlint via hk pre-commit** — done, staged files only, with the
+      test suite and type checker deliberately left to CI.
 
-- [ ] **Add lint to CI** once oxlint is configured, as a separate job from the
-      test suite.
+- [x] **Add lint to CI** — done, as its own job that the image build also
+      depends on.
+
+- [ ] **Re-enable Markdown formatting when oxfmt stabilises.** Markdown is in
+      `.oxfmtrc.json`'s ignore list because oxfmt 0.67 does not converge on a
+      list item containing a second paragraph: it re-indents the continuation
+      lines on every run, so `check` fails immediately after `fix` and the hook
+      would rewrite docs on alternate commits. Worth retrying at 1.0, and worth
+      reporting upstream.
+
+- [ ] **Slower linters on pre-push.** `hk init` detected actionlint, hadolint,
+      zizmor and dclint as applicable here. All are useful and none are fast
+      enough for pre-commit; `pre-push` is the right home, with CI as backstop.
+
+- [ ] **Revisit the oxlint categories.** `correctness`, `suspicious` and `perf`
+      are enabled. `pedantic` produced 127 findings and was not adopted; it may
+      be worth working through selectively. `no-await-in-loop` is off because
+      the sequential API calls in `settings/apply.ts` are deliberate — they
+      pace writes against rate limits and keep ruleset application last.
 
 ## Releases
 

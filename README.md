@@ -303,11 +303,37 @@ settings sync is allowed to write anything.
 
 ## Development
 
+[mise](https://mise.jdx.dev) pins the toolchain and exposes the common tasks:
+
+```bash
+mise install      # Node, hk, pkl, then npm ci and the git hooks
+mise run ci       # lint, typecheck, test, build - exactly what CI runs
+mise run fix      # apply formatting and lint fixes
+```
+
+Without mise, the npm scripts work directly:
+
 ```bash
 npm test          # unit tests
 npm run typecheck
+npm run lint      # oxlint
+npm run format    # oxfmt --check
 npm run build
 ```
+
+### Pre-commit
+
+`mise install` sets up a [hk](https://hk.jdx.dev) pre-commit hook that runs
+oxfmt and oxlint over staged files, fixing what it can. Unstaged work is
+stashed for the duration, so a partially staged file is checked as staged
+rather than picking up changes that were not meant for the commit.
+
+The hook deliberately does **not** run the test suite or the type checker.
+Both are enforced in CI on the pull request, and a hook slow enough to notice
+is one that gets bypassed with `--no-verify`. Slower checks added later belong
+in `pre-push`.
+
+`HK=0 git commit` skips it when you genuinely need to.
 
 The interesting logic is deliberately pure and separated from the API calls:
 `gatekeeper/evaluate.ts`, `settings/plan.ts` and `approval/policy.ts` are all

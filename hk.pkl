@@ -1,0 +1,48 @@
+amends "package://github.com/jdx/hk/releases/download/v1.58.1/hk@1.58.1#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.58.1/hk@1.58.1#/Builtins.pkl"
+
+// Formatting and linting only. Deliberately *not* the test suite or the type
+// checker: a pre-commit hook that takes seconds is a hook people start
+// bypassing with `--no-verify`, and both are already enforced in CI on the
+// pull request. oxfmt and oxlint are fast enough to go unnoticed.
+//
+// Slower checks added later (actionlint, hadolint, zizmor) should go in
+// pre-push rather than here.
+
+local linters = new Mapping<String, Step> {
+    // `npx` resolves the versions pinned in package-lock.json, so a commit
+    // formatted locally matches what CI checks. Installing these through mise
+    // instead would let the two drift.
+    ["oxfmt"] = (Builtins.oxfmt) {
+        prefix = List("npx")
+        // Exclusions live in .oxfmtrc.json rather than here, so that this
+        // hook and the `oxfmt --check .` CI runs on the same file set. Listing
+        // them in both places is how the two silently drift apart.
+    }
+    // Likewise, oxlint's ignores live in .oxlintrc.json.
+    ["oxlint"] = (Builtins.ox_lint) {
+        prefix = List("npx")
+    }
+}
+
+hooks {
+    ["pre-commit"] {
+        fix = true
+        // Unstaged work is stashed for the duration, so a partially staged
+        // file is formatted as staged rather than picking up changes that
+        // were never meant to be in this commit.
+        stash = "git"
+        steps = linters
+    }
+
+    // `hk check` — used by CI and `mise run lint`. Reports, changes nothing.
+    ["check"] {
+        steps = linters
+    }
+
+    // `hk fix` — used by `mise run fix`.
+    ["fix"] {
+        fix = true
+        steps = linters
+    }
+}
