@@ -8,24 +8,23 @@ Deferred work, roughly in the order it is worth doing.
 
 ## Configuration authoring
 
-- [ ] **Upgrade zod to v4.** Needed for native JSON Schema generation
-      (`z.toJSONSchema()`). v4 is a breaking change: `.strict()` becomes
-      `z.strictObject()`, `.passthrough()` becomes `z.looseObject()`, and the
-      `ZodError.issues` shape moves slightly — `src/config/schema.ts` and the
-      `parseConfig` issue mapping both need revisiting.
+- [x] **Upgrade zod to v4** — done. `.strict()` and `.passthrough()` turned out
+      to still work; the actual breaks were `z.record` needing an explicit key
+      type, and `.default({})` on a section now meaning the *output* value, for
+      which `.prefault({})` is the replacement.
 
-- [ ] **Publish a JSON Schema for `woodhouse.yml`.** Generate it from the zod
-      schema at build time so the two cannot drift, commit it to the repo, and
-      document the `yaml.schemas` setting (or a `# yaml-language-server:
-      $schema=` modeline) so editors validate before anything is pushed.
-      Depends on the zod v4 upgrade.
+- [x] **Publish a JSON Schema for `woodhouse.yml`** — done. Generated from the
+      zod definitions into `schema/woodhouse.schema.json`, with a CI check that
+      fails if it drifts, and a test asserting the schema and the runtime
+      validator accept and reject the same documents.
 
-- [ ] **Comment on pull requests with invalid configuration.** The
-      `woodhouse/config` check already validates and fails
-      (`src/settings/validate.ts`), which is enough to block a merge once it is
-      a required check. Still missing: an actual PR comment carrying the
-      validation errors, so the problem is visible without opening the Checks
-      tab. Should upsert a single comment rather than adding one per push.
+- [x] **Comment on pull requests with invalid configuration** — done. A single
+      comment, edited in place on each push and deleted once the file
+      validates.
+
+- [ ] **Offer the schema modeline on new config files.** The validation comment
+      suggests the `# yaml-language-server:` line, but nothing adds it. Best
+      handled by the onboarding PR, which is writing the file anyway.
 
 ## Findings from the first round of real testing
 

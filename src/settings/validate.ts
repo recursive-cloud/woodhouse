@@ -12,10 +12,20 @@ import type { Context } from "probot";
 import type { Logger } from "pino";
 import { parseConfig, type ValidationIssue } from "../config/schema.js";
 import { LOCAL_PATHS, BASELINE_PATHS } from "../config/resolver.js";
+import { SCHEMA_MODELINE } from "../config/json-schema.js";
 
 type Api = Context<"pull_request">["octokit"];
 
 export const CONFIG_CHECK_NAME = "woodhouse/config";
+
+/**
+ * Hidden marker identifying our own comment.
+ *
+ * Matching on the marker rather than on the author means the comment is found
+ * reliably even if the App is renamed, and cannot collide with a human comment
+ * that happens to quote the bot.
+ */
+export const COMMENT_MARKER = "<!-- woodhouse:config-validation -->";
 
 /** Any path this app would ever read as configuration. */
 const CONFIG_PATHS = new Set<string>([
@@ -119,6 +129,33 @@ export function summarise(verdicts: readonly FileVerdict[]): {
   };
 }
 
+/**
+ * The comment body posted while a configuration change is invalid.
+ *
+ * The check run already reports the failure, but a check is easy to miss and
+ * its output is one click away. Repeating the errors inline is what makes the
+ * problem actionable without leaving the conversation.
+ */
+export function buildComment(verdicts: readonly FileVerdict[]): string {
+  const { summary } = summarise(verdicts);
+
+  return [
+    COMMENT_MARKER,
+    "**Woodhouse here, sir. There is a problem with the configuration.**",
+    "",
+    summary,
+    "",
+    "---",
+    "",
+    "Add this line to the top of the file and your editor will validate it " +
+      "before the next push:",
+    "",
+    "```yaml",
+    SCHEMA_MODELINE,
+    "```",
+  ].join("\n");
+}
+
 export interface ValidateDeps {
   readonly octokit: Api;
   readonly log: Logger;
@@ -129,6 +166,76 @@ export interface ValidateDeps {
  * Fetch each config file touched by the PR at the PR's head and validate it.
  * Returns undefined when the PR touches no configuration at all.
  */
+/**
+ * Keep at most one comment on the pull request, and only while it is needed.
+ *
+ * Posting afresh on every push would bury a PR that takes a few attempts to
+ * fix, so the existing comment is edited in place instead. Once the
+ * configuration validates the comment is deleted outright: the check run
+ * records that it was ever wrong, and leaving a stale complaint on a
+ * now-correct pull request is worse than leaving nothing.
+ */
+async function syncComment(
+  deps: ValidateDeps,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  verdicts: readonly FileVerdict[],
+  conclusion: "success" | "failure",
+): Promise<void> {
+  let existing: number | undefined;
+
+  try {
+    const comments = await deps.octokit.paginate(
+      deps.octokit.issues.listComments,
+      { owner, repo, issue_number: prNumber, per_page: 100 },
+    );
+    existing = comments.find((c) => c.body?.includes(COMMENT_MARKER))?.id;
+  } catch (error) {
+    // The check run is the authoritative signal; failing to manage a comment
+    // must not fail the whole validation.
+    deps.log.warn({ err: error, pr: prNumber }, "Could not list PR comments");
+    return;
+  }
+
+  try {
+    if (conclusion === "success") {
+      if (existing !== undefined) {
+        await deps.octokit.issues.deleteComment({
+          owner,
+          repo,
+          comment_id: existing,
+        });
+        deps.log.info({ pr: prNumber }, "Configuration fixed; removed comment");
+      }
+      return;
+    }
+
+    const body = buildComment(verdicts);
+
+    if (existing === undefined) {
+      await deps.octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: prNumber,
+        body,
+      });
+    } else {
+      await deps.octokit.issues.updateComment({
+        owner,
+        repo,
+        comment_id: existing,
+        body,
+      });
+    }
+  } catch (error) {
+    deps.log.warn(
+      { err: error, pr: prNumber },
+      "Could not write configuration comment",
+    );
+  }
+}
+
 export async function validatePullRequest(
   deps: ValidateDeps,
   owner: string,
@@ -194,6 +301,8 @@ export async function validatePullRequest(
     completed_at: new Date().toISOString(),
     output: { title: result.title, summary: result.summary },
   });
+
+  await syncComment(deps, owner, repo, prNumber, verdicts, result.conclusion);
 
   deps.log.info(
     { pr: prNumber, files: verdicts.length, conclusion: result.conclusion },

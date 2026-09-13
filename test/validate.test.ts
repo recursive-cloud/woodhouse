@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildComment,
+  COMMENT_MARKER,
   isConfigPath,
   summarise,
   validateDocument,
 } from "../src/settings/validate.js";
+import { SCHEMA_MODELINE } from "../src/config/json-schema.js";
 
 describe("isConfigPath", () => {
   it.each([
@@ -100,5 +103,37 @@ describe("summarise", () => {
     expect(summarise([bad("a"), bad("b")]).title).toBe(
       "2 configuration files invalid",
     );
+  });
+});
+
+describe("buildComment", () => {
+  const broken = [
+    {
+      path: ".github/woodhouse.yml",
+      ok: false as const,
+      kind: "schema" as const,
+      issues: [{ path: "autoApproval.allowedActor", message: "Unrecognized key" }],
+    },
+  ];
+
+  it("carries the hidden marker so it can be found again", () => {
+    // Matched on the marker rather than the author, so renaming the App does
+    // not orphan comments.
+    expect(buildComment(broken)).toContain(COMMENT_MARKER);
+  });
+
+  it("repeats the errors inline", () => {
+    const body = buildComment(broken);
+    expect(body).toContain(".github/woodhouse.yml");
+    expect(body).toContain("autoApproval.allowedActor");
+  });
+
+  it("offers the schema modeline so the next push is checked locally", () => {
+    expect(buildComment(broken)).toContain(SCHEMA_MODELINE);
+    expect(buildComment(broken)).toContain("yaml-language-server");
+  });
+
+  it("addresses the owner", () => {
+    expect(buildComment(broken)).toMatch(/sir/i);
   });
 });

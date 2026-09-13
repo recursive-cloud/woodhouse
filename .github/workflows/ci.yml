@@ -40,6 +40,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The schema is generated from the zod definitions. If they disagree, an
+      # editor would bless a config the bot then rejects.
+      - name: Check the JSON Schema is up to date
+        run: npm run schema:check
+
   image:
     name: Build and push image
     # Never publish an image that has not passed the suite.

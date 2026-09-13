@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/recursive-cloud/woodhouse/main/schema/woodhouse.schema.json",
+  "title": "Woodhouse configuration",
+  "description": "Configuration for the Woodhouse GitHub App. Place at `.github/woodhouse.yml` in a repository, or `woodhouse.yml` in the owner's `.github-private` repository to set an owner-wide baseline.",
+  "default": {},
+  "type": "object",
+  "properties": {
+    "inherit": {
+      "default": true,
+      "type": "boolean"
+    },
+    "settings": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "pruneLabels": {
+          "default": false,
+          "type": "boolean"
+        },
+        "pruneRulesets": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "repository": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "has_issues": {
+          "type": "boolean"
+        },
+        "has_projects": {
+          "type": "boolean"
+        },
+        "has_wiki": {
+          "type": "boolean"
+        },
+        "has_discussions": {
+          "type": "boolean"
+        },
+        "allow_squash_merge": {
+          "type": "boolean"
+        },
+        "allow_merge_commit": {
+          "type": "boolean"
+        },
+        "allow_rebase_merge": {
+          "type": "boolean"
+        },
+        "allow_auto_merge": {
+          "type": "boolean"
+        },
+        "delete_branch_on_merge": {
+          "type": "boolean"
+        },
+        "allow_update_branch": {
+          "type": "boolean"
+        },
+        "squash_merge_commit_title": {
+          "type": "string",
+          "enum": [
+            "PR_TITLE",
+            "COMMIT_OR_PR_TITLE"
+          ]
+        },
+        "squash_merge_commit_message": {
+          "type": "string",
+          "enum": [
+            "PR_BODY",
+            "COMMIT_MESSAGES",
+            "BLANK"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "homepage": {
+          "type": "string"
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "branchProtection": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "required_status_checks": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "strict": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "contexts": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enforce_admins": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "required_pull_request_reviews": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "required_approving_review_count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6
+                  },
+                  "dismiss_stale_reviews": {
+                    "type": "boolean"
+                  },
+                  "require_code_owner_reviews": {
+                    "type": "boolean"
+                  },
+                  "require_last_push_approval": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "required_linear_history": {
+            "type": "boolean"
+          },
+          "allow_force_pushes": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "allow_deletions": {
+            "type": "boolean"
+          },
+          "required_conversation_resolution": {
+            "type": "boolean"
+          },
+          "lock_branch": {
+            "type": "boolean"
+          },
+          "block_creations": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "labels": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#?[0-9a-fA-F]{6}$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "rulesets": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "default": "branch",
+            "type": "string",
+            "enum": [
+              "branch",
+              "tag",
+              "push"
+            ]
+          },
+          "enforcement": {
+            "default": "active",
+            "type": "string",
+            "enum": [
+              "active",
+              "evaluate",
+              "disabled"
+            ]
+          },
+          "bypass_actors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "actor_id": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "actor_type": {
+                  "type": "string",
+                  "enum": [
+                    "Integration",
+                    "OrganizationAdmin",
+                    "RepositoryRole",
+                    "Team",
+                    "DeployKey"
+                  ]
+                },
+                "bypass_mode": {
+                  "type": "string",
+                  "enum": [
+                    "always",
+                    "pull_request"
+                  ]
+                }
+              },
+              "required": [
+                "actor_type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "conditions": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "rules": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "gatekeeper": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "strictChecks": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ignoredChecks": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "gracePeriodSeconds": {
+          "default": 30,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 900
+        }
+      },
+      "additionalProperties": false
+    },
+    "autoApproval": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "allowedActors": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[A-Za-z0-9-_.]+(\\[bot\\])?$"
+          }
+        },
+        "protectedPaths": {
+          "default": [
+            ".github/woodhouse.yml",
+            ".github/woodhouse.yaml"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

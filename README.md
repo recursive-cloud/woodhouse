@@ -79,7 +79,21 @@ the App installation, or Woodhouse cannot read them.
 Unknown keys are rejected. A misspelled `allowedActor` that silently did
 nothing would be a security problem, not a cosmetic one — so pull requests that
 touch a config file get a `woodhouse/config` check that validates the proposed
-content against the schema.
+content, and a comment spelling out what is wrong. The comment is edited in
+place as you push fixes, and removed once the file validates.
+
+### Editor validation
+
+Catch mistakes before pushing by adding this to the top of the file:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/recursive-cloud/woodhouse/main/schema/woodhouse.schema.json
+```
+
+That works in VS Code (with the YAML extension), Neovim and anything else
+speaking the YAML language server protocol. The schema is generated from the
+same zod definitions the bot validates with, and CI fails if the two drift, so
+your editor and the bot cannot disagree.
 
 ### Deliberate omissions
 
