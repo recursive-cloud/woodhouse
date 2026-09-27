@@ -79,17 +79,14 @@ Worth knowing before picking this up:
 ## Before 1.0
 
 - [ ] **Distinguish owners from "the help" in auto-approval.** Split
-      `autoApproval.allowedActors` so human owners and everything else (bots,
-      service accounts) are recognised separately, and tailor the review
-      comment accordingly. For an owner, something in the register of "let me
-      get that for you, sir". For a bot, still addressed to the owner rather
-      than the bot: "sir, just letting you know I am letting the handyman in to
-      fix a few things".
+      `autoApproval.allowedActors` into `owners` and `bots` groups and tailor
+      the review comment per class. Bots are approved only when *they* enabled
+      auto-merge; owners unconditionally. Full plan in
+      [`docs/owners-bots-auto-approval.md`](docs/owners-bots-auto-approval.md).
 
-      Needs a decision on the config shape — most likely `allowedActors.owners`
-      and `allowedActors.staff`, with the current flat array still accepted so
-      existing configs keep working. Further customisation of the wording is a
-      post-1.0 stretch goal.
+      The app is pre-release, so the legacy flat array is not carried forward —
+      existing configs are migrated by hand. Further customisation of the
+      wording is a post-1.0 stretch goal.
 
 ## Onboarding pull request
 
