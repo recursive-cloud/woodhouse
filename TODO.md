@@ -23,8 +23,6 @@ Worth knowing before picking this up:
   fixes land in `85cb24a`. Only the tip is pushed, so CI never saw it red, but
   `mise run ci` at that commit will fail. Every other commit is green in
   isolation.
-- `hk install --mise` is required rather than plain `hk install`, since hk is
-  mise-managed and is otherwise not on `PATH` inside the hook.
 
 ## Housekeeping
 
