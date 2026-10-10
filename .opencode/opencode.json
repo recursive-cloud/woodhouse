@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["list"],
+  "experimental": {
+    "policies": [
+      { "action": "permission", "resource": "subagent:*-free", "effect": "deny" },
+      { "action": "permission", "resource": "subagent:researcher-free", "effect": "allow" }
+    ]
+  }
+}

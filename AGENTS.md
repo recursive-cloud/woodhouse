@@ -1,6 +1,6 @@
 # Woodhouse
 Self-hosted GitHub App (Probot as a library): cascading settings sync, PR auto-approval, and the `woodhouse/white-glove` consolidated check. Private homelab, not multi-tenant.
-Confidential: no
+Sensitivity: private
 
 ## Commands
 - toolchain: `mise install` (Node 22, hk, pkl) then `mise run install` — `npm ci` and the git hooks
