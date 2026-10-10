@@ -10,3 +10,7 @@ coverage/
 
 # Local-only hk overrides (see hk.jdx.dev/configuration)
 hk.local.pkl
+.cortexkit/magic-context/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
