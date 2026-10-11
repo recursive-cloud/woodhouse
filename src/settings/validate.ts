@@ -11,8 +11,11 @@ import yaml from "js-yaml";
 import type { Context } from "probot";
 import type { Logger } from "pino";
 import { parseConfig, type ValidationIssue } from "../config/schema.js";
-import { LOCAL_PATHS, BASELINE_PATHS } from "../config/resolver.js";
+import { isSettingsPath } from "../config/paths.js";
 import { SCHEMA_MODELINE } from "../config/json-schema.js";
+import { listChangedFiles } from "../github/pulls.js";
+import { syncMarkerComment } from "../github/comments.js";
+import { performWrite } from "../lib/dry-run.js";
 
 type Api = Context<"pull_request">["octokit"];
 
@@ -28,10 +31,8 @@ export const CONFIG_CHECK_NAME = "woodhouse/config";
 export const COMMENT_MARKER = "<!-- woodhouse:config-validation -->";
 
 /** Any path this app would ever read as configuration. */
-const CONFIG_PATHS = new Set<string>([...LOCAL_PATHS, ...BASELINE_PATHS.map((p) => p)]);
-
 export function isConfigPath(path: string): boolean {
-  return CONFIG_PATHS.has(path);
+  return isSettingsPath(path);
 }
 
 export type FileVerdict =
@@ -162,6 +163,9 @@ export interface ValidateDeps {
  * configuration validates the comment is deleted outright: the check run
  * records that it was ever wrong, and leaving a stale complaint on a
  * now-correct pull request is worse than leaving nothing.
+ *
+ * Validation decides the outcome; the shared manager owns the mechanics and
+ * guards its own write (so dry-run never lists comments either).
  */
 async function syncComment(
   deps: ValidateDeps,
@@ -171,56 +175,13 @@ async function syncComment(
   verdicts: readonly FileVerdict[],
   conclusion: "success" | "failure",
 ): Promise<void> {
-  let existing: number | undefined;
-
-  try {
-    const comments = await deps.octokit.paginate(deps.octokit.issues.listComments, {
-      owner,
-      repo,
-      issue_number: prNumber,
-      per_page: 100,
-    });
-    existing = comments.find((c) => c.body?.includes(COMMENT_MARKER))?.id;
-  } catch (error) {
-    // The check run is the authoritative signal; failing to manage a comment
-    // must not fail the whole validation.
-    deps.log.warn({ err: error, pr: prNumber }, "Could not list PR comments");
-    return;
-  }
-
-  try {
-    if (conclusion === "success") {
-      if (existing !== undefined) {
-        await deps.octokit.issues.deleteComment({
-          owner,
-          repo,
-          comment_id: existing,
-        });
-        deps.log.info({ pr: prNumber }, "Configuration fixed; removed comment");
-      }
-      return;
-    }
-
-    const body = buildComment(verdicts);
-
-    if (existing === undefined) {
-      await deps.octokit.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body,
-      });
-    } else {
-      await deps.octokit.issues.updateComment({
-        owner,
-        repo,
-        comment_id: existing,
-        body,
-      });
-    }
-  } catch (error) {
-    deps.log.warn({ err: error, pr: prNumber }, "Could not write configuration comment");
-  }
+  await syncMarkerComment(deps, {
+    owner,
+    repo,
+    issueNumber: prNumber,
+    marker: COMMENT_MARKER,
+    body: conclusion === "success" ? undefined : buildComment(verdicts),
+  });
 }
 
 export async function validatePullRequest(
@@ -230,12 +191,8 @@ export async function validatePullRequest(
   prNumber: number,
   headSha: string,
 ): Promise<"success" | "failure" | undefined> {
-  const files = await deps.octokit.paginate(deps.octokit.pulls.listFiles, {
-    owner,
-    repo,
-    pull_number: prNumber,
-    per_page: 100,
-  });
+  // Unbounded, exactly as before: validation must see every changed file.
+  const { files } = await listChangedFiles(deps.octokit, owner, repo, prNumber);
 
   const touched = files.filter((file) => isConfigPath(file.filename) && file.status !== "removed");
 
@@ -265,31 +222,28 @@ export async function validatePullRequest(
 
   const result = summarise(verdicts);
 
-  if (deps.dryRun) {
-    deps.log.info(
-      { pr: prNumber, conclusion: result.conclusion, dryRun: true },
-      "DRY_RUN: would write config validation check",
-    );
-    return result.conclusion;
-  }
+  await performWrite(deps, "write config validation check", async () => {
+    await deps.octokit.checks.create({
+      owner,
+      repo,
+      name: CONFIG_CHECK_NAME,
+      head_sha: headSha,
+      status: "completed",
+      conclusion: result.conclusion,
+      completed_at: new Date().toISOString(),
+      output: { title: result.title, summary: result.summary },
+    });
 
-  await deps.octokit.checks.create({
-    owner,
-    repo,
-    name: CONFIG_CHECK_NAME,
-    head_sha: headSha,
-    status: "completed",
-    conclusion: result.conclusion,
-    completed_at: new Date().toISOString(),
-    output: { title: result.title, summary: result.summary },
+    deps.log.info(
+      { pr: prNumber, files: verdicts.length, conclusion: result.conclusion },
+      "Validated woodhouse configuration",
+    );
   });
 
+  // The comment write is guarded inside the manager, outside the check's
+  // composite wrap: dry-run yields one line for the check and one for the
+  // comment instead of a single combined gate.
   await syncComment(deps, owner, repo, prNumber, verdicts, result.conclusion);
-
-  deps.log.info(
-    { pr: prNumber, files: verdicts.length, conclusion: result.conclusion },
-    "Validated woodhouse configuration",
-  );
 
   return result.conclusion;
 }

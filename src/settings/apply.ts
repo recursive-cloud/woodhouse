@@ -9,6 +9,7 @@
 import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { WoodhouseConfig } from "../config/schema.js";
+import { performWrite } from "../lib/dry-run.js";
 import {
   diffRepositorySettings,
   planLabels,
@@ -66,13 +67,13 @@ async function applyRepository(ctx: ApplyContext, config: WoodhouseConfig): Prom
   );
 
   if (Object.keys(patch).length > 0) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.repos.update({
+    await performWrite(ctx, "update repository settings", () =>
+      ctx.octokit.repos.update({
         owner: ctx.owner,
         repo: ctx.repo,
         ...patch,
-      });
-    }
+      }),
+    );
     changes.push({
       resource: "repository",
       action: "update",
@@ -82,14 +83,14 @@ async function applyRepository(ctx: ApplyContext, config: WoodhouseConfig): Prom
 
   const desiredTopics = config.repository.topics;
   if (desiredTopics !== undefined && topicsDiffer(current.topics ?? [], desiredTopics)) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.repos.replaceAllTopics({
+    await performWrite(ctx, "replace repository topics", () =>
+      ctx.octokit.repos.replaceAllTopics({
         owner: ctx.owner,
         repo: ctx.repo,
         // GitHub rejects uppercase topics outright.
         names: desiredTopics.map((t) => t.toLowerCase()),
-      });
-    }
+      }),
+    );
     changes.push({
       resource: "topics",
       action: "update",
@@ -132,27 +133,27 @@ async function applyLabels(ctx: ApplyContext, config: WoodhouseConfig): Promise<
   const base = { owner: ctx.owner, repo: ctx.repo };
 
   for (const label of plan.create) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.issues.createLabel({
+    await performWrite(ctx, `create label ${label.name}`, () =>
+      ctx.octokit.issues.createLabel({
         ...base,
         name: label.name,
         ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
         ...(label.description !== undefined ? { description: label.description } : {}),
-      });
-    }
+      }),
+    );
     changes.push({ resource: "label", action: "create", detail: label.name });
   }
 
   for (const label of plan.rename) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.issues.updateLabel({
+    await performWrite(ctx, `rename label ${label.from} -> ${label.name}`, () =>
+      ctx.octokit.issues.updateLabel({
         ...base,
         name: label.from!,
         new_name: label.name,
         ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
         ...(label.description !== undefined ? { description: label.description } : {}),
-      });
-    }
+      }),
+    );
     changes.push({
       resource: "label",
       action: "rename",
@@ -161,22 +162,22 @@ async function applyLabels(ctx: ApplyContext, config: WoodhouseConfig): Promise<
   }
 
   for (const label of plan.update) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.issues.updateLabel({
+    await performWrite(ctx, `update label ${label.name}`, () =>
+      ctx.octokit.issues.updateLabel({
         ...base,
         name: label.name,
         new_name: label.name,
         ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
         ...(label.description !== undefined ? { description: label.description } : {}),
-      });
-    }
+      }),
+    );
     changes.push({ resource: "label", action: "update", detail: label.name });
   }
 
   for (const name of plan.delete) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.issues.deleteLabel({ ...base, name });
-    }
+    await performWrite(ctx, `delete label ${name}`, () =>
+      ctx.octokit.issues.deleteLabel({ ...base, name }),
+    );
     changes.push({ resource: "label", action: "delete", detail: name });
   }
 
@@ -202,8 +203,8 @@ async function applyBranchProtection(
     // (nested `enabled` wrappers, expanded actor objects), and comparing them
     // reliably is more error-prone than an idempotent write.
     try {
-      if (!ctx.dryRun) {
-        await ctx.octokit.repos.updateBranchProtection({
+      await performWrite(ctx, `update branch protection for ${branch}`, () =>
+        ctx.octokit.repos.updateBranchProtection({
           owner: ctx.owner,
           repo: ctx.repo,
           branch,
@@ -237,8 +238,8 @@ async function applyBranchProtection(
           ...(protection.block_creations !== undefined
             ? { block_creations: protection.block_creations }
             : {}),
-        });
-      }
+        }),
+      );
       changes.push({
         resource: "branch-protection",
         action: "update",
@@ -283,16 +284,16 @@ async function applyRulesets(ctx: ApplyContext, config: WoodhouseConfig): Promis
   const changes: Change[] = [];
 
   for (const ruleset of plan.create) {
-    if (!ctx.dryRun) {
-      // `rules` is a large discriminated union in the generated types. Our
-      // schema keeps it open on purpose (see rulesetSchema), so the cast is
-      // required; GitHub validates the payload server-side either way.
-      await ctx.octokit.request("POST /repos/{owner}/{repo}/rulesets", {
+    // `rules` is a large discriminated union in the generated types. Our
+    // schema keeps it open on purpose (see rulesetSchema), so the cast is
+    // required; GitHub validates the payload server-side either way.
+    await performWrite(ctx, `create ruleset ${ruleset.name}`, () =>
+      ctx.octokit.request("POST /repos/{owner}/{repo}/rulesets", {
         owner: ctx.owner,
         repo: ctx.repo,
         ...ruleset,
-      } as never);
-    }
+      } as never),
+    );
     changes.push({
       resource: "ruleset",
       action: "create",
@@ -301,14 +302,14 @@ async function applyRulesets(ctx: ApplyContext, config: WoodhouseConfig): Promis
   }
 
   for (const { id, ruleset } of plan.update) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.request("PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
+    await performWrite(ctx, `update ruleset ${ruleset.name}`, () =>
+      ctx.octokit.request("PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
         owner: ctx.owner,
         repo: ctx.repo,
         ruleset_id: id,
         ...ruleset,
-      } as never);
-    }
+      } as never),
+    );
     changes.push({
       resource: "ruleset",
       action: "update",
@@ -317,13 +318,13 @@ async function applyRulesets(ctx: ApplyContext, config: WoodhouseConfig): Promis
   }
 
   for (const { id, name } of plan.delete) {
-    if (!ctx.dryRun) {
-      await ctx.octokit.request("DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
+    await performWrite(ctx, `delete ruleset ${name}`, () =>
+      ctx.octokit.request("DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
         owner: ctx.owner,
         repo: ctx.repo,
         ruleset_id: id,
-      });
-    }
+      }),
+    );
     changes.push({ resource: "ruleset", action: "delete", detail: name });
   }
 
