@@ -7,8 +7,8 @@
 
 import type { ActorClass } from "./policy.js";
 
-/** The sign-off every approval carries, whichever class the author is. */
-const SIGN_OFF = "_Woodhouse, at your service._";
+/** The sign-off every message carries, whichever class the author is. */
+export const SIGN_OFF = "_Woodhouse, at your service._";
 
 /** Butler register for an owner: approval on their behalf. */
 const OWNER_REASON =

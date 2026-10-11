@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ConfigResolver, type ContentsClient } from "../src/config/resolver.js";
+import {
+  ConfigResolver,
+  invalidateTouchedConfig,
+  type ContentsClient,
+} from "../src/config/resolver.js";
 
 function fakeLogger() {
   const log: Record<string, unknown> = {
@@ -210,5 +214,32 @@ describe("ConfigResolver — caching", () => {
     await resolver.resolve(client, "other", "app", fakeLogger());
 
     expect(getContent.mock.calls.length).toBeGreaterThan(before);
+  });
+});
+
+/** Minimal structural stand-in for the resolver's invalidation surface. */
+function fakeResolver(isBaseline: boolean) {
+  return {
+    isBaselineRepo: vi.fn(() => isBaseline),
+    invalidate: vi.fn(),
+    invalidateOwner: vi.fn(),
+  };
+}
+
+describe("invalidateTouchedConfig", () => {
+  it("invalidates owner-wide when the baseline repository is touched", () => {
+    const resolver = fakeResolver(true);
+
+    expect(invalidateTouchedConfig(resolver, "acme", ".github-private")).toBe("owner");
+    expect(resolver.invalidateOwner).toHaveBeenCalledWith("acme");
+    expect(resolver.invalidate).not.toHaveBeenCalled();
+  });
+
+  it("invalidates only the repository otherwise", () => {
+    const resolver = fakeResolver(false);
+
+    expect(invalidateTouchedConfig(resolver, "acme", "app")).toBe("repo");
+    expect(resolver.invalidate).toHaveBeenCalledWith("acme", "app");
+    expect(resolver.invalidateOwner).not.toHaveBeenCalled();
   });
 });

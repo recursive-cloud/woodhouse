@@ -27,7 +27,16 @@ Probot instance directly, so a new listener cannot accidentally skip the check.
 `woodhouse.yml` from your owner-level `.github-private` repository with
 `.github/woodhouse.yml` from the repository itself, and reconciles repository
 options, topics, labels, branch protection and rulesets. Settings are diffed
-before writing, so an unchanged repository costs no write calls.
+before writing, so an unchanged repository costs no write calls. Merging a pull
+request that changes a settings file into the default branch triggers the same
+sync, and Woodhouse comments on that pull request with the outcome: what was
+applied in each area, any failures with their reason, or that nothing further
+needed changing. A merge on the baseline repository says so truthfully — the
+baseline was synced directly, and other repositories adopt the change at their
+next event — and a repository with settings disabled stays silent. Re-delivering
+the event updates the comment in place rather than duplicating it. Both triggers
+serialise per repository, so a merge push and the closed event cannot apply the
+same change twice.
 
 **Silver Platter.** PR authors listed under `autoApproval.allowedActors.owners`
 get an approving review without any extra preconditions — still vetoed by

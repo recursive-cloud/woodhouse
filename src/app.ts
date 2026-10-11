@@ -11,13 +11,15 @@
 import type { Probot } from "probot";
 import type { Allowlist } from "./security/allowlist.js";
 import { GuardedApp } from "./security/guard.js";
-import { ConfigResolver } from "./config/resolver.js";
+import { ConfigResolver, invalidateTouchedConfig } from "./config/resolver.js";
 import { isSettingsPath } from "./config/paths.js";
 import { isSelfCheck, reconcile } from "./gatekeeper/handler.js";
 import { syncSettings } from "./settings/apply.js";
+import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
 import { serve } from "./approval/silverPlatter.js";
 import { Scheduler } from "./lib/scheduler.js";
+import { KeyedMutex } from "./lib/mutex.js";
 
 export interface AppOptions {
   /** Owners this App is permitted to act on. */
@@ -33,6 +35,7 @@ export function createApp(options: AppOptions) {
     const resolver = new ConfigResolver({ baselineRepo: options.baselineRepo });
     const guarded = new GuardedApp(app, options.allowlist);
     const scheduler = new Scheduler();
+    const settingsMutex = new KeyedMutex();
 
     const deps = (log: Parameters<typeof serve>[0]["log"]) => ({
       resolver,
@@ -42,7 +45,8 @@ export function createApp(options: AppOptions) {
 
     // ------------------------------------------------------------- settings
     guarded.on("push", "settings-sync", async (context, scope) => {
-      if (scope.repo === undefined) return;
+      const repo = scope.repo;
+      if (repo === undefined) return;
 
       const payload = context.payload;
 
@@ -60,20 +64,16 @@ export function createApp(options: AppOptions) {
 
       // Keep the cache honest before reading it back.
       if (touchedConfig) {
-        if (resolver.isBaselineRepo(scope.repo)) {
-          // The baseline changed, so every repository this owner has is now
-          // stale, not merely the baseline repo itself.
-          resolver.invalidateOwner(scope.owner);
+        const invalidation = invalidateTouchedConfig(resolver, scope.owner, repo);
+        if (invalidation === "owner") {
           scope.log.info("Baseline configuration changed; cleared owner cache");
-        } else {
-          resolver.invalidate(scope.owner, scope.repo);
         }
       }
 
       const { config, sources } = await resolver.resolve(
         context.octokit as never,
         scope.owner,
-        scope.repo,
+        repo,
         scope.log,
       );
 
@@ -81,15 +81,49 @@ export function createApp(options: AppOptions) {
 
       scope.log.debug({ sources }, "Running settings sync");
 
-      await syncSettings(
+      // Serialise per repository so a merge push and the merged pull request's
+      // own event cannot run the sync concurrently.
+      await settingsMutex.run(`${scope.owner}/${repo}`, () =>
+        syncSettings(
+          {
+            octokit: context.octokit,
+            owner: scope.owner,
+            repo,
+            log: scope.log,
+            dryRun: options.dryRun,
+          },
+          config,
+        ),
+      );
+    });
+
+    // A pull request that merges a settings change fires here, not only as a
+    // push to the default branch. Forwarding only; the gate, cache
+    // invalidation and sync live in `commentSettingsApplied`.
+    guarded.on("pull_request.closed", "settings-applied", async (context, scope) => {
+      const repo = scope.repo;
+      if (repo === undefined) return;
+
+      const payload = context.payload;
+
+      await commentSettingsApplied(
         {
           octokit: context.octokit,
-          owner: scope.owner,
-          repo: scope.repo,
+          resolver,
+          mutex: settingsMutex,
           log: scope.log,
           dryRun: options.dryRun,
         },
-        config,
+        {
+          owner: scope.owner,
+          repo,
+          defaultBranch: payload.repository.default_branch,
+        },
+        {
+          number: payload.pull_request.number,
+          merged: payload.pull_request.merged === true,
+          baseRef: payload.pull_request.base.ref,
+        },
       );
     });
 
