@@ -72,14 +72,30 @@ export const autoApprovalSchema = z
   .object({
     enabled: z.boolean().default(true),
 
-    /** PR authors whose pull requests are approved automatically. */
-    allowedActors: z.array(githubLogin).default([]),
+    /**
+     * PR authors whose pull requests are approved automatically, split by
+     * trust model: `owners` are approved unconditionally, `bots` only when
+     * they enabled auto-merge themselves.
+     */
+    allowedActors: z
+      .object({
+        owners: z
+          .array(githubLogin)
+          .default([])
+          .describe("PR authors approved unconditionally (still subject to protectedPaths)."),
+        bots: z
+          .array(githubLogin)
+          .default([])
+          .describe("PR authors approved only when they enabled auto-merge themselves."),
+      })
+      .strict()
+      .prefault({}),
 
     /**
      * Refuse to auto-approve a PR that modifies any of these paths. Defaults
-     * cover the config files themselves: without this, anyone in
-     * `allowedActors` could self-approve a change that widens
-     * `allowedActors`, which is a privilege-escalation path.
+     * cover the config files themselves: without this, any listed actor could
+     * self-approve a change that widens `allowedActors`, which is a
+     * privilege-escalation path.
      */
     protectedPaths: z
       .array(z.string().trim().min(1))

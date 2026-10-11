@@ -18,6 +18,19 @@ export interface ApprovalRequest {
   readonly fileListTruncated: boolean;
   /** True when we have already approved this exact head SHA. */
   readonly alreadyApproved: boolean;
+  /**
+   * Login that enabled auto-merge on the pull request, from the current PR
+   * state. Deliberately tri-state:
+   *
+   * - `undefined` — not gathered yet (the cheap preliminary pass). The bot
+   *   gate is inert: `decide()` neither vetoes a bot for the missing fact nor
+   *   approves it on the strength of it, so an otherwise-eligible bot proceeds
+   *   to fact gathering. Nothing is ever submitted on such a pass; submission
+   *   only follows a full pass, where the fact is always gathered.
+   * - `null` — gathered: nobody has enabled auto-merge.
+   * - a string — gathered: this login enabled it.
+   */
+  readonly autoMergeEnabledBy?: string | null;
 }
 
 export type ApprovalDecision =
@@ -40,6 +53,32 @@ export function pathMatches(file: string, pattern: string): boolean {
   return f === p;
 }
 
+/**
+ * How a PR author relates to `autoApproval.allowedActors`, by membership only
+ * (never `pr.user.type`). An author listed as both an owner and a bot is an
+ * owner: owner membership means unconditional approval.
+ */
+export type ActorClass = "owner" | "bot" | "neither";
+
+/** GitHub logins compare case-insensitively; normalise both sides of every check. */
+const normalizeLogin = (login: string): string => login.trim().toLowerCase();
+
+function isListed(list: readonly string[], login: string): boolean {
+  return list.some((entry) => normalizeLogin(entry) === login);
+}
+
+/**
+ * Classify a PR author as an owner, a bot, or neither, by list membership.
+ * Pure and config-driven so the caller can use it (e.g. to decide whether the
+ * auto-merge fact needs gathering) before running the full decision.
+ */
+export function classifyActor(author: string, config: AutoApprovalConfig): ActorClass {
+  const login = normalizeLogin(author);
+  if (isListed(config.allowedActors.owners, login)) return "owner";
+  if (isListed(config.allowedActors.bots, login)) return "bot";
+  return "neither";
+}
+
 export function decide(request: ApprovalRequest, config: AutoApprovalConfig): ApprovalDecision {
   if (!config.enabled) {
     return { approve: false, reason: "auto-approval is disabled" };
@@ -54,14 +93,36 @@ export function decide(request: ApprovalRequest, config: AutoApprovalConfig): Ap
     return { approve: false, reason: "pull request is a draft" };
   }
 
-  const author = request.author.toLowerCase();
-  const trusted = config.allowedActors.some((actor) => actor.trim().toLowerCase() === author);
+  const actorClass = classifyActor(request.author, config);
 
-  if (!trusted) {
+  if (actorClass === "neither") {
     return {
       approve: false,
       reason: `author "${request.author}" is not in autoApproval.allowedActors`,
     };
+  }
+
+  // Owners are approved unconditionally (subject to the shared guards below).
+  // Bots additionally require that they enabled auto-merge themselves. The
+  // gate is inert when the fact has not been gathered (`undefined`) so the
+  // preliminary pass can still classify the author; it never *approves* on a
+  // missing fact either — the shared guards still run.
+  if (actorClass === "bot") {
+    const enabledBy = request.autoMergeEnabledBy;
+
+    if (enabledBy === null) {
+      return {
+        approve: false,
+        reason: `author "${request.author}" is a bot in autoApproval.allowedActors.bots but nobody has enabled auto-merge`,
+      };
+    }
+
+    if (enabledBy !== undefined && normalizeLogin(enabledBy) !== normalizeLogin(request.author)) {
+      return {
+        approve: false,
+        reason: `auto-merge was enabled by "${enabledBy}" rather than the author "${request.author}"`,
+      };
+    }
   }
 
   // Fail closed when we cannot see the whole diff. An enormous PR is exactly

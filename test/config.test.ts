@@ -69,16 +69,53 @@ describe("config schema", () => {
     expect(result.issues[0]?.path).toContain("autoApproval");
   });
 
-  it("accepts bot logins", () => {
+  it("accepts the owners/bots object form", () => {
     const result = parseConfig({
-      autoApproval: { allowedActors: ["renovate[bot]", "my-user"] },
+      autoApproval: { allowedActors: { owners: ["my-user"], bots: ["renovate[bot]"] } },
     });
     expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.autoApproval.allowedActors).toEqual({
+      owners: ["my-user"],
+      bots: ["renovate[bot]"],
+    });
+  });
+
+  it("defaults both actor lists to empty when allowedActors is omitted", () => {
+    const withSection = parseConfig({ autoApproval: { enabled: true } });
+    expect(withSection.ok).toBe(true);
+    if (withSection.ok) {
+      expect(withSection.config.autoApproval.allowedActors).toEqual({ owners: [], bots: [] });
+    }
+
+    const withoutSection = parseConfig({});
+    expect(withoutSection.ok).toBe(true);
+    if (withoutSection.ok) {
+      expect(withoutSection.config.autoApproval.allowedActors).toEqual({ owners: [], bots: [] });
+    }
+  });
+
+  it("rejects the legacy flat allowedActors list", () => {
+    const result = parseConfig({
+      autoApproval: { allowedActors: ["renovate[bot]"] },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.some((i) => i.path.startsWith("autoApproval.allowedActors"))).toBe(true);
+  });
+
+  it("rejects an unknown key inside allowedActors", () => {
+    const result = parseConfig({
+      autoApproval: { allowedActors: { owners: ["me"], bot: ["renovate[bot]"] } },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.some((i) => i.path.includes("allowedActors"))).toBe(true);
   });
 
   it("rejects a login containing a slash", () => {
     const result = parseConfig({
-      autoApproval: { allowedActors: ["org/team"] },
+      autoApproval: { allowedActors: { bots: ["org/team"] } },
     });
     expect(result.ok).toBe(false);
   });
