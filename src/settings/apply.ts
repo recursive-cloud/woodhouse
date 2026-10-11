@@ -1,22 +1,20 @@
 /**
- * Settings appliers.
+ * Settings sync orchestrator.
  *
- * Executes the plans produced by `plan.ts`. Each applier is independent and
- * failures are collected rather than thrown immediately: one repository
- * lacking a `main` branch should not prevent its labels from being synced.
+ * Runs the appliers in the order declared by `./appliers/index.ts`, aggregating
+ * changes and failures rather than aborting on the first error: one repository
+ * lacking a `main` branch should not prevent its labels from being synced. The
+ * actual work lives in `./appliers/`; this module only sequences it, classifies
+ * thrown errors, and renders the summary through `formatApplySummary`.
  */
 
 import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { WoodhouseConfig } from "../config/schema.js";
-import { performWrite } from "../lib/dry-run.js";
-import {
-  diffRepositorySettings,
-  planLabels,
-  planRulesets,
-  topicsDiffer,
-  type Change,
-} from "./plan.js";
+import { APPLIERS } from "./appliers/index.js";
+import type { ChangeRecord, Failure } from "./appliers/types.js";
+import { describeForbidden, messageOf, statusOf } from "./forbidden.js";
+import { type ApplySummary, formatApplySummary } from "./summary.js";
 
 type Api = Context<"push">["octokit"];
 
@@ -28,409 +26,54 @@ export interface ApplyContext {
   readonly dryRun: boolean;
 }
 
-export interface SyncResult {
-  readonly changes: readonly Change[];
-  readonly failures: readonly { resource: string; message: string }[];
-}
-
-function statusOf(error: unknown): number | undefined {
-  const status = (error as { status?: unknown } | null)?.status;
-  return typeof status === "number" ? status : undefined;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/* -------------------------------------------------------------------------
- * Repository core settings
- * ---------------------------------------------------------------------- */
-
-async function applyRepository(ctx: ApplyContext, config: WoodhouseConfig): Promise<Change[]> {
-  const { data: current } = await ctx.octokit.repos.get({
-    owner: ctx.owner,
-    repo: ctx.repo,
-  });
-
-  // Never fight the user over an archived repository: writes would fail, and
-  // if they somehow succeeded that would be worse.
-  if (current.archived) {
-    ctx.log.info("Repository is archived; skipping settings sync");
-    return [];
-  }
-
-  const changes: Change[] = [];
-
-  const patch = diffRepositorySettings(
-    current as unknown as Record<string, unknown>,
-    config.repository,
-  );
-
-  if (Object.keys(patch).length > 0) {
-    await performWrite(ctx, "update repository settings", () =>
-      ctx.octokit.repos.update({
-        owner: ctx.owner,
-        repo: ctx.repo,
-        ...patch,
-      }),
-    );
-    changes.push({
-      resource: "repository",
-      action: "update",
-      detail: Object.keys(patch).toSorted().join(", "),
-    });
-  }
-
-  const desiredTopics = config.repository.topics;
-  if (desiredTopics !== undefined && topicsDiffer(current.topics ?? [], desiredTopics)) {
-    await performWrite(ctx, "replace repository topics", () =>
-      ctx.octokit.repos.replaceAllTopics({
-        owner: ctx.owner,
-        repo: ctx.repo,
-        // GitHub rejects uppercase topics outright.
-        names: desiredTopics.map((t) => t.toLowerCase()),
-      }),
-    );
-    changes.push({
-      resource: "topics",
-      action: "update",
-      detail: desiredTopics.join(", "),
-    });
-  }
-
-  return changes;
-}
-
-/* -------------------------------------------------------------------------
- * Labels
- * ---------------------------------------------------------------------- */
-
-/** GitHub wants six hex digits with no leading `#`. */
-function colour(value: string | undefined): string | undefined {
-  return value?.replace(/^#/, "").toLowerCase();
-}
-
-async function applyLabels(ctx: ApplyContext, config: WoodhouseConfig): Promise<Change[]> {
-  if (config.labels.length === 0 && !config.settings.pruneLabels) return [];
-
-  const existing = await ctx.octokit.paginate(ctx.octokit.issues.listLabelsForRepo, {
-    owner: ctx.owner,
-    repo: ctx.repo,
-    per_page: 100,
-  });
-
-  const plan = planLabels(
-    existing.map((l) => ({
-      name: l.name,
-      color: l.color,
-      description: l.description ?? null,
-    })),
-    config.labels,
-    config.settings.pruneLabels,
-  );
-
-  const changes: Change[] = [];
-  const base = { owner: ctx.owner, repo: ctx.repo };
-
-  for (const label of plan.create) {
-    await performWrite(ctx, `create label ${label.name}`, () =>
-      ctx.octokit.issues.createLabel({
-        ...base,
-        name: label.name,
-        ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
-        ...(label.description !== undefined ? { description: label.description } : {}),
-      }),
-    );
-    changes.push({ resource: "label", action: "create", detail: label.name });
-  }
-
-  for (const label of plan.rename) {
-    await performWrite(ctx, `rename label ${label.from} -> ${label.name}`, () =>
-      ctx.octokit.issues.updateLabel({
-        ...base,
-        name: label.from!,
-        new_name: label.name,
-        ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
-        ...(label.description !== undefined ? { description: label.description } : {}),
-      }),
-    );
-    changes.push({
-      resource: "label",
-      action: "rename",
-      detail: `${label.from} -> ${label.name}`,
-    });
-  }
-
-  for (const label of plan.update) {
-    await performWrite(ctx, `update label ${label.name}`, () =>
-      ctx.octokit.issues.updateLabel({
-        ...base,
-        name: label.name,
-        new_name: label.name,
-        ...(label.color !== undefined ? { color: colour(label.color)! } : {}),
-        ...(label.description !== undefined ? { description: label.description } : {}),
-      }),
-    );
-    changes.push({ resource: "label", action: "update", detail: label.name });
-  }
-
-  for (const name of plan.delete) {
-    await performWrite(ctx, `delete label ${name}`, () =>
-      ctx.octokit.issues.deleteLabel({ ...base, name }),
-    );
-    changes.push({ resource: "label", action: "delete", detail: name });
-  }
-
-  return changes;
-}
-
-/* -------------------------------------------------------------------------
- * Branch protection
- * ---------------------------------------------------------------------- */
-
-async function applyBranchProtection(
-  ctx: ApplyContext,
-  config: WoodhouseConfig,
-): Promise<Change[]> {
-  const branches = Object.entries(config.branchProtection);
-  if (branches.length === 0) return [];
-
-  const changes: Change[] = [];
-
-  for (const [branch, protection] of branches) {
-    // Always PUT rather than diff: the GET representation of branch
-    // protection is structurally quite different from the PUT payload
-    // (nested `enabled` wrappers, expanded actor objects), and comparing them
-    // reliably is more error-prone than an idempotent write.
-    try {
-      await performWrite(ctx, `update branch protection for ${branch}`, () =>
-        ctx.octokit.repos.updateBranchProtection({
-          owner: ctx.owner,
-          repo: ctx.repo,
-          branch,
-          // These three are required by the API and must be explicitly null
-          // when unused, otherwise the request is rejected.
-          required_status_checks:
-            protection.required_status_checks === undefined
-              ? null
-              : protection.required_status_checks,
-          enforce_admins: protection.enforce_admins ?? null,
-          required_pull_request_reviews:
-            protection.required_pull_request_reviews === undefined
-              ? null
-              : protection.required_pull_request_reviews,
-          restrictions: null,
-          ...(protection.required_linear_history !== undefined
-            ? { required_linear_history: protection.required_linear_history }
-            : {}),
-          ...(protection.allow_force_pushes !== undefined
-            ? { allow_force_pushes: protection.allow_force_pushes }
-            : {}),
-          ...(protection.allow_deletions !== undefined
-            ? { allow_deletions: protection.allow_deletions }
-            : {}),
-          ...(protection.required_conversation_resolution !== undefined
-            ? {
-                required_conversation_resolution: protection.required_conversation_resolution,
-              }
-            : {}),
-          ...(protection.lock_branch !== undefined ? { lock_branch: protection.lock_branch } : {}),
-          ...(protection.block_creations !== undefined
-            ? { block_creations: protection.block_creations }
-            : {}),
-        }),
-      );
-      changes.push({
-        resource: "branch-protection",
-        action: "update",
-        detail: branch,
-      });
-    } catch (error) {
-      if (statusOf(error) === 404) {
-        // Configuring protection for a branch that does not exist is a normal
-        // consequence of a shared baseline, not an error worth alerting on.
-        ctx.log.debug({ branch }, "Branch does not exist; skipping protection");
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  return changes;
-}
-
-/* -------------------------------------------------------------------------
- * Rulesets
- * ---------------------------------------------------------------------- */
-
-async function applyRulesets(ctx: ApplyContext, config: WoodhouseConfig): Promise<Change[]> {
-  if (config.rulesets.length === 0 && !config.settings.pruneRulesets) return [];
-
-  const existing = await ctx.octokit.paginate("GET /repos/{owner}/{repo}/rulesets", {
-    owner: ctx.owner,
-    repo: ctx.repo,
-    per_page: 100,
-  });
-
-  const plan = planRulesets(
-    (existing as { id: number; name: string }[]).map((r) => ({
-      id: r.id,
-      name: r.name,
-    })),
-    config.rulesets,
-    config.settings.pruneRulesets,
-  );
-
-  const changes: Change[] = [];
-
-  for (const ruleset of plan.create) {
-    // `rules` is a large discriminated union in the generated types. Our
-    // schema keeps it open on purpose (see rulesetSchema), so the cast is
-    // required; GitHub validates the payload server-side either way.
-    await performWrite(ctx, `create ruleset ${ruleset.name}`, () =>
-      ctx.octokit.request("POST /repos/{owner}/{repo}/rulesets", {
-        owner: ctx.owner,
-        repo: ctx.repo,
-        ...ruleset,
-      } as never),
-    );
-    changes.push({
-      resource: "ruleset",
-      action: "create",
-      detail: ruleset.name,
-    });
-  }
-
-  for (const { id, ruleset } of plan.update) {
-    await performWrite(ctx, `update ruleset ${ruleset.name}`, () =>
-      ctx.octokit.request("PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
-        owner: ctx.owner,
-        repo: ctx.repo,
-        ruleset_id: id,
-        ...ruleset,
-      } as never),
-    );
-    changes.push({
-      resource: "ruleset",
-      action: "update",
-      detail: ruleset.name,
-    });
-  }
-
-  for (const { id, name } of plan.delete) {
-    await performWrite(ctx, `delete ruleset ${name}`, () =>
-      ctx.octokit.request("DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
-        owner: ctx.owner,
-        repo: ctx.repo,
-        ruleset_id: id,
-      }),
-    );
-    changes.push({ resource: "ruleset", action: "delete", detail: name });
-  }
-
-  return changes;
-}
-
 /* -------------------------------------------------------------------------
  * Orchestration
  * ---------------------------------------------------------------------- */
 
-const APPLIERS: {
-  name: string;
-  run: (ctx: ApplyContext, config: WoodhouseConfig) => Promise<Change[]>;
-}[] = [
-  { name: "repository", run: applyRepository },
-  { name: "labels", run: applyLabels },
-  { name: "branch-protection", run: applyBranchProtection },
-  // Rulesets last: they can restrict what the app itself is permitted to do,
-  // so everything else should already be in place before they take effect.
-  { name: "rulesets", run: applyRulesets },
-];
-
-/**
- * Explain a 403 in terms an operator can act on.
- *
- * A bare "Forbidden" is indistinguishable from a transient fault. There are
- * two very different causes, and the plan one is easy to lose an afternoon to:
- * branch protection and rulesets are simply unavailable on private
- * repositories on the Free plan, so the call fails no matter how the App is
- * configured.
- */
-export function describeForbidden(applier: string, message: string): string {
-  // GitHub's own wording for the plan case is the clearest signal available.
-  const looksLikePlanLimit = /upgrade|not available|plan|public repositor/i.test(message);
-
-  const planSensitive = applier === "branch-protection" || applier === "rulesets";
-
-  if (planSensitive && looksLikePlanLimit) {
-    return (
-      `Cannot apply ${applier}: ${message} ` +
-      "Both branch protection and rulesets require the repository to be " +
-      "public, or a paid plan (Pro, Team or Enterprise) if it is private. " +
-      "On the Free plan a private repository can use neither."
-    );
-  }
-
-  if (planSensitive) {
-    return (
-      `Forbidden applying ${applier}: ${message} ` +
-      "Check the App has `administration: write`. Note also that branch " +
-      "protection and rulesets are unavailable on private repositories on " +
-      "the Free plan."
-    );
-  }
-
-  return (
-    `Forbidden applying ${applier}: ${message} ` +
-    "The App is probably missing a permission; `administration: write` is " +
-    "required for repository settings."
-  );
-}
-
 export async function syncSettings(
   ctx: ApplyContext,
   config: WoodhouseConfig,
-): Promise<SyncResult> {
+): Promise<ApplySummary> {
   if (!config.settings.enabled) {
     ctx.log.debug("Settings sync not enabled for this repository");
-    return { changes: [], failures: [] };
+    return { changes: [], failures: [], dryRun: ctx.dryRun };
   }
 
-  const changes: Change[] = [];
-  const failures: { resource: string; message: string }[] = [];
+  const changes: ChangeRecord[] = [];
+  const failures: Failure[] = [];
 
   for (const applier of APPLIERS) {
     try {
-      changes.push(...(await applier.run(ctx, config)));
+      const result = await applier.run(ctx, config);
+      changes.push(...result.changes);
+      failures.push(...result.failures);
     } catch (error) {
       const status = statusOf(error);
       const message = messageOf(error);
 
       if (status === 403) {
-        ctx.log.error(
-          { applier: applier.name, status, err: message },
-          describeForbidden(applier.name, message),
-        );
+        // Fold the classified explanation into the collected failure (design
+        // D1) while logging exactly what we always have.
+        const detail = describeForbidden(applier.name, message);
+        ctx.log.error({ applier: applier.name, status, err: message }, detail);
+        failures.push({ area: applier.name, message: detail });
       } else {
         ctx.log.error(
           { applier: applier.name, status, err: message },
           `Failed applying ${applier.name}`,
         );
+        failures.push({ area: applier.name, message });
       }
-      failures.push({ resource: applier.name, message });
     }
   }
 
+  const summary: ApplySummary = { changes, failures, dryRun: ctx.dryRun };
+
   if (changes.length > 0) {
-    ctx.log.info(
-      { changes, dryRun: ctx.dryRun },
-      ctx.dryRun
-        ? `DRY_RUN: would apply ${changes.length} change(s)`
-        : `Applied ${changes.length} change(s)`,
-    );
+    ctx.log.info({ changes: summary.changes, dryRun: ctx.dryRun }, formatApplySummary(summary));
   } else if (failures.length === 0) {
-    ctx.log.debug("Repository already matches configuration");
+    ctx.log.debug(formatApplySummary(summary));
   }
 
-  return { changes, failures };
+  return summary;
 }
