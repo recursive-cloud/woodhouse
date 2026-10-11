@@ -12,6 +12,7 @@ import type { Probot } from "probot";
 import type { Allowlist } from "./security/allowlist.js";
 import { GuardedApp } from "./security/guard.js";
 import { ConfigResolver } from "./config/resolver.js";
+import { isSettingsPath } from "./config/paths.js";
 import { isSelfCheck, reconcile } from "./gatekeeper/handler.js";
 import { syncSettings } from "./settings/apply.js";
 import { validatePullRequest } from "./settings/validate.js";
@@ -52,8 +53,8 @@ export function createApp(options: AppOptions) {
       if (payload.deleted) return;
 
       const touchedConfig = payload.commits.some((commit) =>
-        [...commit.added, ...commit.modified, ...commit.removed].some(
-          (path) => path.endsWith("woodhouse.yml") || path.endsWith("woodhouse.yaml"),
+        [...commit.added, ...commit.modified, ...commit.removed].some((path) =>
+          isSettingsPath(path),
         ),
       );
 

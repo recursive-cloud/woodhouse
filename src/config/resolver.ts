@@ -15,6 +15,7 @@
 import yaml from "js-yaml";
 import type { Logger } from "pino";
 import { mergeLayers } from "./merge.js";
+import { BASELINE_PATHS, LOCAL_PATHS } from "./paths.js";
 import {
   defaultConfig,
   parseConfig,
@@ -37,8 +38,6 @@ import { TtlCache } from "../lib/cache.js";
  * Override with the BASELINE_REPO environment variable.
  */
 export const DEFAULT_BASELINE_REPO = ".github-private";
-export const BASELINE_PATHS = ["woodhouse.yml", "woodhouse.yaml"] as const;
-export const LOCAL_PATHS = [".github/woodhouse.yml", ".github/woodhouse.yaml"] as const;
 
 /** Minimal shape of the Octokit client we need; keeps this unit-testable. */
 export interface ContentsClient {

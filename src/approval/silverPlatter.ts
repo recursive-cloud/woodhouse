@@ -8,7 +8,9 @@
 import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { AutoApprovalConfig } from "../config/schema.js";
+import { listChangedFiles } from "../github/pulls.js";
 import { decide } from "./policy.js";
+import { performWrite } from "../lib/dry-run.js";
 
 type Api = Context<"pull_request">["octokit"];
 
@@ -17,7 +19,6 @@ type Api = Context<"pull_request">["octokit"];
  * refused rather than approved on incomplete information.
  */
 const MAX_FILE_PAGES = 10;
-const PER_PAGE = 100;
 
 /**
  * The app's own login, e.g. `woodhouse[bot]`. Resolved once per process: it
@@ -41,42 +42,6 @@ async function appLogin(octokit: Api): Promise<string> {
       throw error;
     });
   return cachedAppLogin;
-}
-
-/**
- * List changed paths, stopping early if the PR is unreasonably large.
- * Returns `truncated` so the policy can refuse rather than guess.
- */
-async function listChangedFiles(
-  octokit: Api,
-  owner: string,
-  repo: string,
-  number: number,
-): Promise<{ files: string[]; truncated: boolean }> {
-  const files: string[] = [];
-  let page = 1;
-
-  while (page <= MAX_FILE_PAGES) {
-    const { data } = await octokit.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: number,
-      per_page: PER_PAGE,
-      page,
-    });
-
-    files.push(...data.map((f) => f.filename));
-    // A previous_filename means the file was moved; the old location matters
-    // just as much for protected-path checks.
-    files.push(
-      ...data.map((f) => f.previous_filename).filter((n): n is string => typeof n === "string"),
-    );
-
-    if (data.length < PER_PAGE) return { files, truncated: false };
-    page += 1;
-  }
-
-  return { files, truncated: true };
 }
 
 async function hasExistingApproval(
@@ -147,16 +112,23 @@ export async function serve(
   const self = await appLogin(deps.octokit);
 
   const [{ files, truncated }, alreadyApproved] = await Promise.all([
-    listChangedFiles(deps.octokit, owner, repo, pr.number),
+    listChangedFiles(deps.octokit, owner, repo, pr.number, { maxPages: MAX_FILE_PAGES }),
     hasExistingApproval(deps.octokit, owner, repo, pr.number, pr.headSha, self),
   ]);
+
+  // A previous_filename means the file was moved; the old location matters
+  // just as much for protected-path checks.
+  const changedFiles = [
+    ...files.map((f) => f.filename),
+    ...files.map((f) => f.previous_filename).filter((n): n is string => typeof n === "string"),
+  ];
 
   const decision = decide(
     {
       author: pr.author,
       draft: pr.draft,
       state: pr.state,
-      changedFiles: files,
+      changedFiles,
       fileListTruncated: truncated,
       alreadyApproved,
     },
@@ -168,24 +140,24 @@ export async function serve(
     return false;
   }
 
-  if (deps.dryRun) {
-    deps.log.info({ pr: pr.number, dryRun: true }, "DRY_RUN: would approve pull request");
-    return false;
-  }
-
-  await deps.octokit.pulls.createReview({
-    owner,
-    repo,
-    pull_number: pr.number,
-    event: "APPROVE",
-    // Pin the review to the commit we actually inspected. Without this a push
-    // landing mid-flight would be approved without ever being examined.
-    commit_id: pr.headSha,
-    body:
-      "Approved automatically — the author is listed in " +
-      "`autoApproval.allowedActors` and this pull request touches no " +
-      "protected paths.\n\n_Woodhouse, at your service._",
+  const approved = await performWrite(deps, "approve pull request", async () => {
+    await deps.octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number: pr.number,
+      event: "APPROVE",
+      // Pin the review to the commit we actually inspected. Without this a push
+      // landing mid-flight would be approved without ever being examined.
+      commit_id: pr.headSha,
+      body:
+        "Approved automatically — the author is listed in " +
+        "`autoApproval.allowedActors` and this pull request touches no " +
+        "protected paths.\n\n_Woodhouse, at your service._",
+    });
+    return true;
   });
+
+  if (approved === undefined) return false;
 
   deps.log.info({ pr: pr.number, author: pr.author, sha: pr.headSha }, "Approved pull request");
   return true;

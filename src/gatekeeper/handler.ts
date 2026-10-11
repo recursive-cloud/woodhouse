@@ -9,6 +9,7 @@ import type { Logger } from "pino";
 import type { ConfigResolver } from "../config/resolver.js";
 import type { GatekeeperConfig } from "../config/schema.js";
 import { KeyedMutex } from "../lib/mutex.js";
+import { performWrite } from "../lib/dry-run.js";
 import { evaluate, type CheckRunLike, type EvaluateOptions, type Evaluation } from "./evaluate.js";
 import { WHITE_GLOVE_CHECK_NAME, WHITE_GLOVE_TITLE } from "./constants.js";
 
@@ -95,30 +96,24 @@ async function upsertCheck(
           output,
         };
 
-  if (dryRun) {
-    log.info(
-      { sha, outcome: evaluation.outcome, dryRun: true },
-      "DRY_RUN: would write white-glove check",
-    );
-    return;
-  }
+  await performWrite({ dryRun, log }, "write white-glove check", async () => {
+    const existing = await findExisting(octokit, owner, repo, sha);
 
-  const existing = await findExisting(octokit, owner, repo, sha);
+    if (existing === undefined) {
+      await octokit.checks.create(body);
+      log.info(
+        { sha, outcome: evaluation.outcome, counts: evaluation.counts },
+        "Created white-glove check",
+      );
+      return;
+    }
 
-  if (existing === undefined) {
-    await octokit.checks.create(body);
+    await octokit.checks.update({ ...body, check_run_id: existing });
     log.info(
       { sha, outcome: evaluation.outcome, counts: evaluation.counts },
-      "Created white-glove check",
+      "Updated white-glove check",
     );
-    return;
-  }
-
-  await octokit.checks.update({ ...body, check_run_id: existing });
-  log.info(
-    { sha, outcome: evaluation.outcome, counts: evaluation.counts },
-    "Updated white-glove check",
-  );
+  });
 }
 
 async function findExisting(
