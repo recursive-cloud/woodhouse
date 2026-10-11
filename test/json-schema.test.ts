@@ -87,12 +87,20 @@ describe("schema and runtime agree", () => {
     });
   });
 
-  it("both accept a bot login and reject a slashed one", () => {
-    expect(bothAccept({ autoApproval: { allowedActors: ["renovate[bot]"] } })).toEqual({
-      schema: true,
-      runtime: true,
+  it("both accept the owners/bots actor lists and reject a slashed login", () => {
+    expect(
+      bothAccept({
+        autoApproval: { allowedActors: { owners: ["my-user"], bots: ["renovate[bot]"] } },
+      }),
+    ).toEqual({ schema: true, runtime: true });
+    expect(bothAccept({ autoApproval: { allowedActors: { bots: ["org/team"] } } })).toEqual({
+      schema: false,
+      runtime: false,
     });
-    expect(bothAccept({ autoApproval: { allowedActors: ["org/team"] } })).toEqual({
+  });
+
+  it("both reject the legacy flat allowedActors array", () => {
+    expect(bothAccept({ autoApproval: { allowedActors: ["renovate[bot]"] } })).toEqual({
       schema: false,
       runtime: false,
     });

@@ -246,6 +246,7 @@ export function createApp(options: AppOptions) {
             draft: pr.draft ?? false,
             state: pr.state,
             headSha: pr.head.sha,
+            action: context.payload.action,
           },
           config.autoApproval,
         );

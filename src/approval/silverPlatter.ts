@@ -8,8 +8,9 @@
 import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { AutoApprovalConfig } from "../config/schema.js";
-import { listChangedFiles } from "../github/pulls.js";
-import { decide } from "./policy.js";
+import { getPullRequest, listChangedFiles } from "../github/pulls.js";
+import { classifyActor, decide } from "./policy.js";
+import { approvalBody } from "./wording.js";
 import { performWrite } from "../lib/dry-run.js";
 
 type Api = Context<"pull_request">["octokit"];
@@ -19,6 +20,14 @@ type Api = Context<"pull_request">["octokit"];
  * refused rather than approved on incomplete information.
  */
 const MAX_FILE_PAGES = 10;
+
+/**
+ * How long to wait, on the `opened` action only, before reading the live pull
+ * request. The webhook payload's snapshot is stale — a bot like Renovate
+ * toggles auto-merge a moment after opening — so we give it that moment. A
+ * named constant, tunable without redesign.
+ */
+const AUTO_MERGE_GRACE_MS = 2_000;
 
 /**
  * The app's own login, e.g. `woodhouse[bot]`. Resolved once per process: it
@@ -81,6 +90,35 @@ export interface PullRequestFacts {
   readonly draft: boolean;
   readonly state: string;
   readonly headSha: string;
+  /** The `pull_request` action that triggered this evaluation, e.g. `opened`. */
+  readonly action: string;
+}
+
+/** Promise-based delay so the grace can be awaited inline in the same pass. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Read the login that enabled auto-merge on the pull request, from its current
+ * state — never the stale `auto_merge` snapshot in the webhook payload.
+ *
+ * On `opened` we wait the short grace first (an immediate read races the bot's
+ * own toggle); on the other events the state has settled. A failed GET is not
+ * caught: the rejection propagates and fails the pass, so a fetch error can
+ * never become a silent `null` that reads as "nobody enabled auto-merge".
+ */
+async function getAutoMergeEnabledBy(
+  octokit: Api,
+  owner: string,
+  repo: string,
+  number: number,
+  action: string,
+): Promise<string | null> {
+  if (action === "opened") await sleep(AUTO_MERGE_GRACE_MS);
+
+  const pull = await getPullRequest(octokit, owner, repo, number);
+  return pull.auto_merge?.enabled_by?.login ?? null;
 }
 
 export async function serve(
@@ -90,6 +128,8 @@ export async function serve(
   pr: PullRequestFacts,
   config: AutoApprovalConfig,
 ): Promise<boolean> {
+  const actorClass = classifyActor(pr.author, config);
+
   // Cheap checks first, so an unremarkable PR from an untrusted author costs
   // no API calls at all. Most webhook traffic will land here.
   const preliminary = decide(
@@ -111,9 +151,15 @@ export async function serve(
 
   const self = await appLogin(deps.octokit);
 
-  const [{ files, truncated }, alreadyApproved] = await Promise.all([
+  const [{ files, truncated }, alreadyApproved, autoMergeEnabledBy] = await Promise.all([
     listChangedFiles(deps.octokit, owner, repo, pr.number, { maxPages: MAX_FILE_PAGES }),
     hasExistingApproval(deps.octokit, owner, repo, pr.number, pr.headSha, self),
+    // Owners skip the fetch entirely — their approval never depends on
+    // auto-merge. For a bot the full pass always carries a gathered fact
+    // (`null` or a login), never `undefined`.
+    actorClass === "bot"
+      ? getAutoMergeEnabledBy(deps.octokit, owner, repo, pr.number, pr.action)
+      : undefined,
   ]);
 
   // A previous_filename means the file was moved; the old location matters
@@ -131,6 +177,7 @@ export async function serve(
       changedFiles,
       fileListTruncated: truncated,
       alreadyApproved,
+      autoMergeEnabledBy,
     },
     config,
   );
@@ -149,10 +196,7 @@ export async function serve(
       // Pin the review to the commit we actually inspected. Without this a push
       // landing mid-flight would be approved without ever being examined.
       commit_id: pr.headSha,
-      body:
-        "Approved automatically — the author is listed in " +
-        "`autoApproval.allowedActors` and this pull request touches no " +
-        "protected paths.\n\n_Woodhouse, at your service._",
+      body: approvalBody(actorClass, pr.author),
     });
     return true;
   });

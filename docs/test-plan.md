@@ -60,7 +60,8 @@ gatekeeper:
 autoApproval:
   enabled: true
   allowedActors:
-    - gunzy83
+    owners:
+      - gunzy83
 ```
 
 ### `woodhouse-test` → `.github/woodhouse.yml`
@@ -78,7 +79,7 @@ gatekeeper:
 
 Expected merge result: `has_wiki: false` and the label list inherited from the
 baseline, `has_issues: false` from the local override, `allowedActors:
-[gunzy83]` inherited, and `ignoredChecks: [advisory]` local.
+{owners: [gunzy83]}` inherited, and `ignoredChecks: [advisory]` local.
 
 ### `woodhouse-test` → `.github/workflows/ci.yml`
 

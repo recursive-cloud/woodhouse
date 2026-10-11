@@ -357,14 +357,33 @@
           "type": "boolean"
         },
         "allowedActors": {
-          "default": [],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255,
-            "pattern": "^[A-Za-z0-9-_.]+(\\[bot\\])?$"
-          }
+          "default": {},
+          "type": "object",
+          "properties": {
+            "owners": {
+              "default": [],
+              "description": "PR authors approved unconditionally (still subject to protectedPaths).",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^[A-Za-z0-9-_.]+(\\[bot\\])?$"
+              }
+            },
+            "bots": {
+              "default": [],
+              "description": "PR authors approved only when they enabled auto-merge themselves.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^[A-Za-z0-9-_.]+(\\[bot\\])?$"
+              }
+            }
+          },
+          "additionalProperties": false
         },
         "protectedPaths": {
           "default": [

@@ -45,8 +45,9 @@ Worth knowing before picking this up:
       validates.
 
 - [ ] **Add descriptions to the JSON Schema.** The generated schema currently
-      has 79 nodes and zero `description` fields, so editors offer completion
-      and validation but no hover documentation. The explanatory comments in
+      has `description` fields only on the two `allowedActors` sub-lists (plus
+      the document root), so editors offer completion and validation but almost
+      no hover documentation. The explanatory comments in
       `src/config/schema.ts` are TSDoc and do not carry through; zod needs
       `.describe()` (or `.meta({ description })` in v4) on each field for them
       to reach the schema.
@@ -54,8 +55,7 @@ Worth knowing before picking this up:
       Worth doing as a single pass over `schema.ts`, since the prose largely
       exists already and only needs moving. Consider also `.meta({ examples })`
       for the fiddlier fields — `strictChecks`, `protectedPaths`, `rulesets` —
-      and marking anything deprecated as the config shape evolves, for instance
-      when `allowedActors` gains the owners/staff split.
+      and marking anything deprecated as the config shape evolves.
 
       Check whether `z.toJSONSchema` emits `title` from `.meta()` too, and
       whether descriptions survive the `prefault` wrappers on each section.
@@ -78,13 +78,13 @@ Worth knowing before picking this up:
 
 ## Before 1.0
 
-- [ ] **Distinguish owners from "the help" in auto-approval.** Split
-      `autoApproval.allowedActors` into `owners` and `bots` groups and tailor
+- [x] **Distinguish owners from "the help" in auto-approval.** Split
+      `autoApproval.allowedActors` into `owners` and `bots` groups and tailored
       the review comment per class. Bots are approved only when *they* enabled
       auto-merge; owners unconditionally. Full plan in
       [`docs/owners-bots-auto-approval.md`](docs/owners-bots-auto-approval.md).
 
-      The app is pre-release, so the legacy flat array is not carried forward —
+      The app is pre-release, so the legacy flat array was not carried forward —
       existing configs are migrated by hand. Further customisation of the
       wording is a post-1.0 stretch goal.
 

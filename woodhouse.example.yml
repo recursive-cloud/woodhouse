@@ -97,13 +97,25 @@ gatekeeper:
 
 autoApproval:
   enabled: true
+
+  # Who may be auto-approved, split by trust model.
+  #
+  # `owners` are approved unconditionally (still subject to protectedPaths).
+  # Uncomment and add your own login:
+  # owners:
+  #   - my-user
+  #
+  # `bots` are approved only when they enabled auto-merge themselves. That is
+  # a deliberate tightening over the old flat list, which approved these bots
+  # unconditionally.
   allowedActors:
-    - renovate[bot]
-    - dependabot[bot]
+    bots:
+      - renovate[bot]
+      - dependabot[bot]
 
   # Pull requests touching these paths are never auto-approved. The defaults
-  # cover the config files themselves, which matters: without that, anyone in
-  # allowedActors could self-approve a change adding themselves more rights.
+  # cover the config files themselves, which matters: without that, any listed
+  # actor could self-approve a change adding themselves more rights.
   protectedPaths:
     - .github/woodhouse.yml
     - .github/woodhouse.yaml

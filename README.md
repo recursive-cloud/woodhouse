@@ -29,9 +29,14 @@ Probot instance directly, so a new listener cannot accidentally skip the check.
 options, topics, labels, branch protection and rulesets. Settings are diffed
 before writing, so an unchanged repository costs no write calls.
 
-**Silver Platter.** Pull requests from actors listed in
-`autoApproval.allowedActors` get an approving review — unless they touch a
-protected path, are drafts, or are too large to inspect.
+**Silver Platter.** PR authors listed under `autoApproval.allowedActors.owners`
+get an approving review without any extra preconditions — still vetoed by
+protected paths, drafts, and pull requests too large to inspect. Authors under
+`...bots` are approved only when that same bot enabled auto-merge on the pull
+request itself; Woodhouse reads the live pull request at decision time, because
+the webhook payload's snapshot is stale. `allowedActors` was once a flat list:
+it is not carried forward, the legacy shape is rejected as invalid
+configuration, and existing configs are migrated by hand.
 
 **The white glove check.** A single check run, `woodhouse/white-glove`, that
 aggregates every other check on the commit. Make it your only required status
