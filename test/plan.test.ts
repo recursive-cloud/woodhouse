@@ -7,7 +7,7 @@ import {
   type ExistingLabel,
 } from "../src/settings/plan.js";
 import { repositorySchema } from "../src/config/schema.js";
-import { describeForbidden } from "../src/settings/apply.js";
+import { describeForbidden } from "../src/settings/forbidden.js";
 
 const repo = (o: Record<string, unknown>) => repositorySchema.parse(o);
 
