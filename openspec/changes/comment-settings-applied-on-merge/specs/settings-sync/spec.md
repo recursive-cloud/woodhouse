@@ -10,9 +10,10 @@ settings pull requests.
 ## ADDED Requirements
 
 ### Requirement: Default-branch pushes trigger a settings sync
-A push to a repository's default branch that changes any settings file SHALL
-trigger a settings sync for that repository. Pushes to other branches, pushes
-not touching a settings file, and branch deletions MUST NOT.
+A push to a repository's default branch SHALL trigger a settings sync for
+that repository — a diff-based re-check that writes nothing when the
+repository already matches its configuration. Pushes to other branches and
+branch deletions MUST NOT.
 
 #### Scenario: Settings change lands on the default branch
 - **WHEN** a push to the default branch modifies `.github/woodhouse.yml`
@@ -20,7 +21,8 @@ not touching a settings file, and branch deletions MUST NOT.
 
 #### Scenario: File merely named like a settings file
 - **WHEN** a push to the default branch touches only `docs/woodhouse.yml`
-- **THEN** no settings sync runs
+- **THEN** the file is not treated as a settings change: the settings cache is not invalidated
+- **AND** the routine re-check writes nothing when the repository already matches its configuration
 
 ### Requirement: Merged settings pull requests get an outcome comment
 When a pull request that changes any settings file — added, modified, or

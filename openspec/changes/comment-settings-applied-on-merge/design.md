@@ -112,3 +112,18 @@ request that just disabled management — no sync and no comment; log instead.
 
 Deploy; merge a settings pull request on a real repository and observe the
 comment per the `docs/test-plan.md` walk.
+
+## Verification amendment (2026-10-12)
+
+Final verification surfaced an authoring error in the spec delta: the
+"Default-branch pushes trigger a settings sync" requirement claimed pushes
+not touching a settings file MUST NOT trigger a sync. The actual —
+pre-existing, documented (`docs/test-plan.md` row 5.3) — behavior is that
+every default-branch push triggers a diff-based re-check that writes nothing
+when the repository already matches; the touched-config predicate has only
+ever gated cache invalidation. The user chose to keep that self-healing
+behavior (reconciling drift on every default-branch push) rather than narrow
+the trigger, so the spec delta was amended to match the implementation: the
+MUST NOT clause covers other branches and deletions only, and the near-miss
+scenario states the true semantics (not a settings change; no cache
+invalidation; routine re-check writes nothing when already matching).

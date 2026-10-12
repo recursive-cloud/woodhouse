@@ -220,6 +220,13 @@ first and read the intended changes before letting it write.
 | 5.11 | Non-default branch ignored | Push to a feature branch | No sync runs |
 | 5.12 | Permission error is legible | Temporarily remove `administration: write` | Log explains the missing permission rather than a bare 403 |
 | 5.13 | Plan limit is legible | Make the repo private, keep a `branchProtection` block | Log explains that both branch protection and rulesets need a public repo or a paid plan — not a bare 403 |
+| 5.14 | **Merge walk** | Open a PR flipping a `repository` option in `.github/woodhouse.yml`, merge into `main` | Comment on the PR lists what was applied per area, ending `_Woodhouse, at your service._` |
+| 5.15 | Re-delivery updates in place | Redeliver the `pull_request.closed` event from the App's *Advanced* tab | The same comment is edited, not a second one |
+| 5.16 | Close without merge | Close a settings PR without merging | No sync, no comment |
+| 5.17 | Feature-branch merge | Merge a settings PR into a feature branch | No sync, no comment |
+| 5.18 | Disabled on merge | Merge a PR setting `settings.enabled: false` | No sync, no comment; log only |
+| 5.19 | Merge push already applied | With `DRY_RUN=false`, merge a settings PR | Comment says the settings are in effect and nothing further needed changing |
+| 5.20 | Baseline merge | Merge a settings PR in `.github-private` | Comment states the baseline was synced directly and other repositories adopt the change at their next event |
 
 ## Phase 6 — end to end
 

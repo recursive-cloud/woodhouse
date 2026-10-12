@@ -225,3 +225,32 @@ export class ConfigResolver {
     return { config: result.config, sources, issues: [] };
   }
 }
+
+/**
+ * Which cache scope a settings change invalidated.
+ *
+ * `owner` means the baseline repository was touched, so every repository the
+ * owner has is now stale; `repo` means only the pushed repository changed.
+ */
+export type ConfigInvalidation = "owner" | "repo";
+
+/**
+ * Drop the cached configs a touched settings file makes stale.
+ *
+ * A change in the baseline repository alters the resolved config of every
+ * repository the owner has, so the whole owner cache must go; any other
+ * repository only invalidates itself. This decision is declared once here so
+ * the push and pull-request handlers cannot drift apart.
+ */
+export function invalidateTouchedConfig(
+  resolver: Pick<ConfigResolver, "isBaselineRepo" | "invalidate" | "invalidateOwner">,
+  owner: string,
+  repo: string,
+): ConfigInvalidation {
+  if (resolver.isBaselineRepo(repo)) {
+    resolver.invalidateOwner(owner);
+    return "owner";
+  }
+  resolver.invalidate(owner, repo);
+  return "repo";
+}
