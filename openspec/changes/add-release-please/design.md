@@ -24,10 +24,14 @@ CI today is a single workflow (`ci.yml`): `contents: read` globally, `packages: 
 
 New `.github/workflows/release.yml` with two jobs and per-job permissions:
 the release-please job (`on: push` to main) runs
-`googleapis/release-please-action@v4` with `permissions: contents: write`
-and the default `GITHUB_TOKEN`; the image re-tag job (`on: release:
-published`, design D3) holds `packages: write` only — `docker buildx
-imagetools create` writes to the registry, not the repository. `ci.yml` is
+`googleapis/release-please-action@v4` with `permissions: contents: write`,
+`issues: write`, `pull-requests: write` and the default `GITHUB_TOKEN` —
+opening the release pull request needs `pull-requests: write`, and labeling
+it `autorelease: pending` needs `issues: write`; the label is load-bearing
+(release-please only recognizes its own PRs by it), and the action's own
+README documents the set. The image re-tag job (chained from the
+release-please job's outputs, design D3) holds `packages: write` only —
+`docker buildx imagetools create` writes to the registry, not the repository. `ci.yml` is
 untouched. Alternatives: folding
 release-please into `ci.yml` (rejected — widens permissions onto every
 pull-request run), manual releases (rejected — that is the status quo this
@@ -36,8 +40,10 @@ change exists to end).
 ### D2: bootstrap as 1.0.0 via `release-as`
 
 `release-please-config.json` sets `"release-as": "1.0.0"` for the root
-package; `.release-please-manifest.json` starts at the current `0.1.0`. The
-first release PR is titled `chore(main): release 1.0.0` and accumulates the
+package; `.release-please-manifest.json` starts at the current `0.1.0`.
+`"include-component-in-tag": false` keeps the tag `v1.0.0` rather than
+`woodhouse-v1.0.0` (release-please otherwise prefixes the package name).
+The first release PR is titled `chore(main): release 1.0.0` and accumulates the
 round's work. After that release merges, a task removes `release-as` so
 versioning resumes from commit types. Alternative: let the accumulated `feat`
 commits propose `0.2.0` and hand-edit the PR title (rejected — the
@@ -46,22 +52,26 @@ forgotten).
 
 ### D3: re-tag, don't rebuild, on release
 
-A second job in `release.yml` on `release: published`: GHCR login, buildx,
-then `docker buildx imagetools create` tagging `vX.Y.Z` and `vX` from the
-image already tagged with the release commit's short SHA. The release tag
+A second job in `release.yml`, chained from the release-please job rather
+than a `release: published` event — releases created with the default
+`GITHUB_TOKEN` fire no workflow events, so an event-triggered job would
+never run. It gates on the action's root-component `release_created` output
+(`needs` + `if`) and reads `tag_name` and `sha` from the same outputs: GHCR
+login, buildx, then `docker buildx imagetools create` tagging `vX.Y.Z` and
+`vX` from the image already tagged with the release commit's short SHA. The release tag
 points at the release PR's merge commit — the same commit whose push build
 produced the SHA-tagged image, so the version tags land on the tested digest.
 Alternatives: rebuild with `type=semver` metadata (rejected — double build and
 a different, untested digest), skip version tags and deploy by SHA (rejected —
-unreadable pins).
+unreadable pins), a personal access token so `release: published` fires
+(rejected — a standing new secret where the chained job needs none).
 
 ### D4: extra-files keep the deployment pins honest
 
 This change switches `docker-compose.yml`'s image tag and
 `k8s/kustomization.yaml`'s `newTag` to the bootstrap version, then registers
 both files as `extra-files` (generic updater) so each release commit bumps
-them. The generic updater matches on version strings, so the first bump is
-verified against the actual first release (see Risks for the fallback).
+them. The generic updater is annotation-driven — each pinned image-tag line carries an inline `# x-release-please-version` comment marking it for the bump (the `v` prefix survives the version-only replacement), so the first bump is verified against the actual first release (see Risks for the fallback).
 Deliberate window: from this change's merge until the 1.0.0 release merges,
 the pins reference a tag that does not exist yet, so deployment pulls in that
 window fail loudly rather than silently. The alternative — switching the pins
@@ -79,7 +89,8 @@ lags main, and re-pointing it would race the next push build for no gain.
 
 - [Generic updater may not match the pin lines on the first release] → verify on the first release-please run; fallback is the documented one-line manual bump in the README runbook.
 - [Conventional titles are unenforced until dress-code lands] → changelog quality rests on review discipline in the interim; the round's own PRs set the example.
-- [Re-tag needs the release commit's push build to have finished] → release publication happens after that merge; if the job races, re-running it is cheap and side-effect-free.
+- [Re-tag needs the release commit's push build to have finished] → the re-tag job runs in the same workflow run as the release-PR merge push, while `ci.yml`'s image job is still building; if the job races ahead of the image push, re-running the failed re-tag job alone is cheap and side-effect-free.
+- [The release pull request itself runs no CI checks] → pull requests created with the default `GITHUB_TOKEN` do not trigger workflows; accepted, because the release PR's content is generated from commits that already passed CI on their own pull requests.
 
 ## Migration Plan
 

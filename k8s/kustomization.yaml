@@ -14,7 +14,12 @@ resources:
 
 images:
   - name: ghcr.io/REPLACE_ME/woodhouse
-    newTag: latest
+    # Pin the release version rather than `latest`. release-please rewrites the
+    # annotated line below on every release, so the pin follows releases; until
+    # the 1.0.0 release merges the tag does not exist yet, and a pull fails
+    # loudly rather than silently. It replaces the first version-looking string
+    # on the line, so keep that annotated line free of any other version string.
+    newTag: v1.0.0 # x-release-please-version
 
 # Rolls the deployment automatically whenever the allowlist or log level
 # changes, instead of leaving a stale pod running the old configuration.

@@ -6,9 +6,9 @@ Woodhouse ships an image per commit but has no releases: no version numbers, no 
 
 ## What Changes
 
-- release-please manages versions and the changelog: a new `release.yml` workflow (its own minimal permissions, `contents: write`) opens and maintains a running release pull request on main, derived from conventional-commit PR titles — which this repo already follows.
+- release-please manages versions and the changelog: a new `release.yml` workflow (its own minimal per-job permissions) opens and maintains a running release pull request on main, derived from conventional-commit PR titles — which this repo already follows.
 - Bootstrap targets **1.0.0** (`release-as`), so the accumulating release PR literally is the 1.0 release PR. The pre-conventional history (before `0755843`) is accepted as a gap in the first changelog.
-- Published releases tag the GHCR image: a `release: published` job re-tags the already-built SHA image with `vX.Y.Z` and the floating `vX` via `docker buildx imagetools` — no rebuild, identical digest to the tested push build.
+- Published releases tag the GHCR image: a job chained from the release-please run re-tags the already-built SHA image with `vX.Y.Z` and the floating `vX` via `docker buildx imagetools` — no rebuild, identical digest to the tested push build.
 - Deployment manifests stop drifting: `docker-compose.yml` and `k8s/kustomization.yaml` move to version tags, registered as release-please extra-files so every release commit bumps both.
 - Conventional-commit PR-title *enforcement* is deliberately not here — `woodhouse/dress-code` (post-1.0) is the planned enforcement; until then titles are convention-only.
 
