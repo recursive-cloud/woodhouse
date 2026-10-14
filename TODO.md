@@ -4,187 +4,123 @@ Deferred work, roughly in the order it is worth doing.
 
 ## Where things stand
 
-All three feature areas are implemented and have been exercised against real
-repositories: installation lockdown, cascading settings sync, the white-glove
-consolidated check, auto-approval, and config validation. Two GitHub Apps run
-in one container. CI builds and publishes a multi-arch image per commit.
+Lockdown, cascading settings sync, the white-glove check, auto-approval, and
+config validation are implemented and exercised against real repositories;
+two Apps run in one container; CI builds a multi-arch image per commit.
 
-Tooling is in place: mise pins the toolchain, hk runs oxfmt and oxlint at
-pre-commit, and a JSON Schema is generated from the zod definitions.
+The **1.0 round** is proposed and approved: five changes under
+`openspec/changes/`, applied in order —
 
-The obvious next chunk is **Releases** — release-please, conventional commit
-enforcement, and version-tagged images. Conventional commits begin at
-`0755843`; everything before that is prose, so the first generated changelog
-will have a gap.
+1. `add-release-please` — bootstrapped as `release-as: 1.0.0`, so the
+   accumulating release pull request *is* the 1.0 pull request while the rest
+   of the round merges into it;
+2. `backfill-capability-specs`;
+3. `harden-ruleset-support`;
+4. `document-config-schema`;
+5. `open-onboarding-pr`.
 
-Worth knowing before picking this up:
+OpenSpec tracks the round; this file does not repeat it. Everything below is
+what remains *beyond* the round.
 
-- Commit `34a57ed` does not satisfy the lint gate it introduces, because the
-  fixes land in `85cb24a`. Only the tip is pushed, so CI never saw it red, but
-  `mise run ci` at that commit will fail. Every other commit is green in
-  isolation.
+## Post-1.0
 
-## Housekeeping
+- [ ] **`woodhouse/dress-code` — enforce conventional-commit PR titles.**
+      Woodhouse-native, because a ruleset `commit_message_pattern` rule is
+      not a PR-title gate: it evaluates commits on the head branch at merge
+      time, blocks squash merges on intermediate commits, and rulesets do
+      not exist on private Free repositories anyway. Title-only first pass —
+      a named check validating the PR title against the conventional-commit
+      pattern, re-checked on `pull_request.edited` (title edits; nothing
+      listens for that event today). Only meaningful when the squash commit
+      title is the PR title, so dress-code enabled requires the repository
+      merge settings coupled accordingly — squash merges with
+      `squash_merge_commit_title: PR_TITLE`, rebase and merge-commit
+      disabled, enforced by config validation — until a v2 all-commits mode
+      supports rebase shops. GitHub's merge-time `(#N)` suffix never reaches
+      the check (titles are validated pre-merge).
 
-- [x] **License.** Add `LICENSE` (MIT).
+- [ ] **Repository environments.** Environments and their protection rules
+      as a settings area. Slots into the apply pipeline cleanly: ruleset
+      rules already carry `required_deployments` (environment names) through
+      the passthrough.
 
-## Configuration authoring
+- [ ] **Derive `strictChecks` from ruleset required checks.** The
+      gatekeeper's strict checks and a ruleset's `required_status_checks`
+      are hand-mirrored today; deriving one from the other removes the
+      drift. Deferred from the ruleset hardening.
 
-- [x] **Upgrade zod to v4** — done. `.strict()` and `.passthrough()` turned out
-      to still work; the actual breaks were `z.record` needing an explicit key
-      type, and `.default({})` on a section now meaning the *output* value, for
-      which `.prefault({})` is the replacement.
+- [ ] **Bypass actor-ID lookups.** `bypass_actors` takes numeric actor IDs;
+      resolving teams, roles and logins to IDs would remove the archaeology.
+      Deferred from the ruleset hardening.
 
-- [x] **Publish a JSON Schema for `woodhouse.yml`** — done. Generated from the
-      zod definitions into `schema/woodhouse.schema.json`, with a CI check that
-      fails if it drifts, and a test asserting the schema and the runtime
-      validator accept and reject the same documents.
+- [ ] **Auto-approval wording customisation.** The owners/bots
+      review-comment wording is fixed; per-config wording is the stretch
+      goal (see `docs/owners-bots-auto-approval.md`).
 
-- [x] **Comment on pull requests with invalid configuration** — done. A single
-      comment, edited in place on each push and deleted once the file
-      validates.
+- [ ] **Per-App health and metrics.** `/healthz` reports how many Apps are
+      served but not whether each authenticates; a bad private key is only
+      visible as failing deliveries.
 
-- [ ] **Add descriptions to the JSON Schema.** The generated schema currently
-      has `description` fields only on the two `allowedActors` sub-lists (plus
-      the document root), so editors offer completion and validation but almost
-      no hover documentation. The explanatory comments in
-      `src/config/schema.ts` are TSDoc and do not carry through; zod needs
-      `.describe()` (or `.meta({ description })` in v4) on each field for them
-      to reach the schema.
-
-      Worth doing as a single pass over `schema.ts`, since the prose largely
-      exists already and only needs moving. Consider also `.meta({ examples })`
-      for the fiddlier fields — `strictChecks`, `protectedPaths`, `rulesets` —
-      and marking anything deprecated as the config shape evolves.
-
-      Check whether `z.toJSONSchema` emits `title` from `.meta()` too, and
-      whether descriptions survive the `prefault` wrappers on each section.
-
-- [ ] **Offer the schema modeline on new config files.** The validation comment
-      suggests the `# yaml-language-server:` line, but nothing adds it. Best
-      handled by the onboarding PR, which is writing the file anyway.
-
-## Findings from the first round of real testing
-
-- [x] **Re-approve on `synchronize`** — done.
-- [x] **Handle `pull_request.ready_for_review`** — done.
-- [x] **False green when a PR has no checks yet** — done, via a grace period.
-      See `gatekeeper.gracePeriodSeconds`.
-
-- [x] **Branch protection and rulesets on private Free repositories** — these
-      require the repository to be public, or a paid plan if private. *Neither*
-      mechanism is available on Free with a private repo. Now reported with an
-      explanation instead of a bare 403; see `describeForbidden`.
-
-## Before 1.0
-
-- [x] **Distinguish owners from "the help" in auto-approval.** Split
-      `autoApproval.allowedActors` into `owners` and `bots` groups and tailored
-      the review comment per class. Bots are approved only when *they* enabled
-      auto-merge; owners unconditionally. Full plan in
-      [`docs/owners-bots-auto-approval.md`](docs/owners-bots-auto-approval.md).
-
-      The app is pre-release, so the legacy flat array was not carried forward —
-      existing configs are migrated by hand. Further customisation of the
-      wording is a post-1.0 stretch goal.
-
-## Onboarding pull request
-
-- [ ] **Open an onboarding PR when the App is installed on a repository.**
-      Acts as the gate before Woodhouse becomes active: the PR adds
-      `.github/woodhouse.yml` (and optionally the always-on workflow above),
-      is validated by the config check like any other change, and merging it
-      is what switches management on. Renovate's onboarding PR is the model.
-      Depends on releases being in place.
+- [ ] **Consider deriving the allowlist from actual installations.**
+      `GET /app/installations` is authoritative for a private App and would
+      remove the allowlist from configuration. Rejected so far: it silently
+      widens the boundary if an App ever goes public, and installations
+      change at runtime. Revisit only if configuring it proves genuinely
+      annoying.
 
 ## Developer experience
 
-- [x] **mise for local tooling** — done. `mise.toml` pins Node, hk and pkl, and
-      exposes `install`, `lint`, `fix`, `test`, `typecheck`, `build` and `ci`.
+- [ ] **Re-enable Markdown formatting when oxfmt stabilises.** oxfmt 0.67
+      does not converge on a list item containing a second paragraph (it
+      re-indents the continuation lines on every run). Worth retrying at
+      1.0, and worth reporting upstream.
 
-- [x] **oxfmt + oxlint via hk pre-commit** — done, staged files only, with the
-      test suite and type checker deliberately left to CI.
+- [ ] **Slower linters on pre-push.** actionlint, hadolint, zizmor and
+      dclint are all useful and none fast enough for pre-commit;
+      `pre-push` is the right home, with CI as backstop.
 
-- [x] **Add lint to CI** — done, as its own job that the image build also
-      depends on.
+- [ ] **Revisit the oxlint categories.** `correctness`, `suspicious` and
+      `perf` are enabled; `pedantic` produced 127 findings and was not
+      adopted. Worth working through selectively. `no-await-in-loop` stays
+      off — the sequential API calls in `settings/apply.ts` are deliberate.
 
-- [ ] **Re-enable Markdown formatting when oxfmt stabilises.** Markdown is in
-      `.oxfmtrc.json`'s ignore list because oxfmt 0.67 does not converge on a
-      list item containing a second paragraph: it re-indents the continuation
-      lines on every run, so `check` fails immediately after `fix` and the hook
-      would rewrite docs on alternate commits. Worth retrying at 1.0, and worth
-      reporting upstream.
-
-- [ ] **Consider `hk install --global`.** hk recommends installing once into
-      `~/.gitconfig`, where it no-ops in repositories without an `hk.pkl`. This
-      repo uses a per-repo install so nothing outside it was touched. A global
-      install belongs in dotfiles rather than here, but if it is adopted, the
-      per-repo install becomes redundant and hk will skip it automatically.
-
-- [ ] **Slower linters on pre-push.** `hk init` detected actionlint, hadolint,
-      zizmor and dclint as applicable here. All are useful and none are fast
-      enough for pre-commit; `pre-push` is the right home, with CI as backstop.
-
-- [ ] **Revisit the oxlint categories.** `correctness`, `suspicious` and `perf`
-      are enabled. `pedantic` produced 127 findings and was not adopted; it may
-      be worth working through selectively. `no-await-in-loop` is off because
-      the sequential API calls in `settings/apply.ts` are deliberate — they
-      pace writes against rate limits and keep ruleset application last.
-
-## Releases
-
-- [ ] **release-please** for version bumps and changelog generation.
-
-- [ ] **Enforce conventional commit PR titles** with an action, since
-      release-please derives the changelog from them. Note the existing commit
-      history does *not* follow conventional commits, so either start from the
-      next commit or accept a gap in the first generated changelog.
-
-- [ ] **Tag images with the release version** in addition to the commit SHA,
-      and switch the compose deployment to a version tag once releases exist.
-
-## Multi-App operation
-
-- [ ] **Consider deriving the allowlist from actual installations.** For a
-      private App, `GET /app/installations` is authoritative about which
-      accounts can send events, which would remove the allowlist from
-      configuration entirely for the common case. Rejected for now because it
-      would silently widen the boundary if an App were ever made public, and
-      installations change at runtime. Revisit only if configuring it proves
-      genuinely annoying.
-
-- [ ] **Per-App health and metrics.** `/healthz` reports the number of Apps
-      served but says nothing about whether each is authenticating
-      successfully. A bad private key is currently only visible as failing
-      deliveries.
+- [ ] **Consider `hk install --global`.** Belongs in dotfiles rather than
+      here; if adopted, the per-repo install becomes redundant and hk skips
+      it automatically.
 
 ## Accepted tradeoffs
 
 Recorded so they are not rediscovered as bugs. Revisit only if the premise
 changes.
 
-- **Grace period timers do not survive a restart.** A restart during the grace
-  window on a pull request with no CI leaves the white-glove check
-  `in_progress` until the next push or manual re-run. Acceptable while this is
-  a single replica; the fix arrives naturally with the datastore that HA would
-  require anyway, which would also make the feature more robust.
+- **Grace period timers do not survive a restart.** A restart during the
+  grace window on a pull request with no CI leaves the white-glove check
+  `in_progress` until the next push or manual re-run. The fix arrives with
+  the datastore HA would need anyway.
 
-- **App configuration is read once at boot.** Adding or changing a tenant means
-  restarting the container. Configuration changes are not expected to be
-  frequent after setup.
+- **App configuration is read once at boot.** Adding or changing a tenant
+  means restarting the container.
+
+- **Rulesets converge by unconditional re-declaration.** GitHub's ruleset
+  reads are normalised and cannot be diffed against the planned body, so
+  every sync re-PUTs each configured ruleset. Idempotent, and no
+  user-visible change when the content already matches; specced in
+  `settings-sync`.
+
+- **`pruneRulesets` is converge-everything, not managed-only.** Opt-in
+  (default off): deletes every ruleset absent from the configuration,
+  hand-made included — the API offers no ownership marker. Documented in
+  the schema descriptions.
+
+- **Single replica by design.** Per-commit work is serialised in-process
+  (`src/lib/mutex.ts`) and the config cache is in-process. Redis comes
+  first, before any second replica.
 
 ## Deferred / revisit
 
-- [ ] **Image signing and provenance.** `provenance: false` is set in CI to
-      keep the GHCR package listing clean. Worth revisiting together with
-      cosign signing and SBOM generation.
+- [ ] **Image signing and provenance.** `provenance: false` keeps the GHCR
+      package listing clean. Worth revisiting with cosign signing and SBOM
+      generation.
 
-- [ ] **`docker/*` actions still target Node 20.** CI logs a deprecation
-      warning for `setup-qemu-action`, `setup-buildx-action`, `login-action`,
-      `metadata-action` and `build-push-action`. These are already the latest
-      released majors, so this is upstream — recheck periodically.
-
-- [ ] **Shared state for multi-replica operation.** Work is serialised per
-      commit with an in-process lock (`src/lib/mutex.ts`), and the config cache
-      is in-process too. Both would need to move to Redis before running more
-      than one replica. Not needed while the deployment is a singleton.
+- [ ] **`docker/*` actions still target Node 20.** Already the latest
+      released majors; upstream — recheck periodically.
