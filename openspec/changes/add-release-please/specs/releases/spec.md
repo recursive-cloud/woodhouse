@@ -18,11 +18,11 @@ A release SHALL be produced by release-please from the conventional-commit title
 - **THEN** a version tag and GitHub release are created and the next release pull request is opened
 
 ### Requirement: Release workflows hold least privilege per job
-The release-please job SHALL run with only `contents: write`; the image re-tag job SHALL run with only the registry access it needs (`packages: write`). No workflow triggered by pull requests SHALL hold write access to contents or packages.
+The release-please job SHALL run with only the write permissions it needs to open and label the running release pull request and cut the release (`contents: write`, `issues: write`, `pull-requests: write`); the image re-tag job SHALL run with only the registry access it needs (`packages: write`). No workflow triggered by pull requests SHALL hold write access to contents, issues, pull requests, or packages.
 
 #### Scenario: Pull-request runs stay read-only
 - **WHEN** CI runs on a pull request
-- **THEN** no workflow invoked by that pull request holds `contents: write` or `packages: write`
+- **THEN** no workflow invoked by that pull request holds `contents: write`, `issues: write`, `pull-requests: write`, or `packages: write`
 
 ### Requirement: Images are tagged with release versions without rebuilding
 On a published release, the container image built for the release commit SHALL be tagged with the release version (`vX.Y.Z`) and the floating major tag (`vX`) by re-tagging the existing image, not by building a new one.

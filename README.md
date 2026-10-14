@@ -253,8 +253,10 @@ Multi-stage, ending on distroless — no shell, no package manager, non-root.
 
 CI publishes multi-arch (`linux/amd64`, `linux/arm64`) images to
 `ghcr.io/recursive-cloud/woodhouse` on every push to `main`, tagged with the
-short commit SHA plus a moving `latest`. **Pin the SHA** in a compose file;
-`latest` exists for convenience during early testing.
+short commit SHA plus a moving `latest`. Compose and the kustomization pin the
+**release version** instead — release-please bumps both automatically on every
+release (see [Releases](#releases)); `latest` exists for convenience during
+early testing.
 
 The package is **private** by default, so a pull will fail with `denied` until
 you either:
@@ -282,10 +284,11 @@ shared Docker network. Point the tunnel's public hostname at
 `http://woodhouse:3000` and set the App's webhook URL to
 `https://<hostname>/api/github/webhooks`.
 
-The image tag is pinned to a commit SHA rather than `latest`, deliberately:
-Portainer will not notice a moving tag has changed, and an unexpected restart
-pulling a different build is not a surprise you want from a bot holding admin
-scopes.
+The image tag is pinned to the release version rather than `latest`,
+deliberately: Portainer will not notice a moving tag has changed, and an
+unexpected restart pulling a different build is not a surprise you want from a
+bot holding admin scopes. release-please bumps the pin on every release (see
+[Releases](#releases)).
 
 ### Kubernetes
 
@@ -308,6 +311,51 @@ to Redis first.
 
 There is no Ingress: the Service is ClusterIP and cloudflared connects to it
 from inside the cluster.
+
+## Releases
+
+Releases are cut by
+[release-please](https://github.com/googleapis/release-please) from the
+conventional-commit titles of squash-merged pull requests.
+
+release-please maintains a running release pull request on `main`, titled
+`chore(main): release X.Y.Z`, that accumulates changelog entries as those pull
+requests merge. Merging it cuts the tag, publishes the GitHub release, opens
+the next release pull request, and bumps both deployment pins — the annotated
+`# x-release-please-version` lines in
+[`docker-compose.yml`](./docker-compose.yml) and
+[`k8s/kustomization.yaml`](./k8s/kustomization.yaml). ([`release.yml`](.github/workflows/release.yml)
+wires this up; [`ci.yml`](.github/workflows/ci.yml) is untouched.)
+
+On a release cut, a job in the release workflow re-tags the already-built
+short-SHA image with `vX.Y.Z` and the floating `vX` via
+`docker buildx imagetools` — no rebuild, so the version tags carry the exact
+digest of the push build that CI tested. The raw `latest` tag keeps following
+`main`; releases never re-point it.
+
+### Release runbook
+
+- **Merging the release pull request** cuts the release: tag, GitHub release,
+  `vX.Y.Z` and `vX` image tags, and the two deployment pins all move in the
+  release commit.
+- **Prerequisite:** Settings → Actions → General must have *Allow GitHub
+  Actions to create and approve pull requests* enabled, or the release pull
+  request cannot be opened.
+- **The release pull request runs no CI checks of its own.** Pull requests
+  created with the default `GITHUB_TOKEN` do not trigger workflows. Accepted:
+  the release pull request's content is generated from commits that already
+  passed CI on their own pull requests.
+- **The re-tag job races the image build.** It starts in the same workflow run
+  as the release merge, while `ci.yml`'s image push is still building — expect
+  it to fail on the release cut. Re-run the failed re-tag job (that job alone)
+  once CI's image push completes; it is idempotent. If a further push to `main`
+  lands while the release merge's CI build is running, `ci.yml`'s
+  `cancel-in-progress` kills that build: re-run CI's image job first, then the
+  re-tag job.
+- **Manual-bump fallback.** If an extra-files update ever misses the pin lines,
+  bump the two annotated lines by hand in a normal pull request. That is the
+  whole fallback — the pins still reference a released version, they are just
+  moved without release-please's help that once.
 
 ## Testing against real repositories
 

@@ -8,11 +8,17 @@
 
 services:
   woodhouse:
-    image: ghcr.io/recursive-cloud/woodhouse:226df35
-    # Pin the commit SHA rather than `latest`. Portainer will not notice a
+    image: ghcr.io/recursive-cloud/woodhouse:v1.0.0 # x-release-please-version
+    # Pin the release version rather than `latest`. Portainer will not notice a
     # moving tag has changed, and an unexpected restart pulling a different
     # build is exactly the surprise you do not want from a bot with admin
-    # scopes. Bump this line deliberately.
+    # scopes. release-please rewrites the annotated line above on every
+    # release, so the pin follows releases rather than being bumped by hand.
+    # It replaces the first version-looking string on the line, so keep that
+    # annotated line free of any other version string.
+    #
+    # Until the 1.0.0 release merges, the tag above does not exist yet, so a
+    # deployment pull in that window fails loudly instead of silently.
 
     container_name: woodhouse
     restart: unless-stopped

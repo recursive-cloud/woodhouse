@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# release-please writes commits, tags and releases, so it cannot live in
+# ci.yml: that workflow also runs on pull requests and must stay read-only.
+jobs:
+  release-please:
+    name: Release pull request
+    runs-on: ubuntu-latest
+
+    # Scoped to the job, not the workflow, so a future job added here (the
+    # image re-tag) can hold its own narrower grant instead of inheriting this
+    # one. Opening and updating the release pull request needs
+    # `pull-requests: write`; labeling it `autorelease: pending` needs
+    # `issues: write`, and that label is load-bearing — release-please only
+    # recognizes its own release PRs by it, so a PR that failed to be labeled
+    # would merge without ever being tagged. `contents: write` writes the
+    # release commit, tag and GitHub release. This set is exactly what the
+    # action's README documents under "Workflow Permissions".
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    # Surfaced so the re-tag job below can chain on them. Without the `id` on
+    # the action step and this mapping, `needs.release-please.outputs.release_created`
+    # is the empty string, and an empty string in a job-level `if` silently
+    # skips the job: the release would happen, the images never get their
+    # version tags, and nothing would error.
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
+      major: ${{ steps.release.outputs.major }}
+
+    steps:
+      # With release-please-config.json and .release-please-manifest.json at
+      # the repo root, the action's defaults already resolve to exactly those
+      # files - no `with` block is needed. The `id` is what lets the job's
+      # `outputs` block read this step's results.
+      - id: release
+        uses: googleapis/release-please-action@v4
+
+  retag-image:
+    name: Re-tag image with release version
+    # Chained by `needs`, not a `release: published` trigger: a release cut
+    # with the default `GITHUB_TOKEN` fires no workflow events at all, so an
+    # event-triggered re-tag job would never run. Action outputs are always
+    # strings, so this compares against the literal 'true' — 'false' is truthy
+    # in a GitHub expression, and a truthiness check would run the job on every
+    # push.
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+
+    # Only the registry is written (imagetools create copies a manifest list),
+    # so `packages: write` is the whole grant. The release SHA and version tag
+    # arrive via job outputs, so there is no checkout and no `contents:` read.
+    permissions:
+      packages: write
+
+    steps:
+      # Nothing is read from the repository: the release commit's FULL 40-char
+      # SHA and the version tag both come from the release-please job's
+      # outputs. ci.yml tags the push build with the bare 7-char short SHA
+      # (metadata-action `type=sha,format=short,prefix=`), so the source ref is
+      # the first 7 characters of that SHA.
+      - name: Resolve image tags
+        id: tags
+        env:
+          FULL_SHA: ${{ needs.release-please.outputs.sha }}
+          VERSION: ${{ needs.release-please.outputs.tag_name }}
+          MAJOR: ${{ needs.release-please.outputs.major }}
+        run: |
+          echo "source=ghcr.io/${{ github.repository }}:${FULL_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "major=v${MAJOR}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Two invocations, one `-t` each — that is the documented syntax. Each
+      # carbon-copies the multi-arch manifest list from the short-SHA image, so
+      # both version tags land on the identical digest without rebuilding
+      # anything. ci.yml's push build for the same merge may still be running;
+      # if this races ahead of it the source ref will not exist yet, and
+      # re-running this failed job alone is cheap and side-effect-free.
+      - name: Tag the release version
+        run: docker buildx imagetools create -t "ghcr.io/${{ github.repository }}:${{ steps.tags.outputs.version }}" "${{ steps.tags.outputs.source }}"
+
+      - name: Tag the floating major version
+        run: docker buildx imagetools create -t "ghcr.io/${{ github.repository }}:${{ steps.tags.outputs.major }}" "${{ steps.tags.outputs.source }}"
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Image re-tagged"
+            echo
+            echo '```'
+            echo "ghcr.io/${{ github.repository }}:${{ steps.tags.outputs.version }}"
+            echo "ghcr.io/${{ github.repository }}:${{ steps.tags.outputs.major }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
