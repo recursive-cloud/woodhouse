@@ -30,53 +30,52 @@ const githubLogin = z
 
 export const gatekeeperSchema = z
   .object({
-    /**
-     * When false, the white-glove check is not created at all. Note that if the
-     * check is already a required status check in branch protection, disabling
-     * it here will leave PRs permanently blocked.
-     */
-    enabled: z.boolean().default(true),
+    enabled: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Create the `woodhouse/white-glove` check at all. If it is already a required status check in branch protection, disabling it here leaves PRs permanently blocked.",
+      ),
 
-    /**
-     * Checks that must report `success` explicitly. Unlike ordinary checks,
-     * these may not be `skipped` or `neutral`, and their *absence* holds the
-     * white-glove check at pending rather than letting it pass.
-     */
-    strictChecks: z.array(z.string().trim().min(1)).default([]),
+    strictChecks: z
+      .array(z.string().trim().min(1))
+      .default([])
+      .meta({
+        description:
+          "Checks that must report `success` explicitly: unlike ordinary checks they may not be skipped or neutral, and their absence holds the white-glove check pending rather than letting it pass.",
+        examples: [["build", "test"]],
+      }),
 
-    /**
-     * Check runs to exclude from evaluation entirely, by exact name. Useful for
-     * advisory-only checks (coverage reports, preview deployments).
-     */
-    ignoredChecks: z.array(z.string().trim().min(1)).default([]),
+    ignoredChecks: z
+      .array(z.string().trim().min(1))
+      .default([])
+      .describe(
+        "Check runs excluded from evaluation entirely, by exact name. Useful for advisory-only checks (coverage reports, preview deployments).",
+      ),
 
-    /**
-     * How long to wait for CI to register *any* check run on a commit before
-     * concluding there is none.
-     *
-     * When a pull request opens, GitHub has usually not created the Actions
-     * check runs yet. Concluding "no checks, therefore success" in that window
-     * produces a green required check on a commit nothing has tested. During
-     * the grace period the check is held pending instead; afterwards, a commit
-     * with genuinely no checks passes so that docs-only repositories are not
-     * deadlocked.
-     *
-     * Raise it if CI is routinely slow to start.
-     */
-    gracePeriodSeconds: z.number().int().min(0).max(900).default(30),
+    gracePeriodSeconds: z
+      .number()
+      .int()
+      .min(0)
+      .max(900)
+      .default(30)
+      .describe(
+        "How long to wait for CI to register any check run on a commit before concluding there is none. During the grace period the check is held pending instead of passing on a commit nothing has tested; afterwards a commit with genuinely no checks passes, so docs-only repositories are not deadlocked. Raise it if CI is routinely slow to start.",
+      ),
   })
   .strict()
+  .describe("The `woodhouse/white-glove` consolidated check this schema configures.")
   .prefault({});
 
 export const autoApprovalSchema = z
   .object({
-    enabled: z.boolean().default(true),
+    enabled: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Master switch. When false nothing is ever auto-approved; the rules below only apply while it is on.",
+      ),
 
-    /**
-     * PR authors whose pull requests are approved automatically, split by
-     * trust model: `owners` are approved unconditionally, `bots` only when
-     * they enabled auto-merge themselves.
-     */
     allowedActors: z
       .object({
         owners: z
@@ -89,38 +88,59 @@ export const autoApprovalSchema = z
           .describe("PR authors approved only when they enabled auto-merge themselves."),
       })
       .strict()
+      .describe(
+        "PR authors whose pull requests are approved automatically, split by trust model: `owners` are approved unconditionally, `bots` only when they enabled auto-merge themselves.",
+      )
       .prefault({}),
 
-    /**
-     * Refuse to auto-approve a PR that modifies any of these paths. Defaults
-     * cover the config files themselves: without this, any listed actor could
-     * self-approve a change that widens `allowedActors`, which is a
-     * privilege-escalation path.
-     */
     protectedPaths: z
       .array(z.string().trim().min(1))
-      .default([".github/woodhouse.yml", ".github/woodhouse.yaml"]),
+      .default([".github/woodhouse.yml", ".github/woodhouse.yaml"])
+      .meta({
+        description:
+          "Refuse to auto-approve a PR that modifies any of these paths. Defaults cover the config files themselves: without it, any listed actor could self-approve a change that widens `allowedActors`, a privilege-escalation path.",
+        examples: [[".github/woodhouse.yml", "infrastructure/"]],
+      }),
   })
   .strict()
+  .describe("Auto-approval of pull requests by trusted actors.")
   .prefault({});
 
 export const repositorySchema = z
   .object({
-    has_issues: z.boolean().optional(),
-    has_projects: z.boolean().optional(),
-    has_wiki: z.boolean().optional(),
-    has_discussions: z.boolean().optional(),
-    allow_squash_merge: z.boolean().optional(),
-    allow_merge_commit: z.boolean().optional(),
-    allow_rebase_merge: z.boolean().optional(),
-    allow_auto_merge: z.boolean().optional(),
-    delete_branch_on_merge: z.boolean().optional(),
-    allow_update_branch: z.boolean().optional(),
-    squash_merge_commit_title: z.enum(["PR_TITLE", "COMMIT_OR_PR_TITLE"]).optional(),
-    squash_merge_commit_message: z.enum(["PR_BODY", "COMMIT_MESSAGES", "BLANK"]).optional(),
-    description: z.string().optional(),
-    homepage: z.string().optional(),
-    topics: z.array(z.string().trim().min(1)).optional(),
+    has_issues: z.boolean().optional().describe("Enable the repository's Issues tab."),
+    has_projects: z.boolean().optional().describe("Enable the repository's Projects tab."),
+    has_wiki: z.boolean().optional().describe("Enable the repository's Wiki tab."),
+    has_discussions: z.boolean().optional().describe("Enable GitHub Discussions."),
+    allow_squash_merge: z.boolean().optional().describe("Allow squash merges."),
+    allow_merge_commit: z.boolean().optional().describe("Allow merge commits."),
+    allow_rebase_merge: z.boolean().optional().describe("Allow rebase merges."),
+    allow_auto_merge: z
+      .boolean()
+      .optional()
+      .describe("Allow pull requests to be auto-merged once the requirements pass."),
+    delete_branch_on_merge: z
+      .boolean()
+      .optional()
+      .describe("Delete the head branch automatically once a pull request merges."),
+    allow_update_branch: z
+      .boolean()
+      .optional()
+      .describe("Offer the `Update branch` button on pull requests."),
+    squash_merge_commit_title: z
+      .enum(["PR_TITLE", "COMMIT_OR_PR_TITLE"])
+      .optional()
+      .describe("Commit-title source for squash merges."),
+    squash_merge_commit_message: z
+      .enum(["PR_BODY", "COMMIT_MESSAGES", "BLANK"])
+      .optional()
+      .describe("Commit-message source for squash merges."),
+    description: z.string().optional().describe("Repository description."),
+    homepage: z.string().optional().describe("Repository homepage URL."),
+    topics: z
+      .array(z.string().trim().min(1))
+      .optional()
+      .describe("Repository topic list. Replaces all topics on the repo; GitHub lowercases them."),
 
     // Deliberately NOT exposed: `private` and `archived`.
     //
@@ -131,163 +151,239 @@ export const repositorySchema = z
     // repository you own. Change those two by hand.
   })
   .strict()
+  .describe("Repository settings synced when `settings.enabled` is true.")
   .prefault({});
 
 /**
- * Classic branch protection, keyed by branch name.
- *
- * Kept separate from rulesets because GitHub applies both independently and
- * most homelab repos only need one of them.
+ * Kept separate from the rulesets section because GitHub applies both
+ * independently and most homelab repos only need one of them.
  */
 export const branchProtectionSchema = z
   .object({
     required_status_checks: z
       .object({
-        strict: z.boolean().default(false),
-        contexts: z.array(z.string().trim().min(1)).default([]),
+        strict: z
+          .boolean()
+          .default(false)
+          .describe("Require branches to be up to date with the base branch before merging."),
+        contexts: z
+          .array(z.string().trim().min(1))
+          .default([])
+          .describe("Check context names (GitHub Actions workflow/job) that must pass."),
       })
       .strict()
       .nullable()
-      .optional(),
-    enforce_admins: z.boolean().nullable().optional(),
+      .optional()
+      .describe(
+        "Status checks a branch must satisfy. API-required null: sent as null when unset; sub-fields left out are kept by GitHub.",
+      ),
+    enforce_admins: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe(
+        "Apply branch protections to repository admins too. API-required null: sent as null when unset.",
+      ),
     required_pull_request_reviews: z
       .object({
-        required_approving_review_count: z.number().int().min(0).max(6).optional(),
-        dismiss_stale_reviews: z.boolean().optional(),
-        require_code_owner_reviews: z.boolean().optional(),
-        require_last_push_approval: z.boolean().optional(),
+        required_approving_review_count: z
+          .number()
+          .int()
+          .min(0)
+          .max(6)
+          .optional()
+          .describe("How many approving reviews are required (0-6)."),
+        dismiss_stale_reviews: z
+          .boolean()
+          .optional()
+          .describe("Dismiss a review when new commits land."),
+        require_code_owner_reviews: z
+          .boolean()
+          .optional()
+          .describe("Require approval from code owners for their files."),
+        require_last_push_approval: z
+          .boolean()
+          .optional()
+          .describe("A PR must be approved after its last commit."),
       })
       .strict()
       .nullable()
-      .optional(),
-    required_linear_history: z.boolean().optional(),
-    allow_force_pushes: z.boolean().nullable().optional(),
-    allow_deletions: z.boolean().optional(),
-    required_conversation_resolution: z.boolean().optional(),
-    lock_branch: z.boolean().optional(),
-    block_creations: z.boolean().optional(),
+      .optional()
+      .describe(
+        "Pull-request review protections. API-required null: sent as null when unset; sub-fields left out are kept by GitHub.",
+      ),
+    required_linear_history: z
+      .boolean()
+      .optional()
+      .describe("Only allow commits that extend the branch tip (no merges)."),
+    allow_force_pushes: z.boolean().nullable().optional().describe("Allow force pushes."),
+    allow_deletions: z.boolean().optional().describe("Allow deletion of the branch."),
+    required_conversation_resolution: z
+      .boolean()
+      .optional()
+      .describe("Require all conversations to be resolved before merging."),
+    lock_branch: z.boolean().optional().describe("Lock the branch against any pushes."),
+    block_creations: z
+      .boolean()
+      .optional()
+      .describe("Prevent creation of the branch by users without write access."),
   })
   .strict();
 
 export const labelSchema = z
   .object({
-    name: z.string().trim().min(1),
-    /** Six hex digits; a leading `#` is accepted and stripped on apply. */
+    name: z.string().trim().min(1).describe("Label name."),
     color: z
       .string()
       .trim()
       .regex(/^#?[0-9a-fA-F]{6}$/, "must be a six-digit hex colour")
-      .optional(),
-    description: z.string().max(100).optional(),
-    /** Rename an existing label to `name`. */
-    from: z.string().trim().min(1).optional(),
+      .optional()
+      .describe("Colour as six hex digits; a leading `#` is accepted and stripped on apply."),
+    description: z
+      .string()
+      .max(100)
+      .optional()
+      .describe("Label description — at most 100 characters, GitHub's limit."),
+    from: z.string().trim().min(1).optional().describe("Rename an existing label to `name` first."),
   })
   .strict();
 
-/**
- * Repository rulesets.
- *
- * The perimeter is typed, the core is open. `conditions` accepts only
- * `ref_name` because that is the sole condition key repository rulesets
- * support — organization-level keys (`repository_name`, `repository_id`,
- * `repository_property`) 422 on this endpoint, so they are rejected at
- * authoring time instead of inside a sync. `bypass_actors` enums mirror the
- * REST reference.
- *
- * `rules` is intentionally loose: the rule union is large, versioned, and
- * GitHub extends it regularly. Pinning it here would reject valid new rule
- * types. The `type` discriminant is required so obvious mistakes are still
- * caught, and GitHub validates the rest on write. As of October 2026 the REST
- * rule types are: creation, update, deletion, required_linear_history,
- * merge_queue, required_deployments, required_signatures, pull_request,
- * required_status_checks, non_fast_forward, commit_message_pattern,
- * commit_author_email_pattern, committer_email_pattern, branch_name_pattern,
- * tag_name_pattern, workflows, code_scanning, code_quality, code_coverage,
- * copilot_code_review, license_compliance_scanning, file_path_restriction,
- * max_file_path_length, file_extension_restriction, max_file_size. That list
- * is indicative, not validation: GitHub extends it regularly, and its docs and
- * API already disagree at the edges (`secret_scanning` is documented but
- * absent from the REST array).
- */
 export const rulesetSchema = z
   .object({
-    name: z.string().trim().min(1),
-    target: z.enum(["branch", "tag", "push"]).default("branch"),
-    enforcement: z.enum(["active", "evaluate", "disabled"]).default("active"),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .describe(
+        "Ruleset name. The case-insensitive match key for updates, deletes, and prune protection — two rulesets differing only in case are rejected as a collision at authoring time.",
+      ),
+    target: z
+      .enum(["branch", "tag", "push"])
+      .default("branch")
+      .describe("What the ruleset applies to: branch, tag, or push."),
+    enforcement: z
+      .enum(["active", "evaluate", "disabled"])
+      .default("active")
+      .describe("active enforces; evaluate monitors without blocking; disabled is a no-op."),
     bypass_actors: z
       .array(
         z
           .object({
-            actor_id: z.number().int().nullable().optional(),
-            actor_type: z.enum([
-              "Integration",
-              "OrganizationAdmin",
-              "RepositoryRole",
-              "Team",
-              "DeployKey",
-              "User",
-            ]),
-            bypass_mode: z.enum(["always", "pull_request", "exempt"]).optional(),
+            actor_id: z
+              .number()
+              .int()
+              .nullable()
+              .optional()
+              .describe(
+                "The specific actor's ID (user, team, org role, deploy key, or integration).",
+              ),
+            actor_type: z
+              .enum([
+                "Integration",
+                "OrganizationAdmin",
+                "RepositoryRole",
+                "Team",
+                "DeployKey",
+                "User",
+              ])
+              .describe("The kind of actor that may bypass."),
+            bypass_mode: z
+              .enum(["always", "pull_request", "exempt"])
+              .optional()
+              .describe("Scope of the bypass: always, pull_request only, or exempt."),
           })
           .strict(),
       )
-      .optional(),
+      .optional()
+      .describe(
+        "Actors allowed to bypass this ruleset. actor_type selects the kind, actor_id names the specific actor, bypass_mode controls scope (mirrors the REST reference).",
+      ),
     conditions: z
       .object({
         ref_name: z
           .object({
-            include: z.array(z.string().trim().min(1)).optional(),
-            exclude: z.array(z.string().trim().min(1)).optional(),
+            include: z
+              .array(z.string().trim().min(1))
+              .optional()
+              .describe("Glob-ish name patterns the ruleset applies to."),
+            exclude: z
+              .array(z.string().trim().min(1))
+              .optional()
+              .describe("Glob-ish name patterns the ruleset must not apply to."),
           })
           .strict()
-          .optional(),
+          .optional()
+          .describe("Patterns the ruleset applies to, as include/exclude name globs."),
       })
       .strict()
-      .optional(),
-    rules: z.array(z.object({ type: z.string().trim().min(1) }).passthrough()).default([]),
+      .optional()
+      .describe(
+        "Conditions. Accepts only `ref_name` — organization-level condition keys 422 on the repository-rulesets endpoint, so they are rejected at authoring time rather than mid-sync.",
+      ),
+    rules: z
+      .array(
+        z
+          .object({
+            type: z.string().trim().min(1).describe("Rule type (e.g. `pull_request`)."),
+          })
+          .passthrough(),
+      )
+      .default([])
+      .describe(
+        "The rules applied. `type` is required (catches obvious mistakes); the rest of each rule body passes through and GitHub validates it on write.",
+      ),
   })
   .strict();
 
 export const settingsSchema = z
   .object({
-    /**
-     * Master switch. Off by default: installing this app must not silently
-     * start rewriting repository settings until it is explicitly asked to.
-     */
-    enabled: z.boolean().default(false),
-    /** Remove labels that exist on the repo but are absent from config. */
-    pruneLabels: z.boolean().default(false),
-    /**
-     * Converge everything: delete every ruleset in the repository that is not
-     * named in this configuration — including rulesets created outside
-     * Woodhouse. Off by default. There is no ownership marker to fall back on:
-     * GitHub's ruleset API has no metadata slot for one, so prune cannot tell a
-     * hand-made ruleset from a managed one. Turn it on only when the ruleset
-     * list below is genuinely the whole truth for the repository.
-     */
-    pruneRulesets: z.boolean().default(false),
+    enabled: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Master switch. Off by default: installing this app must not silently start rewriting repository settings until it is explicitly asked to.",
+      ),
+    pruneLabels: z
+      .boolean()
+      .default(false)
+      .describe("Remove labels that exist on the repo but are absent from config."),
+    pruneRulesets: z.boolean().default(false).meta({
+      description:
+        "Converge everything: delete every ruleset in the repository that is not named in this configuration — including rulesets created outside Woodhouse. Off by default. There is no ownership marker to fall back on: GitHub's ruleset API has no metadata slot for one, so prune cannot tell a hand-made ruleset from a managed one. Turn it on only when the ruleset list below is genuinely the whole truth for the repository.",
+    }),
   })
   .strict()
+  .describe(
+    "Repo-settings sync: the master switch plus the prune toggles for labels and rulesets. Off by default.",
+  )
   .prefault({});
 
 export const woodhouseConfigSchema = z
   .object({
-    /**
-     * Set on a repository's local config to opt out of the inherited baseline
-     * entirely rather than merging with it.
-     */
-    inherit: z.boolean().default(true),
+    inherit: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Set on a repository's local config to opt out of the inherited baseline entirely rather than merging with it.",
+      ),
 
     settings: settingsSchema,
     repository: repositorySchema,
-    branchProtection: z.record(z.string(), branchProtectionSchema).default({}),
-    labels: z.array(labelSchema).default([]),
+    branchProtection: z
+      .record(z.string(), branchProtectionSchema)
+      .default({})
+      .describe(
+        "Classic branch protection keyed by branch name; every configured branch is PUT wholesale and idempotently on each sync. Fields left unset are omitted from the write (GitHub keeps them as-is), except the three API-required fields (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`), which are sent as explicit `null` when unset; a branch that does not exist is skipped, not an error.",
+      ),
+    labels: z
+      .array(labelSchema)
+      .default([])
+      .describe(
+        "Repository labels converge to this list; removal is governed by `settings.pruneLabels`.",
+      ),
     rulesets: z
       .array(rulesetSchema)
-      // Names are the case-insensitive match key for updates, deletes, and
-      // prune protection: `main` and `MAIN` would silently target the same
-      // ruleset, so the collision is rejected at authoring time. Config-level
-      // because the conflict is between entries, not within one.
+      // Case-insensitive name-collision check (see the `rulesets` description).
       .superRefine((rulesets, ctx) => {
         const seen = new Map<string, number>();
         rulesets.forEach((ruleset, index) => {
@@ -304,7 +400,28 @@ export const woodhouseConfigSchema = z
           }
         });
       })
-      .default([]),
+      .default([])
+      .meta({
+        description:
+          "Repository rulesets converge to this list; every configured ruleset is re-declared wholesale on every sync (create or update, matched by name — GitHub's GET is too normalised to diff). The perimeter is typed and the core is open: `type` is required (catches obvious mistakes) and the rest of each rule body passes through, GitHub validates on write. Supported rule types as prose (deliberately not an enum — GitHub extends the union regularly), indicative not validation: creation, update, deletion, required_linear_history, merge_queue, required_deployments, required_signatures, pull_request, required_status_checks, non_fast_forward, commit_message_pattern, commit_author_email_pattern, committer_email_pattern, branch_name_pattern, tag_name_pattern, workflows, code_scanning, code_quality, code_coverage, copilot_code_review, license_compliance_scanning, file_path_restriction, max_file_path_length, file_extension_restriction, max_file_size. `secret_scanning` is documented but absent from the REST array. Conditions accept only `ref_name` (organization-level keys 422 on this endpoint, rejected at authoring time instead of mid-sync). WARN: `settings.pruneRulesets` deletes every ruleset not named here, including hand-made ones.",
+        examples: [
+          [
+            {
+              name: "woodhouse",
+              target: "branch",
+              enforcement: "active",
+              conditions: { ref_name: { include: ["refs/heads/main"] } },
+              rules: [
+                { type: "required_linear_history" },
+                {
+                  type: "pull_request",
+                  parameters: { required_approving_review_count: 1 },
+                },
+              ],
+            },
+          ],
+        ],
+      }),
     gatekeeper: gatekeeperSchema,
     autoApproval: autoApprovalSchema,
   })

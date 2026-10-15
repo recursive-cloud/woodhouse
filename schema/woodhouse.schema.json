@@ -8,6 +8,7 @@
   "properties": {
     "inherit": {
       "default": true,
+      "description": "Set on a repository's local config to opt out of the inherited baseline entirely rather than merging with it.",
       "type": "boolean"
     },
     "settings": {
@@ -16,54 +17,69 @@
       "properties": {
         "enabled": {
           "default": false,
+          "description": "Master switch. Off by default: installing this app must not silently start rewriting repository settings until it is explicitly asked to.",
           "type": "boolean"
         },
         "pruneLabels": {
           "default": false,
+          "description": "Remove labels that exist on the repo but are absent from config.",
           "type": "boolean"
         },
         "pruneRulesets": {
           "default": false,
+          "description": "Converge everything: delete every ruleset in the repository that is not named in this configuration — including rulesets created outside Woodhouse. Off by default. There is no ownership marker to fall back on: GitHub's ruleset API has no metadata slot for one, so prune cannot tell a hand-made ruleset from a managed one. Turn it on only when the ruleset list below is genuinely the whole truth for the repository.",
           "type": "boolean"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Repo-settings sync: the master switch plus the prune toggles for labels and rulesets. Off by default."
     },
     "repository": {
       "default": {},
       "type": "object",
       "properties": {
         "has_issues": {
+          "description": "Enable the repository's Issues tab.",
           "type": "boolean"
         },
         "has_projects": {
+          "description": "Enable the repository's Projects tab.",
           "type": "boolean"
         },
         "has_wiki": {
+          "description": "Enable the repository's Wiki tab.",
           "type": "boolean"
         },
         "has_discussions": {
+          "description": "Enable GitHub Discussions.",
           "type": "boolean"
         },
         "allow_squash_merge": {
+          "description": "Allow squash merges.",
           "type": "boolean"
         },
         "allow_merge_commit": {
+          "description": "Allow merge commits.",
           "type": "boolean"
         },
         "allow_rebase_merge": {
+          "description": "Allow rebase merges.",
           "type": "boolean"
         },
         "allow_auto_merge": {
+          "description": "Allow pull requests to be auto-merged once the requirements pass.",
           "type": "boolean"
         },
         "delete_branch_on_merge": {
+          "description": "Delete the head branch automatically once a pull request merges.",
           "type": "boolean"
         },
         "allow_update_branch": {
+          "description": "Offer the `Update branch` button on pull requests.",
           "type": "boolean"
         },
         "squash_merge_commit_title": {
+          "description": "Commit-title source for squash merges.",
           "type": "string",
           "enum": [
             "PR_TITLE",
@@ -71,6 +87,7 @@
           ]
         },
         "squash_merge_commit_message": {
+          "description": "Commit-message source for squash merges.",
           "type": "string",
           "enum": [
             "PR_BODY",
@@ -79,12 +96,15 @@
           ]
         },
         "description": {
+          "description": "Repository description.",
           "type": "string"
         },
         "homepage": {
+          "description": "Repository homepage URL.",
           "type": "string"
         },
         "topics": {
+          "description": "Repository topic list. Replaces all topics on the repo; GitHub lowercases them.",
           "type": "array",
           "items": {
             "type": "string",
@@ -92,10 +112,12 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Repository settings synced when `settings.enabled` is true."
     },
     "branchProtection": {
       "default": {},
+      "description": "Classic branch protection keyed by branch name; every configured branch is PUT wholesale and idempotently on each sync. Fields left unset are omitted from the write (GitHub keeps them as-is), except the three API-required fields (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`), which are sent as explicit `null` when unset; a branch that does not exist is skipped, not an error.",
       "type": "object",
       "propertyNames": {
         "type": "string"
@@ -104,16 +126,19 @@
         "type": "object",
         "properties": {
           "required_status_checks": {
+            "description": "Status checks a branch must satisfy. API-required null: sent as null when unset; sub-fields left out are kept by GitHub.",
             "anyOf": [
               {
                 "type": "object",
                 "properties": {
                   "strict": {
                     "default": false,
+                    "description": "Require branches to be up to date with the base branch before merging.",
                     "type": "boolean"
                   },
                   "contexts": {
                     "default": [],
+                    "description": "Check context names (GitHub Actions workflow/job) that must pass.",
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -129,28 +154,34 @@
             ]
           },
           "enforce_admins": {
+            "description": "Apply branch protections to repository admins too. API-required null: sent as null when unset.",
             "type": [
               "boolean",
               "null"
             ]
           },
           "required_pull_request_reviews": {
+            "description": "Pull-request review protections. API-required null: sent as null when unset; sub-fields left out are kept by GitHub.",
             "anyOf": [
               {
                 "type": "object",
                 "properties": {
                   "required_approving_review_count": {
+                    "description": "How many approving reviews are required (0-6).",
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 6
                   },
                   "dismiss_stale_reviews": {
+                    "description": "Dismiss a review when new commits land.",
                     "type": "boolean"
                   },
                   "require_code_owner_reviews": {
+                    "description": "Require approval from code owners for their files.",
                     "type": "boolean"
                   },
                   "require_last_push_approval": {
+                    "description": "A PR must be approved after its last commit.",
                     "type": "boolean"
                   }
                 },
@@ -162,24 +193,30 @@
             ]
           },
           "required_linear_history": {
+            "description": "Only allow commits that extend the branch tip (no merges).",
             "type": "boolean"
           },
           "allow_force_pushes": {
+            "description": "Allow force pushes.",
             "type": [
               "boolean",
               "null"
             ]
           },
           "allow_deletions": {
+            "description": "Allow deletion of the branch.",
             "type": "boolean"
           },
           "required_conversation_resolution": {
+            "description": "Require all conversations to be resolved before merging.",
             "type": "boolean"
           },
           "lock_branch": {
+            "description": "Lock the branch against any pushes.",
             "type": "boolean"
           },
           "block_creations": {
+            "description": "Prevent creation of the branch by users without write access.",
             "type": "boolean"
           }
         },
@@ -188,23 +225,28 @@
     },
     "labels": {
       "default": [],
+      "description": "Repository labels converge to this list; removal is governed by `settings.pruneLabels`.",
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Label name."
           },
           "color": {
+            "description": "Colour as six hex digits; a leading `#` is accepted and stripped on apply.",
             "type": "string",
             "pattern": "^#?[0-9a-fA-F]{6}$"
           },
           "description": {
+            "description": "Label description — at most 100 characters, GitHub's limit.",
             "type": "string",
             "maxLength": 100
           },
           "from": {
+            "description": "Rename an existing label to `name` first.",
             "type": "string",
             "minLength": 1
           }
@@ -217,16 +259,46 @@
     },
     "rulesets": {
       "default": [],
+      "description": "Repository rulesets converge to this list; every configured ruleset is re-declared wholesale on every sync (create or update, matched by name — GitHub's GET is too normalised to diff). The perimeter is typed and the core is open: `type` is required (catches obvious mistakes) and the rest of each rule body passes through, GitHub validates on write. Supported rule types as prose (deliberately not an enum — GitHub extends the union regularly), indicative not validation: creation, update, deletion, required_linear_history, merge_queue, required_deployments, required_signatures, pull_request, required_status_checks, non_fast_forward, commit_message_pattern, commit_author_email_pattern, committer_email_pattern, branch_name_pattern, tag_name_pattern, workflows, code_scanning, code_quality, code_coverage, copilot_code_review, license_compliance_scanning, file_path_restriction, max_file_path_length, file_extension_restriction, max_file_size. `secret_scanning` is documented but absent from the REST array. Conditions accept only `ref_name` (organization-level keys 422 on this endpoint, rejected at authoring time instead of mid-sync). WARN: `settings.pruneRulesets` deletes every ruleset not named here, including hand-made ones.",
+      "examples": [
+        [
+          {
+            "name": "woodhouse",
+            "target": "branch",
+            "enforcement": "active",
+            "conditions": {
+              "ref_name": {
+                "include": [
+                  "refs/heads/main"
+                ]
+              }
+            },
+            "rules": [
+              {
+                "type": "required_linear_history"
+              },
+              {
+                "type": "pull_request",
+                "parameters": {
+                  "required_approving_review_count": 1
+                }
+              }
+            ]
+          }
+        ]
+      ],
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Ruleset name. The case-insensitive match key for updates, deletes, and prune protection — two rulesets differing only in case are rejected as a collision at authoring time."
           },
           "target": {
             "default": "branch",
+            "description": "What the ruleset applies to: branch, tag, or push.",
             "type": "string",
             "enum": [
               "branch",
@@ -236,6 +308,7 @@
           },
           "enforcement": {
             "default": "active",
+            "description": "active enforces; evaluate monitors without blocking; disabled is a no-op.",
             "type": "string",
             "enum": [
               "active",
@@ -244,11 +317,13 @@
             ]
           },
           "bypass_actors": {
+            "description": "Actors allowed to bypass this ruleset. actor_type selects the kind, actor_id names the specific actor, bypass_mode controls scope (mirrors the REST reference).",
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
                 "actor_id": {
+                  "description": "The specific actor's ID (user, team, org role, deploy key, or integration).",
                   "anyOf": [
                     {
                       "type": "integer",
@@ -269,9 +344,11 @@
                     "Team",
                     "DeployKey",
                     "User"
-                  ]
+                  ],
+                  "description": "The kind of actor that may bypass."
                 },
                 "bypass_mode": {
+                  "description": "Scope of the bypass: always, pull_request only, or exempt.",
                   "type": "string",
                   "enum": [
                     "always",
@@ -287,12 +364,15 @@
             }
           },
           "conditions": {
+            "description": "Conditions. Accepts only `ref_name` — organization-level condition keys 422 on the repository-rulesets endpoint, so they are rejected at authoring time rather than mid-sync.",
             "type": "object",
             "properties": {
               "ref_name": {
+                "description": "Patterns the ruleset applies to, as include/exclude name globs.",
                 "type": "object",
                 "properties": {
                   "include": {
+                    "description": "Glob-ish name patterns the ruleset applies to.",
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -300,6 +380,7 @@
                     }
                   },
                   "exclude": {
+                    "description": "Glob-ish name patterns the ruleset must not apply to.",
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -314,13 +395,15 @@
           },
           "rules": {
             "default": [],
+            "description": "The rules applied. `type` is required (catches obvious mistakes); the rest of each rule body passes through and GitHub validates it on write.",
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
                 "type": {
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "description": "Rule type (e.g. `pull_request`)."
                 }
               },
               "required": [
@@ -342,10 +425,18 @@
       "properties": {
         "enabled": {
           "default": true,
+          "description": "Create the `woodhouse/white-glove` check at all. If it is already a required status check in branch protection, disabling it here leaves PRs permanently blocked.",
           "type": "boolean"
         },
         "strictChecks": {
           "default": [],
+          "description": "Checks that must report `success` explicitly: unlike ordinary checks they may not be skipped or neutral, and their absence holds the white-glove check pending rather than letting it pass.",
+          "examples": [
+            [
+              "build",
+              "test"
+            ]
+          ],
           "type": "array",
           "items": {
             "type": "string",
@@ -354,6 +445,7 @@
         },
         "ignoredChecks": {
           "default": [],
+          "description": "Check runs excluded from evaluation entirely, by exact name. Useful for advisory-only checks (coverage reports, preview deployments).",
           "type": "array",
           "items": {
             "type": "string",
@@ -362,12 +454,14 @@
         },
         "gracePeriodSeconds": {
           "default": 30,
+          "description": "How long to wait for CI to register any check run on a commit before concluding there is none. During the grace period the check is held pending instead of passing on a commit nothing has tested; afterwards a commit with genuinely no checks passes, so docs-only repositories are not deadlocked. Raise it if CI is routinely slow to start.",
           "type": "integer",
           "minimum": 0,
           "maximum": 900
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The `woodhouse/white-glove` consolidated check this schema configures."
     },
     "autoApproval": {
       "default": {},
@@ -375,6 +469,7 @@
       "properties": {
         "enabled": {
           "default": true,
+          "description": "Master switch. When false nothing is ever auto-approved; the rules below only apply while it is on.",
           "type": "boolean"
         },
         "allowedActors": {
@@ -404,12 +499,20 @@
               }
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "PR authors whose pull requests are approved automatically, split by trust model: `owners` are approved unconditionally, `bots` only when they enabled auto-merge themselves."
         },
         "protectedPaths": {
           "default": [
             ".github/woodhouse.yml",
             ".github/woodhouse.yaml"
+          ],
+          "description": "Refuse to auto-approve a PR that modifies any of these paths. Defaults cover the config files themselves: without it, any listed actor could self-approve a change that widens `allowedActors`, a privilege-escalation path.",
+          "examples": [
+            [
+              ".github/woodhouse.yml",
+              "infrastructure/"
+            ]
           ],
           "type": "array",
           "items": {
@@ -418,7 +521,8 @@
           }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Auto-approval of pull requests by trusted actors."
     }
   },
   "additionalProperties": false
