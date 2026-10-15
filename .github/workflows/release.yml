@@ -89,12 +89,38 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
+      # ci.yml's push build for the same merge may still be running: release-
+      # please cuts the release in seconds while the image job queues behind
+      # lint and test and then runs a QEMU multi-arch build. buildx creates the
+      # tag only when the final manifest list lands, so the tag appearing means
+      # the push completed — never a partial push. Poll for it, bounded: 40
+      # attempts 30 seconds apart is 20 minutes, which covers a cold build and
+      # queue delay; exceeding it means something is actually wrong, most
+      # plausibly ci.yml's `cancel-in-progress` killing the build on a further
+      # push to main. The inspect sits in the `if` on purpose: run steps
+      # default to `bash -e`, so a bare inspect would abort the step on the
+      # first not-yet-existing tag and silently reintroduce the race.
+      - name: Wait for the image build
+        env:
+          SOURCE: ${{ steps.tags.outputs.source }}
+        run: |
+          for attempt in $(seq 1 40); do
+            echo "attempt ${attempt}/40"
+            if docker buildx imagetools inspect "$SOURCE" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::The image ${SOURCE} did not appear within 20 minutes." \
+            "ci.yml's image build was likely cancelled by a further push to main, or it failed;" \
+            "see the release runbook recovery in README.md: re-run CI's image job, then this job."
+          exit 1
+
       # Two invocations, one `-t` each — that is the documented syntax. Each
       # carbon-copies the multi-arch manifest list from the short-SHA image, so
       # both version tags land on the identical digest without rebuilding
-      # anything. ci.yml's push build for the same merge may still be running;
-      # if this races ahead of it the source ref will not exist yet, and
-      # re-running this failed job alone is cheap and side-effect-free.
+      # anything. The wait above has confirmed the source ref exists, so these
+      # copy a complete manifest list.
       - name: Tag the release version
         run: docker buildx imagetools create -t "ghcr.io/${{ github.repository }}:${{ steps.tags.outputs.version }}" "${{ steps.tags.outputs.source }}"
 
