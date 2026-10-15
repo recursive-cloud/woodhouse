@@ -345,13 +345,13 @@ digest of the push build that CI tested. The raw `latest` tag keeps following
   created with the default `GITHUB_TOKEN` do not trigger workflows. Accepted:
   the release pull request's content is generated from commits that already
   passed CI on their own pull requests.
-- **The re-tag job races the image build.** It starts in the same workflow run
-  as the release merge, while `ci.yml`'s image push is still building — expect
-  it to fail on the release cut. Re-run the failed re-tag job (that job alone)
-  once CI's image push completes; it is idempotent. If a further push to `main`
-  lands while the release merge's CI build is running, `ci.yml`'s
-  `cancel-in-progress` kills that build: re-run CI's image job first, then the
-  re-tag job.
+- **The re-tag job waits for the image build.** It starts in the same workflow
+  run as the release merge, before `ci.yml`'s image push has finished, so it
+  polls for the short-SHA image to appear — up to 20 minutes — and then re-tags
+  it; the normal path completes hands-off. On timeout (e.g. a further push to
+  `main` cancelled the release merge's CI build via `cancel-in-progress`, or
+  the build failed), re-run CI's image job first, then the re-tag job; the
+  re-tag is idempotent.
 - **Manual-bump fallback.** If an extra-files update ever misses the pin lines,
   bump the two annotated lines by hand in a normal pull request. That is the
   whole fallback — the pins still reference a released version, they are just
