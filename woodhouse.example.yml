@@ -25,6 +25,10 @@ settings:
   # Delete labels that exist on the repository but are absent here. Leave off
   # until you are confident the label list below is complete.
   pruneLabels: false
+
+  # Converge everything: delete every ruleset not named under `rulesets` below,
+  # including ones created by hand. Off by default; there is no ownership
+  # marker to tell a Woodhouse-made ruleset from any other.
   pruneRulesets: false
 
 repository:
@@ -121,4 +125,38 @@ autoApproval:
     - .github/woodhouse.yaml
     - .github/workflows/
 
-rulesets: []
+# Rulesets, GitHub's modern enforcement surface. This example mirrors the
+# `branchProtection.main` section above — the same protection, expressed on
+# the newer API. A real baseline should pick one surface per branch: both
+# apply independently, so listing a branch in both places duplicates the
+# requirement rather than reinforcing it.
+#
+# `target: branch` with a `~DEFAULT_BRANCH` condition scopes the ruleset to
+# the default branch, the modern equivalent of keying branch protection by
+# branch name.
+#
+# PRUNE WARNING: with `settings.pruneRulesets: true` a sync deletes every
+# ruleset not named here — including rulesets created by hand, outside this
+# configuration. There is no ownership marker to distinguish them, so leave
+# prune off unless the list below is genuinely the whole truth.
+rulesets:
+  - name: main
+    target: branch
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+
+    # Rule parameters are the REST API's own snake_case names, passed through
+    # verbatim — GitHub validates the bodies on write.
+    rules:
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 1
+          dismiss_stale_reviews_on_push: true
+      - type: required_status_checks
+        parameters:
+          # The same single consolidated check as branchProtection above.
+          required_status_checks:
+            - context: woodhouse/white-glove
+          strict_required_status_checks_policy: true

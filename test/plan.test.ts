@@ -6,7 +6,7 @@ import {
   topicsDiffer,
   type ExistingLabel,
 } from "../src/settings/plan.js";
-import { repositorySchema } from "../src/config/schema.js";
+import { repositorySchema, type RulesetConfig } from "../src/config/schema.js";
 import { describeForbidden } from "../src/settings/forbidden.js";
 
 const repo = (o: Record<string, unknown>) => repositorySchema.parse(o);
@@ -153,6 +153,41 @@ describe("planLabels", () => {
   });
 });
 
+/**
+ * A full, realistic ruleset: the sole condition key repository rulesets
+ * support (`ref_name`), both bypass enum additions synced in this change, and
+ * two real rule types with their REST parameter names. Deep-equality
+ * assertions against this object are the verbatim-passthrough proof; the
+ * pipeline never touches rule bodies.
+ */
+const FULL_RULESET: RulesetConfig = {
+  name: "main",
+  target: "branch",
+  enforcement: "active",
+  conditions: { ref_name: { include: ["~DEFAULT_BRANCH"] } },
+  bypass_actors: [
+    { actor_id: 42, actor_type: "RepositoryRole", bypass_mode: "pull_request" },
+    { actor_id: 1341, actor_type: "User", bypass_mode: "exempt" },
+  ],
+  rules: [
+    {
+      type: "required_status_checks",
+      parameters: {
+        required_status_checks: [{ context: "woodhouse/white-glove" }],
+        strict_required_status_checks_policy: true,
+        do_not_enforce_on_create: false,
+      },
+    },
+    {
+      type: "pull_request",
+      parameters: {
+        required_approving_review_count: 1,
+        dismiss_stale_reviews_on_push: true,
+      },
+    },
+  ],
+};
+
 describe("planRulesets", () => {
   it("creates a ruleset that does not exist", () => {
     const plan = planRulesets(
@@ -181,6 +216,37 @@ describe("planRulesets", () => {
   it("prunes when enabled", () => {
     const plan = planRulesets([{ id: 1, name: "manual" }], [], true);
     expect(plan.delete).toEqual([{ id: 1, name: "manual" }]);
+  });
+
+  it("creates a full ruleset with every parameter preserved verbatim", () => {
+    const plan = planRulesets([], [FULL_RULESET], false);
+
+    // toEqual is the passthrough assertion: the planned body IS the fixture.
+    expect(plan.create).toEqual([FULL_RULESET]);
+    expect(plan.update).toEqual([]);
+    expect(plan.delete).toEqual([]);
+  });
+
+  it("updates a full ruleset by name with every parameter preserved verbatim", () => {
+    const plan = planRulesets([{ id: 7, name: "main" }], [FULL_RULESET], false);
+
+    expect(plan.update).toEqual([{ id: 7, ruleset: FULL_RULESET }]);
+    expect(plan.create).toEqual([]);
+  });
+
+  it("prunes only the unconfigured hand-made ruleset, never the claimed one", () => {
+    const plan = planRulesets(
+      [
+        { id: 7, name: "main" },
+        { id: 9, name: "hotfix" },
+      ],
+      [FULL_RULESET],
+      true,
+    );
+
+    // The hand-made `hotfix` is unconfigured and dies; the configured `main`
+    // is claimed and survives.
+    expect(plan.delete).toEqual([{ id: 9, name: "hotfix" }]);
   });
 });
 

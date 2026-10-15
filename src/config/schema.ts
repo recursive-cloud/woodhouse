@@ -187,10 +187,27 @@ export const labelSchema = z
 /**
  * Repository rulesets.
  *
+ * The perimeter is typed, the core is open. `conditions` accepts only
+ * `ref_name` because that is the sole condition key repository rulesets
+ * support — organization-level keys (`repository_name`, `repository_id`,
+ * `repository_property`) 422 on this endpoint, so they are rejected at
+ * authoring time instead of inside a sync. `bypass_actors` enums mirror the
+ * REST reference.
+ *
  * `rules` is intentionally loose: the rule union is large, versioned, and
  * GitHub extends it regularly. Pinning it here would reject valid new rule
  * types. The `type` discriminant is required so obvious mistakes are still
- * caught, and GitHub validates the rest on write.
+ * caught, and GitHub validates the rest on write. As of October 2026 the REST
+ * rule types are: creation, update, deletion, required_linear_history,
+ * merge_queue, required_deployments, required_signatures, pull_request,
+ * required_status_checks, non_fast_forward, commit_message_pattern,
+ * commit_author_email_pattern, committer_email_pattern, branch_name_pattern,
+ * tag_name_pattern, workflows, code_scanning, code_quality, code_coverage,
+ * copilot_code_review, license_compliance_scanning, file_path_restriction,
+ * max_file_path_length, file_extension_restriction, max_file_size. That list
+ * is indicative, not validation: GitHub extends it regularly, and its docs and
+ * API already disagree at the edges (`secret_scanning` is documented but
+ * absent from the REST array).
  */
 export const rulesetSchema = z
   .object({
@@ -208,13 +225,25 @@ export const rulesetSchema = z
               "RepositoryRole",
               "Team",
               "DeployKey",
+              "User",
             ]),
-            bypass_mode: z.enum(["always", "pull_request"]).optional(),
+            bypass_mode: z.enum(["always", "pull_request", "exempt"]).optional(),
           })
           .strict(),
       )
       .optional(),
-    conditions: z.record(z.string(), z.unknown()).optional(),
+    conditions: z
+      .object({
+        ref_name: z
+          .object({
+            include: z.array(z.string().trim().min(1)).optional(),
+            exclude: z.array(z.string().trim().min(1)).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     rules: z.array(z.object({ type: z.string().trim().min(1) }).passthrough()).default([]),
   })
   .strict();
@@ -228,7 +257,14 @@ export const settingsSchema = z
     enabled: z.boolean().default(false),
     /** Remove labels that exist on the repo but are absent from config. */
     pruneLabels: z.boolean().default(false),
-    /** Delete rulesets managed by us but no longer present in config. */
+    /**
+     * Converge everything: delete every ruleset in the repository that is not
+     * named in this configuration — including rulesets created outside
+     * Woodhouse. Off by default. There is no ownership marker to fall back on:
+     * GitHub's ruleset API has no metadata slot for one, so prune cannot tell a
+     * hand-made ruleset from a managed one. Turn it on only when the ruleset
+     * list below is genuinely the whole truth for the repository.
+     */
     pruneRulesets: z.boolean().default(false),
   })
   .strict()
@@ -246,7 +282,29 @@ export const woodhouseConfigSchema = z
     repository: repositorySchema,
     branchProtection: z.record(z.string(), branchProtectionSchema).default({}),
     labels: z.array(labelSchema).default([]),
-    rulesets: z.array(rulesetSchema).default([]),
+    rulesets: z
+      .array(rulesetSchema)
+      // Names are the case-insensitive match key for updates, deletes, and
+      // prune protection: `main` and `MAIN` would silently target the same
+      // ruleset, so the collision is rejected at authoring time. Config-level
+      // because the conflict is between entries, not within one.
+      .superRefine((rulesets, ctx) => {
+        const seen = new Map<string, number>();
+        rulesets.forEach((ruleset, index) => {
+          const key = ruleset.name.toLowerCase();
+          const first = seen.get(key);
+          if (first !== undefined) {
+            ctx.addIssue({
+              code: "custom",
+              message: `duplicate ruleset name "${ruleset.name}" (already used by "${rulesets[first]?.name}" at index ${first})`,
+              path: [index],
+            });
+          } else {
+            seen.set(key, index);
+          }
+        });
+      })
+      .default([]),
     gatekeeper: gatekeeperSchema,
     autoApproval: autoApprovalSchema,
   })

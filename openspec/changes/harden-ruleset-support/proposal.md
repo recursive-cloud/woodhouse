@@ -24,6 +24,6 @@ Rulesets are GitHub's modern enforcement surface and Woodhouse's transport for t
 
 ## Impact
 
-- `src/config/schema.ts` (conditions typing, bypass enum sync, duplicate-name refinement, updated comments), `src/settings/plan.ts` (logic unchanged — typing flows through), `woodhouse.example.yml` (realistic ruleset example + prune warning), `schema/woodhouse.schema.json` (regenerated), tests in `test/` (validation, plan, appliers).
+- `src/config/schema.ts` (conditions typing, bypass enum sync, duplicate-name refinement, updated comments), `src/settings/plan.ts` (logic unchanged — typing flows through), `woodhouse.example.yml` (realistic ruleset example + prune warning), `README.md` (pointer to GitHub's assisted branch-protection → rulesets migration), `schema/woodhouse.schema.json` (regenerated), tests in `test/` (validation, plan, appliers).
 - No behavior change for valid existing configurations: a config using `ref_name` conditions validates as before; a config using any other condition key was going to be rejected by GitHub at write time (422) and now fails earlier, at the author.
 - Configurations are hand-migrated as needed (pre-release precedent from the owners/bots split).

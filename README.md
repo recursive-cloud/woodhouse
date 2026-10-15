@@ -90,6 +90,15 @@ the App installation, or Woodhouse cannot read them.
 > regardless. Woodhouse says so explicitly when the API refuses, rather than
 > logging a bare 403.
 
+**Moving off branch protection?** GitHub ships an *assisted* converter rather
+than an automatic one: under repository Settings → Branches, each branch
+protection rule has a **Convert to ruleset** button that previews the
+translation and can optionally delete the original once it lands. It works one
+rule at a time, so a repository can migrate at its own pace. Woodhouse manages
+both surfaces but deliberately ships no migration code of its own — see
+GitHub's [Converting branch protections to
+rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/converting-branch-protections-to-rulesets).
+
 Unknown keys are rejected. A misspelled `allowedActor` that silently did
 nothing would be a security problem, not a cosmetic one — so pull requests that
 touch a config file get a `woodhouse/config` check that validates the proposed

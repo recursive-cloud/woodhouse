@@ -267,14 +267,16 @@
                     "OrganizationAdmin",
                     "RepositoryRole",
                     "Team",
-                    "DeployKey"
+                    "DeployKey",
+                    "User"
                   ]
                 },
                 "bypass_mode": {
                   "type": "string",
                   "enum": [
                     "always",
-                    "pull_request"
+                    "pull_request",
+                    "exempt"
                   ]
                 }
               },
@@ -286,10 +288,29 @@
           },
           "conditions": {
             "type": "object",
-            "propertyNames": {
-              "type": "string"
+            "properties": {
+              "ref_name": {
+                "type": "object",
+                "properties": {
+                  "include": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "exclude": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
             },
-            "additionalProperties": {}
+            "additionalProperties": false
           },
           "rules": {
             "default": [],
