@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import { applyRulesets } from "../../src/settings/appliers/rulesets.js";
 import type { ApplierContext } from "../../src/settings/appliers/types.js";
-import { woodhouseConfigSchema } from "../../src/config/schema.js";
+import { woodhouseConfigSchema, type RulesetConfig } from "../../src/config/schema.js";
 
 interface ExistingRuleset {
   id: number;
@@ -49,7 +49,43 @@ function build(
   return { ...fake, log, ctx, config: woodhouseConfigSchema.parse(configInput) };
 }
 
-/** An error shaped like an Octokit request failure. */
+/**
+ * The same full ruleset shape the planner tests use. It is parsed through the
+ * real `woodhouseConfigSchema` by `build`, so the request assertions prove the
+ * typed schema plus the applier carry rules, conditions and bypass actors
+ * through verbatim.
+ */
+const FULL_RULESET: RulesetConfig = {
+  name: "main",
+  target: "branch",
+  enforcement: "active",
+  conditions: { ref_name: { include: ["~DEFAULT_BRANCH"] } },
+  bypass_actors: [
+    { actor_id: 42, actor_type: "RepositoryRole", bypass_mode: "pull_request" },
+    { actor_id: 1341, actor_type: "User", bypass_mode: "exempt" },
+  ],
+  rules: [
+    {
+      type: "required_status_checks",
+      parameters: {
+        required_status_checks: [{ context: "woodhouse/white-glove" }],
+        strict_required_status_checks_policy: true,
+        do_not_enforce_on_create: false,
+      },
+    },
+    {
+      type: "pull_request",
+      parameters: {
+        required_approving_review_count: 1,
+        dismiss_stale_reviews_on_push: true,
+      },
+    },
+  ],
+};
+
+/**
+ * An error shaped like an Octokit request failure.
+ */
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
 }
@@ -267,6 +303,83 @@ describe("applyRulesets", () => {
       owner: "acme",
       repo: "widgets",
       per_page: 100,
+    });
+  });
+
+  it("POSTs a full ruleset body with rules, conditions and bypass actors verbatim", async () => {
+    const { ctx, config, request } = build([], { rulesets: [FULL_RULESET] });
+
+    const result = await applyRulesets(ctx, config);
+
+    expect(request).toHaveBeenCalledOnce();
+    // Deep equality on the whole body: every rule parameter survives verbatim.
+    expect(request).toHaveBeenCalledWith("POST /repos/{owner}/{repo}/rulesets", {
+      owner: "acme",
+      repo: "widgets",
+      ...FULL_RULESET,
+    });
+    expect(result).toEqual({
+      changes: [{ area: "ruleset", action: "create", target: "main" }],
+      failures: [],
+    });
+  });
+
+  it("PUTs a full ruleset body with rules, conditions and bypass actors verbatim", async () => {
+    const { ctx, config, request } = build([{ id: 7, name: "main" }], {
+      rulesets: [FULL_RULESET],
+    });
+
+    const result = await applyRulesets(ctx, config);
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith("PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
+      owner: "acme",
+      repo: "widgets",
+      ruleset_id: 7,
+      ...FULL_RULESET,
+    });
+    expect(result).toEqual({
+      changes: [{ area: "ruleset", action: "update", target: "main" }],
+      failures: [],
+    });
+  });
+
+  it("DELETEs only the unconfigured hand-made ruleset when the configured one is claimed", async () => {
+    const { ctx, config, request } = build(
+      [
+        { id: 7, name: "main" },
+        { id: 9, name: "hotfix" },
+      ],
+      { rulesets: [FULL_RULESET], settings: { pruneRulesets: true } },
+    );
+
+    const result = await applyRulesets(ctx, config);
+
+    // main is configured (PUT), hotfix is hand-made and unconfigured (DELETE).
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}",
+      expect.objectContaining({ ruleset_id: 7, name: "main" }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}",
+      {
+        owner: "acme",
+        repo: "widgets",
+        ruleset_id: 9,
+      },
+    );
+    // The configured ruleset's id is never the target of a delete.
+    expect(request).not.toHaveBeenCalledWith(
+      "DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}",
+      expect.objectContaining({ ruleset_id: 7 }),
+    );
+    expect(result.changes).toContainEqual({
+      area: "ruleset",
+      action: "delete",
+      target: "hotfix",
     });
   });
 });

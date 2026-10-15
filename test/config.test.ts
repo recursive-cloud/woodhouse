@@ -127,6 +127,63 @@ describe("config schema", () => {
     expect(result.issues[0]?.path).toBe("gatekeeper.enabled");
   });
 
+  it("accepts a ref_name condition", () => {
+    const result = parseConfig({
+      rulesets: [{ name: "main", conditions: { ref_name: { include: ["~DEFAULT_BRANCH"] } } }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.rulesets[0]?.conditions).toEqual({
+      ref_name: { include: ["~DEFAULT_BRANCH"] },
+    });
+  });
+
+  it("rejects an organization-only condition key with the condition path", () => {
+    // `repository_name` is organization-ruleset-only and would 422 at write time.
+    const result = parseConfig({
+      rulesets: [
+        { name: "main", conditions: { repository_name: { include: ["~DEFAULT_BRANCH"] } } },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const issue = result.issues.find((i) => i.path.startsWith("rulesets"));
+    expect(issue?.path).toBe("rulesets.0.conditions");
+    expect(issue?.message).toContain("repository_name");
+  });
+
+  it("accepts the User actor type and exempt bypass mode", () => {
+    const result = parseConfig({
+      rulesets: [
+        {
+          name: "main",
+          bypass_actors: [{ actor_id: 42, actor_type: "User", bypass_mode: "exempt" }],
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.rulesets[0]?.bypass_actors?.[0]).toEqual({
+      actor_id: 42,
+      actor_type: "User",
+      bypass_mode: "exempt",
+    });
+  });
+
+  it("rejects duplicate ruleset names case-insensitively", () => {
+    const result = parseConfig({ rulesets: [{ name: "main" }, { name: "MAIN" }] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const duplicate = result.issues.find((i) => i.path.startsWith("rulesets"));
+    expect(duplicate?.message).toContain("MAIN");
+    expect(duplicate?.message).toContain("main");
+  });
+
+  it("accepts distinct ruleset names", () => {
+    const result = parseConfig({ rulesets: [{ name: "main" }, { name: "release" }] });
+    expect(result.ok).toBe(true);
+  });
+
   it("merges a baseline and a local layer before validating", () => {
     // Validating each layer separately would apply defaults to the local layer
     // and clobber real baseline values.
