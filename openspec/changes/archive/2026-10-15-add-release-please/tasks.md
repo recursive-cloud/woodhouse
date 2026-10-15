@@ -19,7 +19,7 @@
 ## 4. Whole-change verification
 
 - [x] 4.1 Run `mise run ci && npm run schema:check` (the full gate — schema drift is not part of `mise run ci`).
-- [ ] 4.2 After merge, observe the first release-please run open the 1.0.0 release pull request and record its URL in the change notes (apply-time observation; the runbook fallback in 3.2 covers a missed extra-files bump).
+- [x] 4.2 After merge, observe the first release-please run open the 1.0.0 release pull request and record its URL in the change notes (apply-time observation; the runbook fallback in 3.2 covers a missed extra-files bump). Observed: https://github.com/recursive-cloud/woodhouse/pull/12 — recorded in the notes' follow-through section.
 
 ## Workflow follow-up
 

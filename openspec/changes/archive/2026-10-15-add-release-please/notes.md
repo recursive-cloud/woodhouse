@@ -43,3 +43,22 @@ approve pull requests" enabled, or the `GITHUB_TOKEN` cannot open the release
 PR. At apply time it was **disabled** (`can_approve_pull_request_reviews:
 false`, via the repo `actions/permissions/workflow` API) — it must be
 enabled before the first push to main after this change merges.
+
+## Follow-through (post-merge, 2026-10-15)
+
+- The operator prerequisite was resolved before the merge: "Allow GitHub
+  Actions to create and approve pull requests" was enabled at the **org**
+  level (the repo-level setting was greyed out because the org setting was
+  disabled); the repo endpoint now reports `can_approve_pull_request_reviews:
+  true`.
+- PR #11 merged as `76e0bbb`. GitHub required one-time manual approval for
+  the new `release.yml` workflow file's first run; subsequent runs go
+  automatically.
+- The first release-please run succeeded and opened the 1.0.0 release pull
+  request — task 4.2's observation:
+  https://github.com/recursive-cloud/woodhouse/pull/12
+  (`chore(main): release 1.0.0`, labeled `autorelease: pending`).
+- On PR #11's merge the re-tag job correctly **skipped** (`release_created`
+  false — opening the release PR is not cutting a release). The documented
+  re-tag race engages on the release PR's merge; the bounded-wait
+  self-healing fix is proposed as the `retag-wait-for-image` change.
