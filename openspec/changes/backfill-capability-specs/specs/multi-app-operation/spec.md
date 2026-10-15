@@ -7,7 +7,7 @@ Multi-App operation: one container serving several private GitHub Apps, each wit
 ## ADDED Requirements
 
 ### Requirement: Each App is served by its own Probot instance
-Each configured App SHALL be served by its own Probot instance with its own webhook secret, created at startup from the operator-supplied App-definition file — a CommonJS function of the environment. Per-App settings (installation allowlist, baseline repository, label) SHALL override the global defaults, and every App SHALL end up with an allowlist and a baseline repository either way.
+Each configured App SHALL be served by its own Probot instance with its own webhook secret, created at startup from the operator-supplied App-definition file — a CommonJS function of the environment. Per-App settings — installation allowlist, baseline repository and label — SHALL be honoured, with the allowlist and baseline repository inherited from the global defaults when unset, and every App SHALL end up with an allowlist and a baseline repository either way.
 
 #### Scenario: Two Apps, one container
 - **WHEN** the App-definition file configures two Apps

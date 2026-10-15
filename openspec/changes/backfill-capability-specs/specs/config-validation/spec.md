@@ -7,7 +7,7 @@ Pull-request-time validation of settings files: pull requests that change a `woo
 ## ADDED Requirements
 
 ### Requirement: Pull requests touching settings files are validated
-When a pull request that adds or modifies a settings file is opened, reopened, or synchronized, Woodhouse SHALL read each such settings file at the pull request head and validate it against the configuration schema. A removed settings file is not read — there is nothing at the head to validate — so a pull request whose only settings change is a deletion posts no validation check. A file that is merely named like a settings file is not a settings file.
+When a pull request that adds or modifies a settings file is opened, reopened, or synchronized, Woodhouse SHALL validate each such file at the pull request head against the configuration schema. A removed settings file, or a settings path that is not a regular file at the head (a symlink or submodule), is not read — nothing to validate — so a pull request whose only settings change is such a path posts no validation check. A file merely named like a settings file is not a settings file.
 
 #### Scenario: Pull request adds a local config
 - **WHEN** a pull request adds or modifies `.github/woodhouse.yml`
@@ -23,6 +23,10 @@ When a pull request that adds or modifies a settings file is opened, reopened, o
 
 #### Scenario: Deletion is not validated
 - **WHEN** a pull request's only settings change is deleting `.github/woodhouse.yml`
+- **THEN** no `woodhouse/config` check is posted for it
+
+#### Scenario: Non-regular file is not validated
+- **WHEN** a pull request replaces the settings file with a symlink or a submodule
 - **THEN** no `woodhouse/config` check is posted for it
 
 ### Requirement: The validation verdict is a check run
@@ -59,8 +63,8 @@ When every changed settings file validates, no explanatory comment SHALL be pres
 - **THEN** no comment is left and the `woodhouse/config` check passes
 
 ### Requirement: Dry-run never writes
-In dry-run mode the validation verdict and the would-be comment SHALL be evaluated and logged, and nothing SHALL be written to GitHub.
+In dry-run mode the validation verdict and the would-be comment SHALL be evaluated, every write SHALL be suppressed, and each suppressed write SHALL be logged; nothing SHALL be written to GitHub.
 
 #### Scenario: Dry-run validation
 - **WHEN** a pull request with an invalid settings file is validated while dry-run mode is on
-- **THEN** the issues and the would-be comment body are logged and GitHub receives no comment and no check run
+- **THEN** GitHub receives no comment and no check run, and each suppressed check and comment write is logged as a skipped write

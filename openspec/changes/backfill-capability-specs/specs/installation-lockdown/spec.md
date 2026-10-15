@@ -18,7 +18,7 @@ Every webhook delivery SHALL be checked against the installation allowlist befor
 - **THEN** the delivery is rejected as unresolved, running no handler
 
 ### Requirement: Owner resolution falls back in order and never trusts the sender
-The owner SHALL be resolved from `repository.owner.login`, falling back to `organization.login`, then to `installation.account.login` for events that carry no repository. The event's sender SHALL NOT be used to authorize — the sender is the actor who triggered the event, not the owner of the resource — and the boundary never consults it at all.
+The owner SHALL be resolved from `repository.owner.login`, falling back to `organization.login`, then to `installation.account.login` when the prior source is absent. The event's sender SHALL NOT be used to authorize — the sender is the actor who triggered the event, not the owner of the resource — and the boundary never consults it at all.
 
 #### Scenario: Installation event without a repository
 - **WHEN** an `installation` event arrives carrying no repository object
