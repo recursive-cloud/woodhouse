@@ -153,6 +153,63 @@ The App slug can be anything; Woodhouse resolves its own bot login at runtime
 via `GET /app` and caches it, so the "have I already approved this commit?"
 check keeps working whatever you name it.
 
+### Onboarding on install
+
+Installing the App is the offer. A fresh install (`installation.created`) and a
+repository added to an existing installation (`installation_repositories.added`)
+both trigger the onboarding walk: for each newly installed repository Woodhouse
+opens a pull request — branch `woodhouse/onboarding`, title
+`chore: onboard to Woodhouse`, label `woodhouse: onboarding` — that adds
+`.github/woodhouse.yml` with the schema modeline, `settings.enabled: true`, and
+pointers to the schema and `woodhouse.example.yml`. That is the whole starter
+configuration; everything else stays at its schema default.
+
+The walk is stateless — every decision is read from GitHub's current state, not
+remembered:
+
+- A repository that already has any settings file (either `.github/` path, or a
+  root `woodhouse.yml`/`.yaml`, which is how the baseline repository carries its
+  own) is skipped silently. An existing file is a deliberate state, even if
+  settings are off.
+- A repository with an open onboarding pull request is skipped, so re-delivered
+  installation events never duplicate the branch, the commit, or the pull
+  request.
+- An offer closed without merging leaves the branch behind; the next
+  installation event opens the pull request from that existing branch rather
+  than rewriting it. The branch keeps its old template — delete it to have the
+  next event regenerate it. If the branch and commit succeeded but opening the
+  pull request failed, the next event picks up from the branch the same way.
+
+**Merging is the opt-in.** Until the pull request merges, settings management
+is off for the repository and Woodhouse writes no settings. White-glove and
+configuration validation stay live — they are what validate the onboarding pull
+request itself: its `woodhouse/config` check passes because the starter template
+is valid by construction, and white-glove goes green like any other pull
+request. Merging switches management on, runs the settings sync, and reports the
+outcome as a comment on that pull request.
+
+With `DRY_RUN=true` the whole walk is evaluated and logged and nothing is
+written: the probes still read (they are how the skip decisions are made), each
+would-be write logs its own `DRY_RUN: would …` line, and one summary line carries
+the branch, file, title and body of the would-be pull request.
+
+Two things worth knowing:
+
+- **An all-repositories install may enumerate nothing.** The repository list
+  comes only from the delivery payload — Woodhouse does not call around it — so
+  an install on *All repositories* can legitimately carry no list. No offers are
+  made, and one log line says so. Re-add a repository (which fires
+  `installation_repositories.added`) or reinstall with selected repositories.
+- **A restricted installation is reported, not guessed at.** If a read or write
+  is refused, the walk logs that reads need the installation's read permissions
+  and writes need `contents: write` and `pull_requests: write`, then continues
+  to the next repository. Re-granting takes effect on the next installation
+  event.
+
+Uninstalling is deliberately silent: `installation.deleted` and
+`installation_repositories.removed` are no-ops. Nothing is cleaned up — no
+branches, files, or pull requests — and the repository simply goes quiet.
+
 ## Serving several GitHub Apps
 
 Woodhouse is a **private** App: rather than one public installation anyone can
