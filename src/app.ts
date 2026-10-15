@@ -18,6 +18,7 @@ import { syncSettings } from "./settings/apply.js";
 import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
 import { serve } from "./approval/silverPlatter.js";
+import { handleOnboarding } from "./onboarding/handler.js";
 import { Scheduler } from "./lib/scheduler.js";
 import { KeyedMutex } from "./lib/mutex.js";
 
@@ -307,5 +308,29 @@ export function createApp(options: AppOptions) {
         );
       },
     );
+
+    // ------------------------------------------------------------- onboarding
+    // Registered for the two action-scoped events design D1 names: a fresh
+    // install (`installation.created`) and a repository added later
+    // (`installation_repositories.added`). Both forward to the same handler,
+    // which normalises the repository list per D1. `scope.repo` is deliberately
+    // unused: these events are about the installation, not any one repository's
+    // webhook subject. The handler keeps its own action gate as defence in
+    // depth, so a replayed delivery is still a no-op.
+    guarded.on("installation.created", "onboarding", async (context, scope) => {
+      await handleOnboarding(
+        { octokit: context.octokit, log: scope.log, dryRun: options.dryRun },
+        scope.owner,
+        context.payload,
+      );
+    });
+
+    guarded.on("installation_repositories.added", "onboarding", async (context, scope) => {
+      await handleOnboarding(
+        { octokit: context.octokit, log: scope.log, dryRun: options.dryRun },
+        scope.owner,
+        context.payload,
+      );
+    });
   };
 }

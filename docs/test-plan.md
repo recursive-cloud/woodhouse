@@ -17,7 +17,8 @@ Both must be included in the App installation, or the baseline cannot be read.
 1. Install the App on **`recursive-cloud` only**, selecting just those two
    repositories.
 2. Run with `DRY_RUN=true`. Every decision is evaluated and logged; nothing is
-   written back to GitHub. Leave it on until phase 3.
+   written back to GitHub. The plan says when it flips: Phase 0 step 0.2, Phase 2
+   after 2.1, Phase 3 onwards.
 3. Tail the logs. Every entry carries `owner`, `repo`, `deliveryId` and
    `handler`, so `deliveryId` ties a log line back to a specific delivery in
    the App's *Advanced* tab.
@@ -138,6 +139,41 @@ jobs:
 ```
 
 ---
+
+## Phase 0 — onboarding on install (`DRY_RUN=true`, then off)
+
+The installation walk is the first thing to observe and the most reversible — it
+only ever opens a pull request you can close. Do it on a **scratch repository**
+that is empty of a settings file (the default new-repo "Add a README" checkbox is
+fine — a default branch with no settings file is the target state). A repository
+with no default branch instead produces the expected `has no default branch` error
+trace rather than an offer: that is the fail-closed edge, not this phase's target.
+The two repositories above are already configured, so they are skipped by design —
+the same skip reason as check 0.8.
+
+Phase 0 expects `LOG_LEVEL=debug`. The four settings-path probes surface through
+Probot's request logging and the `Onboarding skipped` lines are `debug` entries,
+so at the documented default (`info`) the product looks dead while behaving
+correctly. The `DRY_RUN: would …` lines, the summary line and the 403 hint all
+appear at `info`/`error` regardless.
+
+Create the scratch repository and add it to the existing installation —
+installation settings → *Repository access* → add it. That fires
+`installation_repositories.added`; installing the App on it fresh fires
+`installation.created`. Either path runs the same walk.
+
+| # | Test | Action | Expected |
+| --- | --- | --- | --- |
+| 0.1 | Dry run shows the offer | Add the scratch repo with `DRY_RUN=true` | Logs show the four settings-path probes (each 404), then `DRY_RUN: would create branch woodhouse/onboarding`, `DRY_RUN: would commit .github/woodhouse.yml to woodhouse/onboarding` and `DRY_RUN: would open pull request "chore: onboard to Woodhouse"`, then one summary line carrying `branch`, `file`, `title` and `body`. **Verify GitHub shows no branch, commit or pull request** |
+| 0.2 | The offer is made | `DRY_RUN=false`, then re-fire the event (remove and re-add the repo, or redeliver from the App's *Advanced* tab) | PR `chore: onboard to Woodhouse` from `woodhouse/onboarding` adds `.github/woodhouse.yml` (`settings.enabled: true`, schema modeline) and carries the `woodhouse: onboarding` label |
+| 0.3 | The offer is validated by the product | Watch the PR's checks | `woodhouse/config` **passes** on the added file and `woodhouse/white-glove` goes green — the product validates its own onboarding pull request |
+| 0.4 | Nothing else runs | Watch the logs while the PR is open | No settings sync for the scratch repository; white-glove and config validation are the only activity |
+| 0.5 | Re-delivery is idempotent | Redeliver the installation event from the App's *Advanced* tab | No second branch, commit or pull request; one debug line `Onboarding skipped`, `reason: onboarding-pull-request-open` |
+| 0.6 | Closed without merging re-offers | Close the PR without merging, then re-fire the event | The existing `woodhouse/onboarding` branch is reused as-is (not rewritten) and a fresh PR opens from it |
+| 0.7 | Merging is the opt-in | Merge the onboarding PR | Settings sync runs for the scratch repository and leaves the outcome comment on the PR; management is on from then on |
+| 0.8 | Already-configured skip | Re-fire the event with the settings file now on the default branch | Silent skip — one debug line `Onboarding skipped`, `reason: settings-file-present`. This is also why the two repositories above never get an offer |
+| 0.9 | All-repositories caveat | (Optional) Install the App with *All repositories* | One log line: `Installation delivery carried no repository list; no onboarding offers were made`. Re-add a repository or reinstall with selected repositories |
+| 0.10 | Restricted installation | Temporarily remove the installation's `Contents`/`Pull requests` write access and re-fire | The 403 hint log names both the read permissions and `contents: write`/`pull_requests: write`; the walk continues. Restore access — it takes effect on the next installation event |
 
 ## Phase 1 — lockdown and config resolution (`DRY_RUN=true`)
 
