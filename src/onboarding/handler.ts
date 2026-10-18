@@ -169,7 +169,7 @@ async function resolveFacts(
   const head = await deps.octokit.git.getRef({
     owner,
     repo,
-    ref: `refs/heads/${defaultBranch}`,
+    ref: `heads/${defaultBranch}`,
   });
 
   let branchExists = false;
@@ -177,7 +177,7 @@ async function resolveFacts(
     await deps.octokit.git.getRef({
       owner,
       repo,
-      ref: `refs/heads/${ONBOARDING_BRANCH}`,
+      ref: `heads/${ONBOARDING_BRANCH}`,
     });
     branchExists = true;
   } catch (error) {

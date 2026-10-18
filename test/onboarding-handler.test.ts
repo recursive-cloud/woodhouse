@@ -87,7 +87,9 @@ function fakeOctokit(config: FakeConfig = {}) {
   const create = vi.fn(async ({ repo }: { repo: string }) => {
     calls.push(`pulls.create ${repo}`);
     if (config.failCreateForRepo === repo) {
-      throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
+      throw Object.assign(new Error("Resource not accessible by integration"), {
+        status: 403,
+      });
     }
     return { data: { number: 42 } };
   });
@@ -173,8 +175,8 @@ describe("handleOnboarding", () => {
       `repos.getContent widgets:woodhouse.yaml`,
       "pulls.list widgets",
       "repos.get widgets",
-      `git.getRef widgets:refs/heads/main`,
-      `git.getRef widgets:refs/heads/${ONBOARDING_BRANCH}`,
+      `git.getRef widgets:heads/main`,
+      `git.getRef widgets:heads/${ONBOARDING_BRANCH}`,
       "git.createRef",
       "repos.createOrUpdateFileContents",
       "pulls.create widgets",
@@ -197,7 +199,9 @@ describe("handleOnboarding", () => {
       sha: "base-sha",
     });
 
-    const contentsArg = createOrUpdateFileContents.mock.calls[0]![0] as { content: string };
+    const contentsArg = createOrUpdateFileContents.mock.calls[0]![0] as {
+      content: string;
+    };
     expect(Buffer.from(contentsArg.content, "base64").toString("utf8")).toBe(ONBOARDING_TEMPLATE);
 
     expect(create).toHaveBeenCalledWith({
@@ -241,7 +245,11 @@ describe("handleOnboarding", () => {
     // "Silently" means no pull request, not no log: the machine-readable reason
     // is recorded for the operator.
     expect(log.debug).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: OWNER, repo: "widgets", reason: "settings-file-present" }),
+      expect.objectContaining({
+        owner: OWNER,
+        repo: "widgets",
+        reason: "settings-file-present",
+      }),
       "Onboarding skipped",
     );
   });
@@ -261,7 +269,10 @@ describe("handleOnboarding", () => {
     expect(addLabels).not.toHaveBeenCalled();
 
     expect(log.debug).toHaveBeenCalledWith(
-      expect.objectContaining({ repo: "widgets", reason: "onboarding-pull-request-open" }),
+      expect.objectContaining({
+        repo: "widgets",
+        reason: "onboarding-pull-request-open",
+      }),
       "Onboarding skipped",
     );
   });
@@ -356,7 +367,9 @@ describe("handleOnboarding", () => {
   });
 
   it("logs a write failure on one repository and still walks the next", async () => {
-    const { deps, calls, create, addLabels, log } = build({ failCreateForRepo: "alpha" });
+    const { deps, calls, create, addLabels, log } = build({
+      failCreateForRepo: "alpha",
+    });
 
     await handleOnboarding(deps, OWNER, created("alpha", "beta"));
 
@@ -382,7 +395,9 @@ describe("handleOnboarding", () => {
   });
 
   it("qualifies the 403 hint when the refusal is on a read, not a write", async () => {
-    const { deps, calls, create, log } = build({ forbiddenReadForRepo: "widgets" });
+    const { deps, calls, create, log } = build({
+      forbiddenReadForRepo: "widgets",
+    });
 
     await handleOnboarding(deps, OWNER, created("widgets"));
 
@@ -406,7 +421,10 @@ describe("handleOnboarding", () => {
     // The known GitHub shape for an all-repositories install: the delivery is
     // acted on but names no repositories at all.
     await handleOnboarding(deps, OWNER, { action: "created" });
-    await handleOnboarding(deps, OWNER, { action: "added", repositories_added: [] });
+    await handleOnboarding(deps, OWNER, {
+      action: "added",
+      repositories_added: [],
+    });
 
     expect(calls).toEqual([]);
     expect(log.info).toHaveBeenCalledWith(
