@@ -236,6 +236,11 @@ Reset `strictChecks` to `[]` afterwards.
 | 4.4 | Unmanageable setting | `repository: { private: true }` | failure — not in the schema on purpose |
 | 4.5 | Not triggered | PR touching only `README.md` | No `woodhouse/config` check at all |
 
+On failure the check also posts (or updates) a marker comment on the pull
+request — `<!-- woodhouse:config-validation -->` — with the failure body and a
+security footnote, so the reason is visible without opening the Checks tab.
+Verified live in the 2026-10-18 acceptance run (4.2–4.4).
+
 ## Phase 5 — settings sync (destructive; do this last)
 
 Set `settings.enabled: true` in the baseline, but go back to `DRY_RUN=true`
@@ -287,13 +292,37 @@ Only relevant once a second App is registered.
 | 7.5 | Bad signature | POST signed with the wrong secret | 400, no handler runs |
 | 7.6 | Misconfigured App | Unset one App's `APP_ID` | Container exits 78 naming the App, rather than starting half-configured |
 
+## Known deviations (2026-10-18 acceptance run)
+
+Observed during the 1.0 acceptance run (`docs/acceptance/2026-10-18/`). The open
+findings are tracked as GitHub issues and pulled in separately:
+
+- **5.19 — branch protection always reports "applied".** With a
+  `branchProtection` block present the sync issues the PUT unconditionally, so
+  a no-op merge never reaches the "nothing further needed changing" wording
+  (#25).
+- **5.20 — the baseline repository resolves to defaults.** Its own root
+  `woodhouse.yml` is never read as its config, so a baseline merge posts no
+  merge comment (#26).
+- **2.9 — a red check can wear a "Waiting on…" title.** After a
+  completed→pending PATCH GitHub keeps the old conclusion, so the old status
+  and the new title disagree; fail-safe but visually odd (#27).
+- **0.9 — a switch to All repositories offers onboarding everywhere.** Flipping
+  an existing installation enumerates every newly accessible repository and
+  live-offers each settings-less one; a fresh all-repositories install is
+  silent. The decided direction — invite everything unmanaged — is pending
+  (#24).
+- **2.8 — close and reopen doubles the summary rows.** Each check name appears
+  twice after a reopening (#28).
+- **7.6 — the exit-78 fatal named the App as `""`.** A broken map key is now
+  presented as a configuration key, with the label when one is set; fixed in
+  the pre-1.0 polish pull request.
+
 ## Known gaps to confirm, not bugs
 
 These are current design limits worth observing during testing so they are
 deliberate choices rather than surprises:
 
-- **Nothing comments on the PR** when config validation fails — the failure is
-  only visible in the Checks tab. Tracked in `TODO.md`.
 - **Grace period timers do not survive a restart.** If Woodhouse restarts
   during the grace window on a PR with no CI, the check stays `in_progress`
   until the next push or manual re-run.

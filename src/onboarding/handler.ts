@@ -247,9 +247,11 @@ export async function handleOnboarding(
 
   if (repositories.length === 0) {
     // `repositoryNames` also yields [] for actions this handler ignores; only
-    // an acted-on action with no list is worth a line. An all-repositories
-    // install does not enumerate pre-existing repositories, so this is the only
-    // trace the operator gets that the delivery legitimately made no offers.
+    // an acted-on action with no list is worth a line. A fresh all-repositories
+    // install carries no repository list, so this is the only trace the
+    // operator gets that the delivery legitimately made no offers. A switch to
+    // all-repositories is different: it enumerates every newly accessible
+    // repository and walks them all (see the README warning and issue #24).
     if (event.action === "created" || event.action === "added") {
       deps.log.info(
         { owner, action: event.action },

@@ -4,23 +4,16 @@ Deferred work, roughly in the order it is worth doing.
 
 ## Where things stand
 
-Lockdown, cascading settings sync, the white-glove check, auto-approval, and
-config validation are implemented and exercised against real repositories;
-two Apps run in one container; CI builds a multi-arch image per commit.
+Lockdown, cascading settings sync, the white-glove check, auto-approval, config
+validation and onboarding are implemented and verified against real
+repositories. The **1.0 acceptance run** passed every phase (report at
+`docs/acceptance/2026-10-18/`); two Apps run in one container; CI builds a
+multi-arch image per commit.
 
-The **1.0 round** is proposed and approved: five changes under
-`openspec/changes/`, applied in order —
-
-1. `add-release-please` — bootstrapped as `release-as: 1.0.0`, so the
-   accumulating release pull request *is* the 1.0 pull request while the rest
-   of the round merges into it;
-2. `backfill-capability-specs`;
-3. `harden-ruleset-support`;
-4. `document-config-schema`;
-5. `open-onboarding-pr`.
-
-OpenSpec tracks the round; this file does not repeat it. Everything below is
-what remains *beyond* the round.
+What remains for 1.0: the pre-1.0 polish pull request and the 1.0 release
+itself, through release-please's accumulating pull request. Acceptance-run
+findings are tracked as GitHub issues (#24-#29) and pulled in one by one; this
+file does not repeat them.
 
 ## Post-1.0
 
