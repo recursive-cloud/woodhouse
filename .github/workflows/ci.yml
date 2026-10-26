@@ -111,6 +111,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=Woodhouse
             org.opencontainers.image.description=A personal butler for your GitHub repositories
+            org.opencontainers.image.source=https://github.com/recursive-cloud/woodhouse
 
       - name: Build and push
         uses: docker/build-push-action@v6

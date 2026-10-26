@@ -195,11 +195,17 @@ the branch, file, title and body of the would-be pull request.
 
 Two things worth knowing:
 
-- **An all-repositories install may enumerate nothing.** The repository list
-  comes only from the delivery payload — Woodhouse does not call around it — so
-  an install on *All repositories* can legitimately carry no list. No offers are
-  made, and one log line says so. Re-add a repository (which fires
-  `installation_repositories.added`) or reinstall with selected repositories.
+- **An all-repositories install may enumerate nothing — and switching to it
+  enumerates everything.** A fresh install on *All repositories* can
+  legitimately carry no repository list (the list comes only from the delivery
+  payload — Woodhouse does not call around it), so no offers are made and one
+  log line says so. Flipping an *existing* installation's repository access to
+  *All repositories* is different: GitHub delivers an enumerated
+  `installation_repositories.added` event, and Woodhouse offers onboarding to
+  every settings-less repository it names. If a burst of onboarding pull
+  requests is not wanted, do that flip under `DRY_RUN=true`. The decided
+  long-term direction — invite everything unmanaged, not just the delivery's
+  list — is tracked in issue #24 and still pending.
 - **A restricted installation is reported, not guessed at.** If a read or write
   is refused, the walk logs that reads need the installation's read permissions
   and writes need `contents: write` and `pull_requests: write`, then continues

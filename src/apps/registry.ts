@@ -180,8 +180,15 @@ export function resolveDefinitions(
         key === "undefined" || definition.appId === undefined
           ? " The environment variable it reads is not set."
           : "";
+      // The key is presented as a key, never as a name: when it came from an
+      // unset variable it is garbage, and a configured label is the only
+      // legible identifier. The label cannot fall back to the App ID here,
+      // because the App ID is the value that is broken.
+      const named = definition.label
+        ? `App "${definition.label}" (configuration key ${JSON.stringify(key)})`
+        : `App with configuration key ${JSON.stringify(key)}`;
       throw new ConfigurationError(
-        `App "${key}" has an invalid appId: ${JSON.stringify(definition.appId)}.${hint}`,
+        `${named} has an invalid appId: ${JSON.stringify(definition.appId)}.${hint}`,
       );
     }
 

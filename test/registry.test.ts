@@ -209,6 +209,26 @@ describe("resolveDefinitions — unset environment variables", () => {
     ).toThrow(/environment variable it reads is not set/);
   });
 
+  it("names an App by its label when the appId is invalid", () => {
+    expect(() =>
+      resolveDefinitions({ "": def({ appId: undefined, label: "gunzy83" }) }, defaults),
+    ).toThrow(
+      'App "gunzy83" (configuration key "") has an invalid appId: undefined. The environment variable it reads is not set.',
+    );
+  });
+
+  it("presents the configuration key when there is no label", () => {
+    expect(() => resolveDefinitions({ "": def({ appId: undefined }) }, defaults)).toThrow(
+      'App with configuration key "" has an invalid appId: undefined. The environment variable it reads is not set.',
+    );
+  });
+
+  it("keeps the unset-variable hint out of an invalid appId that is present", () => {
+    expect(() =>
+      resolveDefinitions({ "not-an-id": def({ appId: "not-an-id", label: "org-a" }) }, defaults),
+    ).toThrow('App "org-a" (configuration key "not-an-id") has an invalid appId: "not-an-id".');
+  });
+
   it("survives the whole file evaluating to unset variables", () => {
     const path = configFile(`
       module.exports = function (env) {

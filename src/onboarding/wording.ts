@@ -63,13 +63,25 @@ settings:
  * may still be covered by an owner-level baseline, it says so. A local file is
  * how a repository records its own consent and overrides the baseline.
  */
-export const ONBOARDING_PR_BODY = `Woodhouse is installed, and this pull request is the invitation: merge it to hand management of this repository over.
+export const ONBOARDING_PR_BODY = `## An invitation
+
+Woodhouse is installed, and this pull request is the invitation: merge it to hand management of this repository over.
+
+## What Woodhouse does
 
 Woodhouse keeps repository settings, labels, branch protection, rulesets and auto-approval in order, and consolidates every check into a single \`woodhouse/white-glove\` status. All of it is driven by configuration in the repository.
 
-This pull request adds \`.github/woodhouse.yml\` with \`settings.enabled: true\`. Until it merges, Woodhouse writes nothing here: white-glove and configuration validation stay live, and they are what validated this very pull request. Merging switches management on, and the settings sync reports its work as a comment on this pull request.
+## What this pull request means
 
-A word to the wise: this repository may already inherit baseline settings from the owner-level \`.github-private\` configuration. A local file is how a repository records its own consent, and it overrides anything inherited.
+- It adds \`.github/woodhouse.yml\` with \`settings.enabled: true\`.
+- Until it merges, Woodhouse writes nothing here — white-glove and configuration validation stay live, and they are what validated this very pull request.
+- Merging switches management on, and the settings sync reports its work as a comment on this pull request.
+
+## A note on baselines
+
+This repository may already inherit baseline settings from the owner-level \`.github-private\` configuration. A local file is how a repository records its own consent, and it overrides anything inherited.
+
+## Editing the file
 
 Edit the file freely — anything you leave out stays at its schema default. The schema and a fully commented example are linked from the modeline at the top of the file.
 
