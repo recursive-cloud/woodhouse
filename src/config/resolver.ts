@@ -6,6 +6,10 @@
  *   2. `woodhouse.yml` in the owner's `.github` repository  (global baseline)
  *   3. `.github/woodhouse.yml` in the repository itself     (local override)
  *
+ * The baseline repository is the one exception to layer 3: its own root
+ * `woodhouse.yml` / `woodhouse.yaml` are its local layer, and no baseline layer
+ * is fetched into its own resolution. There is nothing to inherit from itself.
+ *
  * The raw YAML of each layer is merged *before* validation. Validating each
  * layer independently would be wrong: zod would fill in defaults for the local
  * layer, and those defaults would then overwrite real values from the baseline.
@@ -182,17 +186,22 @@ export class ConfigResolver {
     log: Logger,
     ref: string | undefined,
   ): Promise<ResolvedConfig> {
+    // The baseline repository's own root files are its local layer; every
+    // other repository's local override lives under `.github/`.
+    const localPaths = this.isBaselineRepo(repo) ? BASELINE_PATHS : LOCAL_PATHS;
+
     // Fetched in parallel: they are independent and this halves the latency
     // added to every event.
     const [baseline, local] = await Promise.all([
       // The baseline always comes from the default branch of the baseline
       // repository; pinning it to the current repo's ref would be meaningless.
-      // Skipped entirely when the repo *is* the baseline, which would
-      // otherwise merge the file into itself.
+      // The baseline *layer* is skipped when the repo *is* the baseline — there
+      // is nothing to inherit from itself — while its own root files still
+      // serve as its local layer above.
       this.isBaselineRepo(repo)
         ? Promise.resolve(undefined)
         : fetchLayer(client, owner, this.baselineRepo, BASELINE_PATHS, undefined, log),
-      fetchLayer(client, owner, repo, LOCAL_PATHS, ref, log),
+      fetchLayer(client, owner, repo, localPaths, ref, log),
     ]);
 
     const sources: string[] = [];
