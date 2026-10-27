@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import { woodhouseConfigSchema } from "../src/config/schema.js";
+import { ConfigResolver } from "../src/config/resolver.js";
 import { KeyedMutex } from "../src/lib/mutex.js";
 import {
   SETTINGS_APPLIED_MARKER,
@@ -35,10 +36,30 @@ interface Comment {
  * perturb that assertion. The comment fakes are returned separately for tests
  * that assert on them.
  */
-function fakeOctokit(files: readonly ChangedFile[] = [SETTINGS_FILE], comments: Comment[] = []) {
+function fakeOctokit(
+  files: readonly ChangedFile[] = [SETTINGS_FILE],
+  comments: Comment[] = [],
+  configFiles: Record<string, string> = {},
+) {
   const calls: string[] = [];
 
   const listFiles = vi.fn(async () => ({ data: [...files] }));
+
+  // Serves the config cascade to a real `ConfigResolver`. Keyed `repo:path`,
+  // 404ing everything else, exactly as the Contents API does.
+  const getContent = vi.fn(async ({ repo, path }: { repo: string; path: string }) => {
+    const key = `${repo}:${path}`;
+    if (!(key in configFiles)) {
+      throw Object.assign(new Error("Not Found"), { status: 404 });
+    }
+    return {
+      data: {
+        type: "file",
+        encoding: "base64",
+        content: Buffer.from(configFiles[key]!).toString("base64"),
+      },
+    };
+  });
 
   const get = vi.fn(async () => {
     calls.push("repos.get");
@@ -96,7 +117,7 @@ function fakeOctokit(files: readonly ChangedFile[] = [SETTINGS_FILE], comments: 
   });
 
   const octokit = {
-    repos: { get, update, replaceAllTopics, updateBranchProtection },
+    repos: { get, getContent, update, replaceAllTopics, updateBranchProtection },
     issues: {
       listLabelsForRepo,
       createLabel,
@@ -122,6 +143,7 @@ function fakeOctokit(files: readonly ChangedFile[] = [SETTINGS_FILE], comments: 
     deleteComment,
     paginate,
     get,
+    getContent,
     update,
   };
 }
@@ -400,6 +422,50 @@ describe("commentSettingsApplied", () => {
     expect(body).toContain("Other repositories will adopt the change at their next event.");
     expect(body).not.toMatch(/every repository/i);
     expect(body.trimEnd().endsWith(SIGN_OFF)).toBe(true);
+  });
+
+  it("syncs the baseline repository from its own root configuration on a merged settings PR", async () => {
+    // Issue #26 end to end: the merged PR changes the baseline repository's own
+    // root file, which is also its local layer. Before that was wired up, the
+    // resolver probed only `.github/woodhouse.*`, everything 404'd, settings
+    // resolved disabled, and this path skipped with "Settings management
+    // disabled" instead of syncing.
+    const octokit = fakeOctokit([{ filename: "woodhouse.yaml", status: "modified" }], [], {
+      ".github-private:woodhouse.yaml":
+        "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
+    });
+    const log = fakeLogger();
+    const resolver = new ConfigResolver();
+    const invalidateOwner = vi.spyOn(resolver, "invalidateOwner");
+
+    await commentSettingsApplied(
+      {
+        octokit: octokit.octokit,
+        resolver,
+        mutex: new KeyedMutex(),
+        log,
+        dryRun: false,
+      },
+      { owner: "acme", repo: ".github-private", defaultBranch: "main" },
+      { number: 7, merged: true, baseRef: "main" },
+    );
+
+    // The owner cache was dropped and the sync ran against the config the
+    // repository's own root file resolved to.
+    expect(invalidateOwner).toHaveBeenCalledWith("acme");
+    expect(octokit.calls).toEqual(["repos.get", "repos.update"]);
+
+    // The outcome comment is the baseline variant: synced directly, and other
+    // repositories adopt the change at their next event.
+    const { body } = octokit.createComment.mock.calls[0][0] as { body: string };
+    expect(body).toContain("This is the baseline repository, sir, so it has been synced directly.");
+    expect(body).toContain("Other repositories will adopt the change at their next event.");
+
+    // Never the pre-fix skip path.
+    expect(log.debug).not.toHaveBeenCalledWith(
+      { owner: "acme", repo: ".github-private" },
+      "Settings management disabled; skipping sync",
+    );
   });
 
   it("in dry-run writes no comment, makes no comment call, and logs the body", async () => {
