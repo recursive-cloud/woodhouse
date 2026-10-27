@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
+import { defaultConfig, type WoodhouseConfig } from "../src/config/schema.js";
 import { handleOnboarding, type OnboardingDeps } from "../src/onboarding/handler.js";
 import {
   ONBOARDING_BRANCH,
@@ -23,6 +24,10 @@ interface FakeConfig {
   failCreateForRepo?: string;
   /** A read probe (`repos.getContent`) rejects with a 403 for this repository. */
   forbiddenReadForRepo?: string;
+  /** Repositories `apps.listReposAccessibleToInstallation` reports, page by page. */
+  accessibleRepos?: ReadonlyArray<{ readonly name?: unknown } | null>;
+  /** Enumeration rejects (the installation endpoint refuses). */
+  enumerationFails?: boolean;
 }
 
 /**
@@ -99,11 +104,57 @@ function fakeOctokit(config: FakeConfig = {}) {
     return { data: [] };
   });
 
+  const listReposAccessibleToInstallation = vi.fn(
+    async (params: { per_page?: number; page?: number } = {}) => {
+      const perPage = params.per_page ?? 30;
+      const page = params.page ?? 1;
+      calls.push(`apps.listReposAccessibleToInstallation page=${page} per_page=${perPage}`);
+      if (config.enumerationFails) {
+        throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
+      }
+      const all = config.accessibleRepos ?? [];
+      return {
+        data: {
+          total_count: all.length,
+          repositories: all.slice((page - 1) * perPage, page * perPage),
+        },
+      };
+    },
+  );
+
+  /**
+   * Mirrors `octokit.paginate` for the installation endpoint: it calls the
+   * method once per page with the caller's params, reads the `repositories`
+   * array (a `total_count` response is not itself the list), and stops on a
+   * short page. A real multi-page batch therefore needs real iteration here
+   * rather than a stub that hands back everything at once.
+   */
+  const paginate = vi.fn(
+    async (
+      route: (params: Record<string, unknown>) => Promise<{ data: unknown }>,
+      params: Record<string, unknown> = {},
+    ) => {
+      const perPage = typeof params.per_page === "number" ? params.per_page : 30;
+      const items: unknown[] = [];
+      for (let page = 1; ; page += 1) {
+        const { data } = await route({ ...params, page });
+        const batch = Array.isArray(data)
+          ? data
+          : ((data as { repositories?: unknown[] }).repositories ?? []);
+        items.push(...batch);
+        if (batch.length < perPage) break;
+      }
+      return items;
+    },
+  );
+
   const octokit = {
     repos: { getContent, get, createOrUpdateFileContents },
     git: { getRef, createRef },
     pulls: { list, create },
     issues: { addLabels },
+    apps: { listReposAccessibleToInstallation },
+    paginate,
   } as unknown as OnboardingDeps["octokit"];
 
   return {
@@ -117,6 +168,8 @@ function fakeOctokit(config: FakeConfig = {}) {
     createOrUpdateFileContents,
     create,
     addLabels,
+    listReposAccessibleToInstallation,
+    paginate,
   };
 }
 
@@ -124,16 +177,29 @@ function fakeLogger() {
   return { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-function build(config: FakeConfig = {}, dryRun = false) {
+function build(
+  config: FakeConfig = {},
+  dryRun = false,
+  resolveConfig?: OnboardingDeps["resolveConfig"],
+) {
   const fake = fakeOctokit(config);
   const log = fakeLogger();
+  const resolve = resolveConfig ?? vi.fn(async () => defaultConfig());
   const deps: OnboardingDeps = {
     octokit: fake.octokit,
     log: log as unknown as Logger,
     dryRun,
+    resolveConfig: resolve,
   };
 
-  return { ...fake, log, deps };
+  return { ...fake, log, deps, resolveConfig: resolve };
+}
+
+/** Defaults with the settings master switch set, as a baseline resolution would. */
+function configWithSettingsEnabled(enabled: boolean): WoodhouseConfig {
+  const config = defaultConfig();
+  config.settings.enabled = enabled;
+  return config;
 }
 
 /** `installation` `created` payload carrying the freshly installed repositories. */
@@ -277,6 +343,118 @@ describe("handleOnboarding", () => {
     );
   });
 
+  it("skips a repository the owner baseline manages, without searching for a pull request", async () => {
+    const resolveConfig = vi.fn(async () => configWithSettingsEnabled(true));
+    const { deps, calls, list, createRef, createOrUpdateFileContents, create, addLabels, log } =
+      build({}, false, resolveConfig);
+
+    await handleOnboarding(deps, OWNER, created("widgets"));
+
+    // The management check ran after the four settings probes and short-circuited
+    // before the open-offer search: no `pulls.list`.
+    expect(resolveConfig).toHaveBeenCalledWith(OWNER, "widgets");
+    expect(calls).toEqual([
+      "repos.getContent widgets:.github/woodhouse.yml",
+      "repos.getContent widgets:.github/woodhouse.yaml",
+      "repos.getContent widgets:woodhouse.yml",
+      "repos.getContent widgets:woodhouse.yaml",
+    ]);
+    expect(list).not.toHaveBeenCalled();
+    expect(createRef).not.toHaveBeenCalled();
+    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(addLabels).not.toHaveBeenCalled();
+
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: OWNER,
+        repo: "widgets",
+        reason: "baseline-managed",
+      }),
+      "Onboarding skipped",
+    );
+  });
+
+  it("still offers a repository whose resolved configuration has settings disabled", async () => {
+    const resolveConfig = vi.fn(async () => configWithSettingsEnabled(false));
+    const { deps, list, create, addLabels } = build({}, false, resolveConfig);
+
+    await handleOnboarding(deps, OWNER, created("widgets"));
+
+    expect(resolveConfig).toHaveBeenCalledWith(OWNER, "widgets");
+    expect(list).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "widgets" }));
+    expect(addLabels).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when configuration resolution rejects, then walks the next repository", async () => {
+    const resolveConfig = vi.fn(async (_owner: string, repo: string) => {
+      if (repo === "alpha") throw new Error("network unavailable");
+      return configWithSettingsEnabled(false);
+    });
+    const { deps, calls, create, log } = build({}, false, resolveConfig);
+
+    await handleOnboarding(deps, OWNER, created("alpha", "beta"));
+
+    // Alpha's failure is logged as that repository's error; no offer, no PR search.
+    expect(calls).not.toContain("pulls.list alpha");
+    expect(calls).not.toContain("pulls.create alpha");
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: OWNER, repo: "alpha" }),
+      expect.stringContaining("network unavailable"),
+    );
+
+    // The walk continued and beta was offered normally.
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "beta" }));
+  });
+
+  it("fails closed when the baseline parses but fails validation, without an offer", async () => {
+    // The wrapper in app.ts maps a resolution with non-empty `issues` to
+    // undefined; the handler must treat that as unresolvable, never as the
+    // resolver's fallback defaults (which would offer the repository).
+    const resolveConfig = vi.fn(async (_owner: string, repo: string) =>
+      repo === "alpha" ? undefined : configWithSettingsEnabled(false),
+    );
+    const { deps, calls, create, log } = build({}, false, resolveConfig);
+
+    await handleOnboarding(deps, OWNER, created("alpha", "beta"));
+
+    expect(calls).not.toContain("pulls.list alpha");
+    expect(calls).not.toContain("pulls.create alpha");
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: OWNER, repo: "alpha" }),
+      expect.stringContaining("Could not resolve woodhouse configuration for acme/alpha"),
+    );
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "beta" }));
+  });
+
+  it("issues no pull request search for a managed repository while probing the others", async () => {
+    const resolveConfig = vi.fn(async (_owner: string, repo: string) =>
+      configWithSettingsEnabled(repo === "managed"),
+    );
+    const { deps, calls, create, addLabels } = build({}, false, resolveConfig);
+
+    await handleOnboarding(deps, OWNER, created("managed", "free"));
+
+    expect(calls).not.toContain("pulls.list managed");
+    expect(calls).toContain("pulls.list free");
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "free" }));
+    expect(addLabels).toHaveBeenCalledOnce();
+  });
+
+  it("does not resolve configuration for a repository that already has a settings file", async () => {
+    const resolveConfig = vi.fn(async () => configWithSettingsEnabled(false));
+    const { deps } = build({ presentPaths: ["woodhouse.yml"] }, false, resolveConfig);
+
+    await handleOnboarding(deps, OWNER, created("widgets"));
+
+    expect(resolveConfig).not.toHaveBeenCalled();
+  });
+
   it("offers onboarding for a repository added to an existing installation", async () => {
     const { deps, create, addLabels, log } = build();
 
@@ -287,6 +465,117 @@ describe("handleOnboarding", () => {
     expect(log.info).toHaveBeenCalledWith(
       expect.objectContaining({ repo: "gadgets", pullRequestNumber: 42 }),
       "Onboarding offer complete",
+    );
+  });
+
+  it("enumerates the installation's repositories when a fresh install carries no list", async () => {
+    // The empty name and the null entry are dropped by the same filter the
+    // payload path uses; the two real repositories are walked as any batch.
+    const { deps, paginate, listReposAccessibleToInstallation, create, addLabels } = build({
+      accessibleRepos: [{ name: "alpha" }, { name: "" }, null, { name: "beta" }],
+    });
+
+    await handleOnboarding(deps, OWNER, { action: "created" });
+
+    expect(paginate).toHaveBeenCalledWith(listReposAccessibleToInstallation, { per_page: 100 });
+    expect(create.mock.calls.map((call) => (call[0] as { repo: string }).repo)).toEqual([
+      "alpha",
+      "beta",
+    ]);
+    expect(addLabels).toHaveBeenCalledTimes(2);
+  });
+
+  it("walks every page of an enumeration that spans more than one page", async () => {
+    const names = Array.from({ length: 150 }, (_, index) => `repo-${index}`);
+    const { deps, calls, listReposAccessibleToInstallation, create } = build({
+      accessibleRepos: names.map((name) => ({ name })),
+    });
+
+    await handleOnboarding(deps, OWNER, { action: "created" });
+
+    // `per_page: 100` over 150 names needs two requests, and the second page is
+    // walked rather than truncated.
+    expect(listReposAccessibleToInstallation).toHaveBeenCalledTimes(2);
+    expect(calls).toContain("apps.listReposAccessibleToInstallation page=1 per_page=100");
+    expect(calls).toContain("apps.listReposAccessibleToInstallation page=2 per_page=100");
+
+    const offered = create.mock.calls.map((call) => (call[0] as { repo: string }).repo);
+    expect(offered).toHaveLength(150);
+    expect(new Set(offered).size).toBe(150);
+    expect(offered[0]).toBe("repo-0");
+    expect(offered[149]).toBe("repo-149");
+  });
+
+  it("logs one error and writes nothing when enumeration fails", async () => {
+    const { deps, calls, create, createRef, createOrUpdateFileContents, addLabels, log } = build({
+      enumerationFails: true,
+    });
+
+    await expect(handleOnboarding(deps, OWNER, { action: "created" })).resolves.toBeUndefined();
+
+    // Enumeration is the delivery's only call: no repository was probed and
+    // nothing was written.
+    expect(calls).toEqual(["apps.listReposAccessibleToInstallation page=1 per_page=100"]);
+    expect(create).not.toHaveBeenCalled();
+    expect(createRef).not.toHaveBeenCalled();
+    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
+    expect(addLabels).not.toHaveBeenCalled();
+
+    expect(log.error).toHaveBeenCalledOnce();
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: OWNER, action: "created" }),
+      expect.stringContaining(
+        "Could not enumerate the repositories accessible to the installation",
+      ),
+    );
+    // The old "carried no repository list" info line is replaced by the error.
+    expect(log.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining("no repository list"),
+    );
+  });
+
+  it("enumerates in dry-run and writes nothing", async () => {
+    const { deps, paginate, createRef, createOrUpdateFileContents, create, addLabels, log } = build(
+      { accessibleRepos: [{ name: "alpha" }] },
+      true,
+    );
+
+    await handleOnboarding(deps, OWNER, { action: "created" });
+
+    // The read-only enumeration happened and the would-be offer was logged.
+    expect(paginate).toHaveBeenCalledOnce();
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ branch: ONBOARDING_BRANCH, file: ONBOARDING_FILE_PATH }),
+      expect.stringContaining("DRY_RUN: would open onboarding pull request"),
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: "alpha", dryRun: true, pullRequestNumber: null }),
+      "Onboarding offer complete",
+    );
+
+    expect(createRef).not.toHaveBeenCalled();
+    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(addLabels).not.toHaveBeenCalled();
+  });
+
+  it("re-enumerates on a re-delivery without opening a second offer", async () => {
+    const { deps, paginate, create, addLabels, log } = build({
+      accessibleRepos: [{ name: "alpha" }],
+      openOnboardingPr: true,
+    });
+
+    await handleOnboarding(deps, OWNER, { action: "created" });
+    await handleOnboarding(deps, OWNER, { action: "created" });
+
+    // The second delivery enumerated again and the open-offer probe absorbed it.
+    expect(paginate).toHaveBeenCalledTimes(2);
+    expect(create).not.toHaveBeenCalled();
+    expect(addLabels).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: "alpha", reason: "onboarding-pull-request-open" }),
+      "Onboarding skipped",
     );
   });
 
@@ -415,26 +704,26 @@ describe("handleOnboarding", () => {
     expect(message).not.toContain("write forbidden");
   });
 
-  it("logs once and makes no calls when an acted-on delivery carries no repository list", async () => {
-    const { deps, calls, log } = build();
+  it("enumerates for any acted-on delivery with an empty or missing list", async () => {
+    const { deps, calls, paginate, create, log } = build();
 
-    // The known GitHub shape for an all-repositories install: the delivery is
-    // acted on but names no repositories at all.
+    // The known GitHub shape for an all-repositories install omits the list;
+    // the access-switch shape can carry an empty one. Both are list-less
+    // acted-on deliveries and both enumerate.
     await handleOnboarding(deps, OWNER, { action: "created" });
-    await handleOnboarding(deps, OWNER, {
-      action: "added",
-      repositories_added: [],
-    });
+    await handleOnboarding(deps, OWNER, { action: "created", installation: { repositories: [] } });
+    await handleOnboarding(deps, OWNER, { action: "added", repositories_added: [] });
 
-    expect(calls).toEqual([]);
-    expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: OWNER, action: "created" }),
-      expect.stringContaining("no repository list"),
-    );
-    expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: OWNER, action: "added" }),
-      expect.stringContaining("no repository list"),
-    );
+    expect(paginate).toHaveBeenCalledTimes(3);
+    expect(calls).toEqual([
+      "apps.listReposAccessibleToInstallation page=1 per_page=100",
+      "apps.listReposAccessibleToInstallation page=1 per_page=100",
+      "apps.listReposAccessibleToInstallation page=1 per_page=100",
+    ]);
+
+    // An empty enumeration is not an error and opens no offers.
+    expect(create).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
   });
 
   it("treats a malformed payload as no repositories rather than throwing", async () => {

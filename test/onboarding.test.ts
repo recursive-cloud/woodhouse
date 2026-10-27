@@ -95,7 +95,7 @@ Woodhouse keeps repository settings, labels, branch protection, rulesets and aut
 
 ## A note on baselines
 
-This repository may already inherit baseline settings from the owner-level \`.github-private\` configuration. A local file is how a repository records its own consent, and it overrides anything inherited.
+Woodhouse has checked the owner-level \`.github-private\` configuration, and this repository is not yet managed there. A local file is how a repository records its own consent, and it overrides anything inherited.
 
 ## Editing the file
 
@@ -112,11 +112,14 @@ ${SIGN_OFF}`;
     expect(ONBOARDING_PR_BODY).toMatch(/^- /m);
   });
 
-  it("says the repository may already inherit baseline settings", () => {
-    // D2: a baseline-managed repository with no local file still gets the
-    // offer, so the body must not imply the repository is entirely unmanaged.
-    expect(ONBOARDING_PR_BODY).toContain("baseline settings");
-    expect(ONBOARDING_PR_BODY).toContain("inherit");
+  it("says the repository was resolved as not yet managed by the baseline", () => {
+    // D4: an offer exists only because resolution said settings.enabled is not
+    // true, so the body states the check happened rather than warning that the
+    // repository may already be managed.
+    expect(ONBOARDING_PR_BODY).toContain("owner-level `.github-private` configuration");
+    expect(ONBOARDING_PR_BODY).toContain("not yet managed");
+    expect(ONBOARDING_PR_BODY).toContain("records its own consent");
+    expect(ONBOARDING_PR_BODY).not.toContain("may already inherit");
   });
 });
 
@@ -169,5 +172,44 @@ describe("shouldOnboard", () => {
     // Cannot confirm no offer exists; a duplicate is worse than no offer.
     const decision = shouldOnboard(repository, { configPresent: false });
     expect(decision).toMatchObject({ onboard: false, reason: "pull-request-state-unprobed" });
+  });
+
+  it("skips a repository the resolved baseline already manages", () => {
+    expect(shouldOnboard(repository, probe({ managed: true }))).toEqual({
+      onboard: false,
+      repository,
+      reason: "baseline-managed",
+    });
+  });
+
+  it("offers when the resolved baseline does not manage the repository", () => {
+    expect(shouldOnboard(repository, probe({ managed: false }))).toEqual({
+      onboard: true,
+      repository,
+      reason: "no-settings-file",
+    });
+  });
+
+  it("treats an unset managed field as not managed", () => {
+    // Call sites that predate the field leave it undefined; behavior is unchanged.
+    const decision = shouldOnboard(repository, { configPresent: false, openOnboardingPr: false });
+    expect(decision).toEqual({ onboard: true, repository, reason: "no-settings-file" });
+  });
+
+  it("skips a managed repository before the pull-request probe", () => {
+    // A managed repository skips without paying for the PR search, so the field
+    // is unprobed; the management skip must not fall through to fail-closed.
+    const decision = shouldOnboard(repository, { configPresent: false, managed: true });
+    expect(decision).toMatchObject({ onboard: false, reason: "baseline-managed" });
+  });
+
+  it("prefers the managed skip when an onboarding pull request is also open", () => {
+    const decision = shouldOnboard(repository, probe({ managed: true, openOnboardingPr: true }));
+    expect(decision).toMatchObject({ onboard: false, reason: "baseline-managed" });
+  });
+
+  it("prefers the settings-file skip over the managed skip", () => {
+    const decision = shouldOnboard(repository, probe({ configPresent: true, managed: true }));
+    expect(decision).toMatchObject({ onboard: false, reason: "settings-file-present" });
   });
 });

@@ -195,17 +195,21 @@ the branch, file, title and body of the would-be pull request.
 
 Two things worth knowing:
 
-- **An all-repositories install may enumerate nothing — and switching to it
-  enumerates everything.** A fresh install on *All repositories* can
-  legitimately carry no repository list (the list comes only from the delivery
-  payload — Woodhouse does not call around it), so no offers are made and one
-  log line says so. Flipping an *existing* installation's repository access to
-  *All repositories* is different: GitHub delivers an enumerated
-  `installation_repositories.added` event, and Woodhouse offers onboarding to
-  every settings-less repository it names. If a burst of onboarding pull
-  requests is not wanted, do that flip under `DRY_RUN=true`. The decided
-  long-term direction — invite everything unmanaged, not just the delivery's
-  list — is tracked in issue #24 and still pending.
+- **An all-repositories install walks every repository.** A fresh install on
+  *All repositories* carries no repository list, so the walk enumerates the
+  repositories the installation can access and walks them like a payload
+  list. Flipping an *existing* installation's repository access to
+  *All repositories* delivers an enumerated
+  `installation_repositories.added` event, walked the same way; if a burst of
+  onboarding pull requests is not wanted, do that flip under `DRY_RUN=true`. A
+  repository that already has a settings file is skipped, as is one whose
+  resolved configuration — defaults plus the owner baseline — has
+  `settings.enabled: true`; the baseline's repositories therefore get no second
+  offer. The walk runs on the delivery's response path, so a large installation
+  can outlive GitHub's ~10s redelivery window. A redelivered delivery
+  re-enumerates and walks again, but the same probes absorb it — settings file,
+  baseline-managed skip, open onboarding pull request, branch existence — so
+  nothing is duplicated.
 - **A restricted installation is reported, not guessed at.** If a read or write
   is refused, the walk logs that reads need the installation's read permissions
   and writes need `contents: write` and `pull_requests: write`, then continues

@@ -9,16 +9,18 @@
  */
 
 import type { Probot } from "probot";
+import type { Logger } from "pino";
 import type { Allowlist } from "./security/allowlist.js";
 import { GuardedApp } from "./security/guard.js";
-import { ConfigResolver, invalidateTouchedConfig } from "./config/resolver.js";
+import { ConfigResolver, invalidateTouchedConfig, type ContentsClient } from "./config/resolver.js";
 import { isSettingsPath } from "./config/paths.js";
+import type { WoodhouseConfig } from "./config/schema.js";
 import { isSelfCheck, reconcile } from "./gatekeeper/handler.js";
 import { syncSettings } from "./settings/apply.js";
 import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
 import { serve } from "./approval/silverPlatter.js";
-import { handleOnboarding } from "./onboarding/handler.js";
+import { handleOnboarding, type OnboardingDeps } from "./onboarding/handler.js";
 import { Scheduler } from "./lib/scheduler.js";
 import { KeyedMutex } from "./lib/mutex.js";
 
@@ -29,6 +31,33 @@ export interface AppOptions {
   readonly baselineRepo: string;
   /** Evaluate and log, but never write to GitHub. */
   readonly dryRun: boolean;
+}
+
+/**
+ * The narrow management check the onboarding handler receives (design D2).
+ *
+ * The resolver never throws on invalid configuration: it logs and returns the
+ * fallback defaults with a non-empty `issues` list. Both that outcome and a
+ * rejection (HTTP error, network) mean "unresolvable", so both map to
+ * `undefined` — the decision layer must never see the fallback defaults. The
+ * handler then logs the candidate as that repository's error and continues the
+ * walk with no offer. The rejection's cause is logged here, at debug level,
+ * before it is reduced to `undefined`.
+ */
+export async function resolveOnboardingConfig(
+  resolver: Pick<ConfigResolver, "resolve">,
+  octokit: ContentsClient,
+  log: Logger,
+  owner: string,
+  repo: string,
+): Promise<WoodhouseConfig | undefined> {
+  try {
+    const resolved = await resolver.resolve(octokit, owner, repo, log);
+    return resolved.issues.length > 0 ? undefined : resolved.config;
+  } catch (error) {
+    log.debug({ owner, repo, err: error }, "Could not resolve onboarding configuration");
+    return undefined;
+  }
 }
 
 export function createApp(options: AppOptions) {
@@ -43,6 +72,12 @@ export function createApp(options: AppOptions) {
       log,
       dryRun: options.dryRun,
     });
+
+    /** Per-candidate wiring of the shared resolver into the narrow check above. */
+    const onboardingResolveConfig =
+      (octokit: OnboardingDeps["octokit"], log: OnboardingDeps["log"]) =>
+      (owner: string, repo: string) =>
+        resolveOnboardingConfig(resolver, octokit as never, log, owner, repo);
 
     // ------------------------------------------------------------- settings
     guarded.on("push", "settings-sync", async (context, scope) => {
@@ -319,7 +354,12 @@ export function createApp(options: AppOptions) {
     // depth, so a replayed delivery is still a no-op.
     guarded.on("installation.created", "onboarding", async (context, scope) => {
       await handleOnboarding(
-        { octokit: context.octokit, log: scope.log, dryRun: options.dryRun },
+        {
+          octokit: context.octokit,
+          log: scope.log,
+          dryRun: options.dryRun,
+          resolveConfig: onboardingResolveConfig(context.octokit, scope.log),
+        },
         scope.owner,
         context.payload,
       );
@@ -327,7 +367,12 @@ export function createApp(options: AppOptions) {
 
     guarded.on("installation_repositories.added", "onboarding", async (context, scope) => {
       await handleOnboarding(
-        { octokit: context.octokit, log: scope.log, dryRun: options.dryRun },
+        {
+          octokit: context.octokit,
+          log: scope.log,
+          dryRun: options.dryRun,
+          resolveConfig: onboardingResolveConfig(context.octokit, scope.log),
+        },
         scope.owner,
         context.payload,
       );
