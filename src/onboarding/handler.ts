@@ -27,12 +27,15 @@
  * next installation event offers again, and the current state is re-probed then.
  *
  * An action that names no repositories is not silent: when the delivery is one
- * this handler acts on (`created`/`added`) but carries an empty list, one line
- * records it so the operator can tell an all-repositories install's missing
- * enumeration from a dead product.
+ * this handler acts on (`created`/`added`) but carries no repository list — the
+ * shape of an install with repository selection "All" — the repositories
+ * accessible to the installation are enumerated and walked like any other
+ * batch. A failing enumeration is recorded as one operator-facing error, and
+ * that delivery opens no offers.
  */
 
 import { BASELINE_PATHS, LOCAL_PATHS } from "../config/paths.js";
+import type { WoodhouseConfig } from "../config/schema.js";
 import { messageOf, statusOf } from "../settings/forbidden.js";
 import { shouldOnboard, type OnboardingProbe } from "./decide.js";
 import {
@@ -42,8 +45,20 @@ import {
 } from "./write.js";
 import { ONBOARDING_BRANCH, ONBOARDING_LABEL } from "./wording.js";
 
-/** Everything the handler needs: the same client and dry-run context as the write seam. */
-export type OnboardingDeps = OnboardingWriteDeps;
+/**
+ * Everything the handler needs: the same client and dry-run context as the
+ * write seam, plus the resolved configuration for a candidate repository.
+ *
+ * `resolveConfig` is a narrow injected function rather than the resolver itself
+ * (design D2): the injection point is where "unresolvable" is defined, so the
+ * decision layer never sees the resolver's fallback defaults. It resolves the
+ * full cascade (defaults → owner baseline → local 404 — the handler only calls
+ * it after `configPresent` said the repository has no local file) and returns
+ * `undefined` when that configuration cannot be determined.
+ */
+export interface OnboardingDeps extends OnboardingWriteDeps {
+  readonly resolveConfig: (owner: string, repo: string) => Promise<WoodhouseConfig | undefined>;
+}
 
 /**
  * The four paths that count as "already configured", in probe order: the two
@@ -77,6 +92,26 @@ function isNotFound(error: unknown): boolean {
 }
 
 /**
+ * The usable names in a raw repository list, per design D1.
+ *
+ * Entries that are null, carry no string `name`, or name the empty string are
+ * dropped, so a malformed payload simply produces fewer (or no) repositories.
+ * Shared by the payload path and the enumeration fallback so both filter
+ * identically rather than drifting apart.
+ */
+function namesOf(
+  raw: ReadonlyArray<{ readonly name?: unknown } | null> | null | undefined,
+): string[] {
+  if (raw === undefined || raw === null) return [];
+  const names: string[] = [];
+  for (const entry of raw) {
+    const name = entry?.name;
+    if (typeof name === "string" && name !== "") names.push(name);
+  }
+  return names;
+}
+
+/**
  * The repository names carried by the payload, per design D1.
  *
  * A fresh installation lists them under `installation.repositories`; a later
@@ -92,14 +127,28 @@ function repositoryNames(payload: OnboardingPayload): string[] {
         ? payload.repositories_added
         : undefined;
 
-  if (raw === undefined || raw === null) return [];
+  return namesOf(raw);
+}
 
-  const names: string[] = [];
-  for (const entry of raw) {
-    const name = entry?.name;
-    if (typeof name === "string" && name !== "") names.push(name);
-  }
-  return names;
+/**
+ * Enumerate the repositories accessible to the installation (design D1).
+ *
+ * The fallback for a list-less acted-on delivery: an install with repository
+ * selection "All" does not name its repositories in the webhook, so the walk's
+ * batch comes from `GET /installation/repositories`. Probot's `context.octokit`
+ * is already bound to the installation, so no auth plumbing is needed, and the
+ * pagination plugin follows every page (`per_page: 100` is the maximum).
+ *
+ * Errors are deliberately not caught here: the caller's own catch makes the
+ * enumeration failure a delivery-level outcome, which is a different thing from
+ * a per-repository failure.
+ */
+async function listInstallationRepositories(deps: OnboardingDeps): Promise<string[]> {
+  const repositories = await deps.octokit.paginate(
+    deps.octokit.apps.listReposAccessibleToInstallation,
+    { per_page: 100 },
+  );
+  return namesOf(repositories);
 }
 
 /**
@@ -190,20 +239,41 @@ async function resolveFacts(
 /**
  * Walk one repository: probe, decide, and only then offer.
  *
- * When a settings file is present the pull-request search is never made —
- * `openOnboardingPr` is left unset and `shouldOnboard` skips on config alone
- * (cheap-first). When it is absent the search is mandatory: its boolean result
- * is what lets `shouldOnboard` offer, and omitting it would fail closed.
+ * When a settings file is present the configuration is never resolved and the
+ * pull-request search is never made — `openOnboardingPr` is left unset and
+ * `shouldOnboard` skips on config alone (cheap-first). When it is absent the
+ * resolved cascade decides whether the owner baseline already manages the
+ * repository; a managed repository skips before the pull-request search, so it
+ * never pays for `pulls.list`. Only an unmanaged repository is searched, and
+ * that boolean result is what lets `shouldOnboard` offer: omitting it would
+ * fail closed.
+ *
+ * An unresolvable configuration is an operational failure, not a decision: it
+ * throws here so the per-repository catch logs it and the walk continues with
+ * no offer. Handing the decision layer fallback defaults would offer a pull
+ * request on unknown management state.
  */
 async function walkRepository(deps: OnboardingDeps, owner: string, repo: string): Promise<void> {
   const present = await configPresent(deps, owner, repo);
 
-  const probe: OnboardingProbe = present
-    ? { configPresent: true }
-    : {
-        configPresent: false,
-        openOnboardingPr: await onboardingPullRequestOpen(deps, owner, repo),
-      };
+  let probe: OnboardingProbe;
+  if (present) {
+    probe = { configPresent: true };
+  } else {
+    const config = await deps.resolveConfig(owner, repo);
+    if (config === undefined) {
+      throw new Error(`Could not resolve woodhouse configuration for ${owner}/${repo}`);
+    }
+
+    const managed = config.settings.enabled === true;
+    probe = managed
+      ? { configPresent: false, managed: true }
+      : {
+          configPresent: false,
+          managed: false,
+          openOnboardingPr: await onboardingPullRequestOpen(deps, owner, repo),
+        };
+  }
 
   const decision = shouldOnboard({ owner, name: repo }, probe);
 
@@ -243,22 +313,30 @@ export async function handleOnboarding(
   // one cast, and it only ever reads optional fields defensively.
   const event = payload as OnboardingPayload;
 
-  const repositories = repositoryNames(event);
+  let repositories = repositoryNames(event);
 
   if (repositories.length === 0) {
     // `repositoryNames` also yields [] for actions this handler ignores; only
-    // an acted-on action with no list is worth a line. A fresh all-repositories
-    // install carries no repository list, so this is the only trace the
-    // operator gets that the delivery legitimately made no offers. A switch to
-    // all-repositories is different: it enumerates every newly accessible
-    // repository and walks them all (see the README warning and issue #24).
-    if (event.action === "created" || event.action === "added") {
-      deps.log.info(
-        { owner, action: event.action },
-        "Installation delivery carried no repository list; no onboarding offers were made",
+    // an acted-on action with no list is an all-repositories delivery worth
+    // enumerating: a fresh *All repositories* install carries no list, and a
+    // switch to it is delivered as the enumerated `added` delta. When the
+    // payload does carry a list it stays authoritative — enumeration is the
+    // fallback, not a second source.
+    if (event.action !== "created" && event.action !== "added") return;
+
+    try {
+      repositories = await listInstallationRepositories(deps);
+    } catch (error) {
+      // The enumeration precedes the per-repository walk, so its failure is the
+      // delivery's failure: one operator-facing line, no offers, and a normal
+      // return (this handler never throws outward).
+      deps.log.error(
+        { owner, action: event.action, err: error },
+        `Could not enumerate the repositories accessible to the installation for ${owner}: ` +
+          `${messageOf(error)}. No onboarding offers were made for this delivery.`,
       );
+      return;
     }
-    return;
   }
 
   for (const repo of repositories) {

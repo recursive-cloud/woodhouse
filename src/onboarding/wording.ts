@@ -59,9 +59,9 @@ settings:
  * wording, and it ends with the shared sign-off.
  *
  * It has to answer three questions — what Woodhouse does, what merging this
- * enables, and how to edit it — and, because a repository with no local file
- * may still be covered by an owner-level baseline, it says so. A local file is
- * how a repository records its own consent and overrides the baseline.
+ * enables, and how to edit it — and, because an offer only goes to a repository
+ * the resolution found unmanaged, it says so: the check happened, and a local
+ * file is how a repository records its own consent.
  */
 export const ONBOARDING_PR_BODY = `## An invitation
 
@@ -79,7 +79,7 @@ Woodhouse keeps repository settings, labels, branch protection, rulesets and aut
 
 ## A note on baselines
 
-This repository may already inherit baseline settings from the owner-level \`.github-private\` configuration. A local file is how a repository records its own consent, and it overrides anything inherited.
+Woodhouse has checked the owner-level \`.github-private\` configuration, and this repository is not yet managed there. A local file is how a repository records its own consent, and it overrides anything inherited.
 
 ## Editing the file
 
