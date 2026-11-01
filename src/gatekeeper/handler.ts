@@ -37,9 +37,18 @@ function truncate(text: string): string {
  *
  * `filter: "latest"` is GitHub's default and returns only the most recent
  * attempt per check name per suite, so re-runs do not resurrect old failures.
- * Note that we do NOT deduplicate by name ourselves: two different apps may
- * legitimately publish the same check name, and since failure takes precedence
- * over success, evaluating both is the fail-safe behaviour.
+ *
+ * But a re-triggered workflow (opening or reopening a PR re-runs CI on the
+ * same SHA) can produce a *second* check suite whose checks share names with
+ * the first, so a single check name can legitimately appear twice across
+ * suites. We therefore deduplicate same-named runs across suites down to their
+ * latest attempt (see `evaluate.ts`) and count each once. This is the one case
+ * we deliberately override GitHub's per-suite default.
+ *
+ * Failure over success across DIFFERENT check names is untouched: distinct
+ * checks are still all evaluated, so an uncovered real failure cannot be
+ * masked by a pass. Only same-named runs (the cross-suite duplicates) are
+ * collapsed.
  */
 async function listCheckRuns(
   octokit: AnyOctokit,
@@ -60,6 +69,8 @@ async function listCheckRuns(
     status: run.status,
     conclusion: run.conclusion,
     detailsUrl: run.details_url,
+    id: run.id,
+    startedAt: run.started_at ?? undefined,
   }));
 }
 
