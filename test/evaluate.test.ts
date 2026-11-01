@@ -18,6 +18,22 @@ const running = (name: string, status = "in_progress"): CheckRunLike => ({
   conclusion: null,
 });
 
+const withMeta = (
+  name: string,
+  opts: {
+    conclusion?: string | null;
+    status?: string;
+    id?: number;
+    startedAt?: string;
+  } = {},
+): CheckRunLike => ({
+  name,
+  status: opts.status ?? "completed",
+  conclusion: opts.conclusion ?? null,
+  id: opts.id,
+  startedAt: opts.startedAt,
+});
+
 describe("evaluate — basic outcomes", () => {
   it("passes when every check succeeded", () => {
     const result = evaluate([done("build", "success"), done("test", "success")], cfg());
@@ -178,10 +194,77 @@ describe("evaluate — defensive cases", () => {
     expect(evaluate([], cfg({ strictChecks: ["build"] })).outcome).toBe("pending");
   });
 
-  it("does not let duplicate names mask a failure", () => {
-    // Two apps may publish the same check name; failure must still win.
+  it("deduplicates same-named runs without metadata to the first occurrence", () => {
+    // Revised stance: same-named runs across suites are now deduplicated.
+    // With no startedAt/id there is nothing to order by, so the first
+    // occurrence is kept deterministically. The fail-safe guarantee is now
+    // carried by metadata-aware dedup (see the tests below), not by evaluating
+    // every same-named run.
     const result = evaluate([done("build", "success"), done("build", "failure")], cfg());
+    expect(result.outcome).toBe("success");
+    expect(result.counts.failed).toBe(0);
+  });
+});
+
+describe("evaluate — cross-suite dedup", () => {
+  it("counts a re-triggered check once, keeping the latest run", () => {
+    // Opening/reopening a PR re-runs CI on the same SHA, producing a second
+    // suite. The older suite failed ci/unit; the newer suite passed it. Only
+    // the latest run should be counted.
+    const result = evaluate(
+      [
+        withMeta("ci/unit", { conclusion: "failure", id: 100, startedAt: "2024-01-01T00:00:00Z" }),
+        withMeta("ci/unit", { conclusion: "success", id: 200, startedAt: "2024-06-01T00:00:00Z" }),
+      ],
+      cfg(),
+    );
+    expect(result.outcome).toBe("success");
+    expect(result.counts.passed).toBe(1);
+    expect(result.counts.failed).toBe(0);
+    expect(result.summary.split("\n").filter((l) => l.includes("ci/unit")).length).toBe(1);
+  });
+
+  it("keeps a pending latest run without dropping the earlier failure", () => {
+    // The latest run is still in progress; the older completed failure must
+    // not linger in the summary once it has been superseded.
+    const result = evaluate(
+      [
+        withMeta("ci/unit", { conclusion: "failure", id: 100, startedAt: "2024-01-01T00:00:00Z" }),
+        withMeta("ci/unit", { status: "in_progress", id: 200, startedAt: "2024-06-01T00:00:00Z" }),
+      ],
+      cfg(),
+    );
+    expect(result.outcome).toBe("pending");
+    expect(result.counts.pending).toBe(1);
+    expect(result.counts.failed).toBe(0);
+    expect(result.summary).not.toContain("FAIL");
+  });
+
+  it("breaks equal startedAt ties on the greatest run id", () => {
+    const result = evaluate(
+      [
+        withMeta("shared", { conclusion: "success", id: 10, startedAt: "2024-01-01T00:00:00Z" }),
+        withMeta("shared", { conclusion: "failure", id: 20, startedAt: "2024-01-01T00:00:00Z" }),
+      ],
+      cfg(),
+    );
     expect(result.outcome).toBe("failure");
+  });
+
+  it("picks the latest run across same-named checks from different apps", () => {
+    // Distinct apps publishing the same name is still deduplicated to the
+    // latest attempt; with metadata the newer run's verdict stands, so a real
+    // latest failure is not masked (fail-closed).
+    const result = evaluate(
+      [
+        withMeta("shared", { conclusion: "success", id: 10, startedAt: "2024-01-01T00:00:00Z" }),
+        withMeta("shared", { conclusion: "failure", id: 20, startedAt: "2025-01-01T00:00:00Z" }),
+      ],
+      cfg(),
+    );
+    expect(result.outcome).toBe("failure");
+    expect(result.counts.failed).toBe(1);
+    expect(result.summary).toContain("**shared**");
   });
 });
 

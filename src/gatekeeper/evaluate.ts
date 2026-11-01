@@ -36,6 +36,12 @@ export interface CheckRunLike {
   readonly status: CheckStatus | string;
   readonly conclusion: CheckConclusion | string | null;
   readonly detailsUrl?: string | null;
+  /** Numeric check-run id, used only to break startedAt ties. Optional so
+   * hand-built runs in tests remain valid. */
+  readonly id?: number;
+  /** ISO-8601 time the check run started, used to pick the latest run per
+   * name. Optional so hand-built runs in tests remain valid. */
+  readonly startedAt?: string;
 }
 
 export type Outcome = "success" | "failure" | "pending";
@@ -105,6 +111,55 @@ function nameMatches(name: string, list: readonly string[]): boolean {
   return list.some((entry) => entry.trim().toLowerCase() === lowered);
 }
 
+/** True when `candidate` is a later (more recent) run than `holder`. */
+function laterThan(candidate: CheckRunLike, holder: CheckRunLike): boolean {
+  const a = candidate.startedAt ?? null;
+  const b = holder.startedAt ?? null;
+
+  // Primary key: startedAt. ISO-8601 timestamps sort chronologically as text.
+  if (a && b) {
+    if (a !== b) return a > b;
+  } else if (a !== b) {
+    // Exactly one run carries a start time; the timestamped one is the later
+    // attempt. (Both absent is handled by the tie-break below.)
+    return a !== null;
+  }
+
+  // Tie-break: greatest run id.
+  const ca = candidate.id ?? null;
+  const cb = holder.id ?? null;
+  if (ca != null && cb != null && ca !== cb) return ca > cb;
+
+  // No reliable ordering (e.g. two metadata-less runs): keep holder, so the
+  // first-seen run wins deterministically.
+  return false;
+}
+
+/**
+ * Collapse same-named runs down to a single run so a check is counted once.
+ *
+ * A re-triggered workflow (opening or reopening a PR re-runs CI on the same
+ * SHA) produces a second check suite, so the same check name can appear twice
+ * with different outcomes. Count the latest attempt and drop the rest.
+ *
+ * "Latest" is the greatest `startedAt`, broken on the greatest `id`. When a
+ * name group carries neither field (only possible for hand-built runs in
+ * tests — real check runs carry both) the first occurrence is kept, so the
+ * choice stays deterministic. Original run order is preserved (minus dropped
+ * duplicates) for a stable summary.
+ */
+function dedupeLatest(runs: readonly CheckRunLike[]): CheckRunLike[] {
+  const byName = new Map<string, CheckRunLike>();
+  for (const run of runs) {
+    const key = run.name.toLowerCase();
+    const existing = byName.get(key);
+    if (!existing || laterThan(run, existing)) {
+      byName.set(key, run);
+    }
+  }
+  return runs.filter((run) => byName.get(run.name.toLowerCase()) === run);
+}
+
 export function evaluate(
   runs: readonly CheckRunLike[],
   config: GatekeeperConfig,
@@ -122,7 +177,13 @@ export function evaluate(
   let anyFailure = false;
   let anyPending = false;
 
-  for (const run of runs) {
+  // A re-triggered workflow (opening or reopening a PR re-runs CI on the same
+  // SHA) produces a second check suite, so the same check name can appear
+  // twice. Count each check once by evaluating its latest run only — see
+  // `laterThan`/`dedupeLatest` above.
+  const deduped = dedupeLatest(runs);
+
+  for (const run of deduped) {
     // Never evaluate ourselves. Without this the check would react to its own
     // completion event and loop indefinitely.
     if (run.name === WHITE_GLOVE_CHECK_NAME) continue;
