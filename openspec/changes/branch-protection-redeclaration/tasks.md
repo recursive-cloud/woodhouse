@@ -4,8 +4,8 @@ The MODIFIED deltas in `specs/settings-sync/spec.md` are applied to `openspec/sp
 
 ## 1. Record the tradeoff and the schema prose
 
-- [ ] 1.1 `TODO.md` "Accepted tradeoffs": add an entry next to the rulesets one — branch protection converges by unconditional re-declaration, reported as applied on every sync (mirrors the rulesets entry). Second sentence: removing a block ends the re-assertion and does NOT delete the protection behind it — off-boarding is GitHub's assisted "Convert to ruleset" flow (`README.md` "Moving off branch protection?").
-- [ ] 1.2 `src/config/schema.ts` (`branchProtectionSchema`): add a truthfulness description on the block — re-declared (idempotent PUT) on every sync and reported as applied even when already matching; removing the block ends the re-assertion and does not delete existing protection; off-board via GitHub's converter. Regenerate `schema/woodhouse.schema.json` and commit.
+- [x] 1.1 `TODO.md` "Accepted tradeoffs": add an entry next to the rulesets one — branch protection converges by unconditional re-declaration, reported as applied on every sync (mirrors the rulesets entry). Second sentence: removing a block ends the re-assertion and does NOT delete the protection behind it — off-boarding is GitHub's assisted "Convert to ruleset" flow (`README.md` "Moving off branch protection?").
+- [x] 1.2 `src/config/schema.ts` (`branchProtectionSchema`): add a truthfulness description on the block — re-declared (idempotent PUT) on every sync and reported as applied even when already matching; removing the block ends the re-assertion and does not delete existing protection; off-board via GitHub's converter. Regenerate `schema/woodhouse.schema.json` and commit.
 
 ## 2. Tests pinning the contracts
 
