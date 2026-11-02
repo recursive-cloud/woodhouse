@@ -48,12 +48,13 @@ never writes a change without listing it.
 ## ADDED Requirements
 
 ### Requirement: Removing a branchProtection block does not remove protection
-A removed `branchProtection` block stops the re-assertion; pulling it from
-the configuration MUST NOT delete the protection that already exists on the
-branch — there is no delete path and no prune equivalent for branch
-protection. The configuration surface SHALL state this and point at
-GitHub's assisted branch-protection → rulesets converter as the off-boarding
-path, which can delete the original protection once the ruleset has landed.
+A removed `branchProtection` block stops the re-assertion and MUST NOT delete
+the protection that already exists on the branch. Woodhouse deliberately ships
+no delete path and no prune for branch protection, because silently deleting
+protection it did not create is unacceptable. The configuration surface SHALL
+state the choice truthfully and point at GitHub's branch-protection → rulesets
+converter as the off-boarding path, which deletes the original
+protection once the ruleset has landed.
 
 #### Scenario: Block removed, protection stays
 - **WHEN** a configuration stops listing a `branchProtection` block for a branch whose protection was previously applied

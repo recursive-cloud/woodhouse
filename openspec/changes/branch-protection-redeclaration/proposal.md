@@ -28,8 +28,11 @@ with this root cause.
   configuration has no `branchProtection` blocks configured and nothing else
   needed changing.
 - Removing a `branchProtection` block from the configuration stops the
-  re-assertion but does NOT delete the existing branch protection — there is
-  no delete path and no prune equivalent for branch protection, by design.
+  re-assertion but does not delete the existing branch protection. The absence
+  of a delete path is a deliberate Woodhouse choice, not an API limit: GitHub
+  offers a protection delete endpoint and lists branches by `protected`, so a
+  `pruneRulesets`-style opt-in would be mechanically possible — but silently
+  deleting protection Woodhouse did not create is unacceptable.
   Off-boarding is manual via GitHub's assisted branch-protection → rulesets
   converter, already documented in `README.md`. This behaviour is now stated
   in the configuration schema so it is not rediscovered as a bug.

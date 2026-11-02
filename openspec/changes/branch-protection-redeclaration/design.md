@@ -45,7 +45,12 @@ behaviour is common to both forks. Resolution is documentation, consistent
 with the README's existing off-boarding stance ("Moving off branch
 protection?"): GitHub ships a manual, assisted "Convert to ruleset" button
 (one rule at a time, optional deletion of the original), and Woodhouse ships
-no migration code. The schema prose states it; no state, no log line, no
+no migration code. Wording caveat from review: the absence of a delete path
+is a deliberate choice, not an API impossibility — GitHub offers DELETE
+.../branches/{branch}/protection and lists branches by `protected`, so a
+`pruneRulesets`-style opt-in would be mechanically possible; it is declined
+because silently deleting protection Woodhouse did not create is
+unacceptable. The schema prose states it; no state, no log line, no
 code.
 
 ### D3. Everything else is untouched
