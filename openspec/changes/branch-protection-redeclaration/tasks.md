@@ -9,8 +9,8 @@ The MODIFIED deltas in `specs/settings-sync/spec.md` are applied to `openspec/sp
 
 ## 2. Tests pinning the contracts
 
-- [ ] 2.1 `test/merge-feedback.test.ts`: the no-op wording appears only when no `branchProtection` blocks are configured; with a block present the comment lists the re-declared `branch-protection update` row(s) instead.
-- [ ] 2.2 `test/appliers/branch-protection.test.ts`: confirm a test asserts the change row is emitted on every sync; add one only if none does.
+- [x] 2.1 `test/merge-feedback.test.ts`: the no-op wording appears only when no `branchProtection` blocks are configured; with a block present the comment lists the re-declared `branch-protection update` row(s) instead.
+- [x] 2.2 `test/appliers/branch-protection.test.ts`: confirm a test asserts the change row is emitted on every sync; add one only if none does.
 
 ## 3. Verification
 
