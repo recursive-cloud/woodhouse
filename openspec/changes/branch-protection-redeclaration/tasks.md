@@ -14,5 +14,5 @@ The MODIFIED deltas in `specs/settings-sync/spec.md` are applied to `openspec/sp
 
 ## 3. Verification
 
-- [ ] 3.1 `openspec validate branch-protection-redeclaration` passes.
-- [ ] 3.2 `npm test` green; `npm run typecheck` clean; `npx oxfmt --check` on touched files; `npm run schema:generate` produces no additional diff.
+- [x] 3.1 `openspec validate branch-protection-redeclaration` passes.
+- [x] 3.2 `npm test` green; `npm run typecheck` clean; `npx oxfmt --check` on touched files; `npm run schema:generate` produces no additional diff.
