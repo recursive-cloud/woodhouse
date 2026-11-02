@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import type { EmitterWebhookEventName } from "@octokit/webhooks";
 import type { Probot } from "probot";
 import { Allowlist } from "../src/security/allowlist.js";
-import { GuardedApp } from "../src/security/guard.js";
+import { GuardedApp, guardedFor } from "../src/security/guard.js";
 
 function fakeLogger() {
   const log: Record<string, unknown> = {
@@ -17,13 +18,16 @@ function fakeLogger() {
 /** Minimal Probot stand-in that captures the registered emitter callback. */
 function fakeApp() {
   let registered: ((ctx: unknown) => Promise<void>) | undefined;
+  const onCalls: unknown[] = [];
   const app = {
-    on: (_events: unknown, cb: (ctx: unknown) => Promise<void>) => {
+    on: (events: unknown, cb: (ctx: unknown) => Promise<void>) => {
+      onCalls.push(events);
       registered = cb;
     },
   } as unknown as Probot;
   return {
     app,
+    onCalls,
     deliver: (payload: unknown) => {
       if (registered === undefined) throw new Error("no handler registered");
       return registered({
@@ -97,5 +101,77 @@ describe("GuardedApp", () => {
     await expect(
       deliver({ repository: { name: "r", owner: { login: "trusted-org" } } }),
     ).rejects.toThrow("boom");
+  });
+});
+
+describe("GuardedApp coverage", () => {
+  it("records a bare event registration as covering every action", () => {
+    const { app } = fakeApp();
+    const guarded = new GuardedApp(app, allowlist);
+    guarded.on("push", "t", vi.fn());
+
+    expect(guarded.handlesEvent("push")).toBe(true);
+    expect(guarded.handlesEvent("push", "created")).toBe(true);
+    expect(guarded.handlesEvent("pull_request")).toBe(false);
+  });
+
+  it("records an action-scoped registration verbatim", () => {
+    const { app } = fakeApp();
+    const guarded = new GuardedApp(app, allowlist);
+    guarded.on("pull_request.opened", "t", vi.fn());
+
+    expect(guarded.handlesEvent("pull_request", "opened")).toBe(true);
+    expect(guarded.handlesEvent("pull_request.edited")).toBe(false);
+    expect(guarded.handlesEvent("pull_request", "edited")).toBe(false);
+    // D1: the bare form is not recorded alongside an action-scoped name, so a
+    // query for the event alone must not claim coverage.
+    expect(guarded.handlesEvent("pull_request")).toBe(false);
+    // The submitted name is stored exactly as given.
+    expect(guarded.handlesEvent("pull_request.opened")).toBe(true);
+  });
+
+  it("records each event of an array registration individually", () => {
+    const { app } = fakeApp();
+    const guarded = new GuardedApp(app, allowlist);
+    guarded.on(["pull_request.opened", "pull_request.reopened"], "t", vi.fn());
+
+    expect(guarded.handlesEvent("pull_request", "opened")).toBe(true);
+    expect(guarded.handlesEvent("pull_request", "reopened")).toBe(true);
+    expect(guarded.handlesEvent("pull_request", "synchronize")).toBe(false);
+    expect(guarded.handlesEvent("check_run", "completed")).toBe(false);
+  });
+
+  it("treats a * registration as covering every event and action", () => {
+    const { app } = fakeApp();
+    const guarded = new GuardedApp(app, allowlist);
+    guarded.on("*" as EmitterWebhookEventName, "t", vi.fn());
+
+    expect(guarded.handlesEvent("push")).toBe(true);
+    expect(guarded.handlesEvent("pull_request", "edited")).toBe(true);
+  });
+
+  it("reports unregistered events and actions as uncovered", () => {
+    const { app } = fakeApp();
+    const guarded = new GuardedApp(app, allowlist);
+
+    expect(guarded.handlesEvent("issues")).toBe(false);
+    expect(guarded.handlesEvent("issues", "opened")).toBe(false);
+  });
+
+  it("records without adding listeners to the Probot emitter", () => {
+    const { app, onCalls } = fakeApp();
+    const guarded = new GuardedApp(app, allowlist);
+    guarded.on(["pull_request.opened", "pull_request.reopened"], "t", vi.fn());
+
+    expect(onCalls).toEqual([["pull_request.opened", "pull_request.reopened"]]);
+  });
+
+  it("looks up the GuardedApp by its Probot instance", () => {
+    const { app } = fakeApp();
+    const other = fakeApp().app;
+    const guarded = new GuardedApp(app, allowlist);
+
+    expect(guardedFor(app)).toBe(guarded);
+    expect(guardedFor(other)).toBeUndefined();
   });
 });

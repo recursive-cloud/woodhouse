@@ -2,9 +2,9 @@
 
 ## 1. GuardedApp records registrations and exposes handlesEvent (high-risk)
 
-- [ ] 1.1 In `src/security/guard.ts`: collect every name passed to `GuardedApp.on` (verbatim, added individually for array registrations) into an internal set; expose `handlesEvent(event: string, action?: string): boolean` and an exported Probot→GuardedApp lookup, without adding a listener to the Probot emitter or altering the allowlist interception. Verify via the extended unit tests (1.2).
-- [ ] 1.2 Extend `test/guard.test.ts` in the existing fakeProbot/fakeLogger style to pin the recordings and query semantics: bare event, action-scoped event, array of events, `*` registration covering any event/action, and unregistered event/action names returning false. Verify: `npx vitest run test/guard.test.ts`.
-- [ ] 1.3 Run the exact verification command: `npx vitest run test/guard.test.ts`, then `npm run typecheck` — both green with no new diagnostics.
+- [x] 1.1 In `src/security/guard.ts`: collect every name passed to `GuardedApp.on` (verbatim, added individually for array registrations) into an internal set; expose `handlesEvent(event: string, action?: string): boolean` and an exported Probot→GuardedApp lookup, without adding a listener to the Probot emitter or altering the allowlist interception. Verify via the extended unit tests (1.2).
+- [x] 1.2 Extend `test/guard.test.ts` in the existing fakeProbot/fakeLogger style to pin the recordings and query semantics: bare event, action-scoped event, array of events, `*` registration covering any event/action, and unregistered event/action names returning false. Verify: `npx vitest run test/guard.test.ts`.
+- [x] 1.3 Run the exact verification command: `npx vitest run test/guard.test.ts`, then `npm run typecheck` — both green with no new diagnostics.
 
 ## 2. Log unroutable and missing-header deliveries at the route (high-risk)
 
