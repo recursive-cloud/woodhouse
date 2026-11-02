@@ -15,4 +15,4 @@
 
 ## 3. Document the new logs
 
-- [ ] 3.1 README operational notes: the unroutable-delivery 200+warn and the missing-header 400+warn, alongside the existing "Rejected webhooks return 200" note. Verify: `npx oxlint README.md && npx oxfmt --check README.md`.
+- [x] 3.1 README operational notes: the unroutable-delivery 200+warn and the missing-header 400+warn, alongside the existing "Rejected webhooks return 200" note. Verified by prose review of the diff (`.oxfmtrc.json` ignores `**/*.md`, so lint/format tools do not apply to this file) and by `hk check` cleanliness at commit.
