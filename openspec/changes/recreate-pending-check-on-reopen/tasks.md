@@ -2,7 +2,7 @@
 
 ## 1. Pure write decision helper
 
-- [ ] 1.1 Create `src/gatekeeper/write-decision.ts` exporting a pure `resolveCheckWrite(existing: { status: string } | undefined, outcome: "pending" | "success" | "failure"): "create" | "update"` implementing the matrix: undefined existing → create; existing not `completed` (`in_progress`, `queued`, any non-terminal status) → update; existing completed + terminal outcome → update; existing completed + pending outcome → create. Verify with a new hermetic `test/gatekeeper/write-decision.test.ts` covering all four branches including a `queued`-existing cell (`npx vitest run test/gatekeeper/write-decision.test.ts`)
+- [x] 1.1 Create `src/gatekeeper/write-decision.ts` exporting a pure `resolveCheckWrite(existing: { status: string } | undefined, outcome: "pending" | "success" | "failure"): "create" | "update"` implementing the matrix: undefined existing → create; existing not `completed` (`in_progress`, `queued`, any non-terminal status) → update; existing completed + terminal outcome → update; existing completed + pending outcome → create. Verify with a new hermetic `test/gatekeeper/write-decision.test.ts` covering all four branches including a `queued`-existing cell (`npx vitest run test/gatekeeper/write-decision.test.ts`)
 
 ## 2. Handler wiring and head_sha rider
 
