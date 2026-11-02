@@ -126,6 +126,24 @@ describe("buildSettingsAppliedComment", () => {
     );
   });
 
+  it("records a re-declared branch-protection row instead of the no-op wording", () => {
+    const body = buildSettingsAppliedComment(
+      summary([{ area: "branch-protection", action: "update", target: "main" }]),
+      false,
+    );
+
+    expect(body).toBe(
+      `${SETTINGS_APPLIED_MARKER}\n` +
+        "**Woodhouse here, sir. I have applied the settings changed by this merge.**\n" +
+        "\n" +
+        "Applied:\n" +
+        "- branch-protection update: main\n" +
+        "\n" +
+        SIGN_OFF,
+    );
+    expect(body).not.toContain("nothing further needed changing");
+  });
+
   it("lists each failure with its detail", () => {
     expect(
       buildSettingsAppliedComment(

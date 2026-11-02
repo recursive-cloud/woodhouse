@@ -117,7 +117,7 @@
     },
     "branchProtection": {
       "default": {},
-      "description": "Classic branch protection keyed by branch name; every configured branch is PUT wholesale and idempotently on each sync. Fields left unset are omitted from the write (GitHub keeps them as-is), except the three API-required fields (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`), which are sent as explicit `null` when unset; a branch that does not exist is skipped, not an error.",
+      "description": "Classic branch protection keyed by branch name; every configured branch is re-declared wholesale and idempotently (PUT) on each sync, and reported as applied even when the protection already matches. Fields left unset are omitted from the write (GitHub keeps them as-is), except the three API-required fields (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`), which are sent as explicit `null` when unset; a branch that does not exist is skipped, not an error. Removing a branch block ends the re-assertion and does not delete the protection behind it — a deliberate choice, not an API limit: a prune would be mechanically possible but silently deleting protection Woodhouse did not create is unacceptable; off-board via the assisted Convert to ruleset flow (README.md, Moving off branch protection?).",
       "type": "object",
       "propertyNames": {
         "type": "string"

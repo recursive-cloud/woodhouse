@@ -100,6 +100,18 @@ changes.
   user-visible change when the content already matches; specced in
   `settings-sync`.
 
+- **Branch protection converges by unconditional re-declaration.** Same
+  pattern as rulesets: every configured branch is PUT wholesale on each
+  sync, idempotent, and reported as applied even when the protection
+  already matches — no user-visible change. Removing a `branchProtection`
+  block ends the re-assertion and does **not** delete the protection
+  behind it — a deliberate choice, not an API limit: GitHub's protection
+  delete endpoint and `protected=true` branch filter would make a
+  `pruneRulesets`-style opt-in mechanically possible, but silently deleting
+  protection Woodhouse did not create is unacceptable. Off-boarding is
+  GitHub's assisted "Convert to ruleset" flow (see
+  `README.md`, "Moving off branch protection?").
+
 - **`pruneRulesets` is converge-everything, not managed-only.** Opt-in
   (default off): deletes every ruleset absent from the configuration,
   hand-made included — the API offers no ownership marker. Documented in
