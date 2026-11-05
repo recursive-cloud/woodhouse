@@ -485,6 +485,13 @@ plain functions over plain data, and hold the bulk of the test suite.
 - Rejected webhooks return 200. An event from an unapproved owner is not an
   error on our side, and failing the delivery would produce noise for something
   we are choosing to ignore.
+- A delivery routed to an App with no listener for the event or action is still
+  answered 200, but warns (`Delivery routed to an App with no handler for this
+  event`) naming delivery, event, action and App. A non-2xx would mark those
+  deliberately ignored events failed in GitHub; the warning shows the gap.
+- A delivery missing a required webhook header (delivery ID, event or signature)
+  is rejected with 400 and warns: `Delivery rejected: missing required GitHub
+  webhook headers`.
 - Handler errors are rethrown so the delivery is marked failed in GitHub's UI
   and can be redelivered from the App's Advanced tab.
 

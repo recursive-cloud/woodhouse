@@ -11,16 +11,12 @@
  * signature is verified — necessarily, since each App has its own secret.
  */
 
-import express, { type Request, type Response } from "express";
+import express from "express";
 import { createServer, type Server as HttpServer } from "node:http";
 import { AppRegistry, loadAppDefinitions } from "./apps/registry.js";
 import { ConfigurationError, loadEnv } from "./lib/env.js";
 import { createLogger } from "./lib/logger.js";
-import { isRequestRejection } from "./lib/webhook-errors.js";
-
-/** GitHub identifies the App that sent a delivery with these headers. */
-const TARGET_ID_HEADER = "x-github-hook-installation-target-id";
-const TARGET_TYPE_HEADER = "x-github-hook-installation-target-type";
+import { handleWebhook } from "./webhook-route.js";
 
 /**
  * Deliveries are capped well above anything GitHub sends (payloads are
@@ -117,83 +113,6 @@ async function main(): Promise<void> {
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
-}
-
-async function handleWebhook(
-  req: Request,
-  res: Response,
-  registry: AppRegistry,
-  log: ReturnType<typeof createLogger>,
-): Promise<void> {
-  const deliveryId = req.get("x-github-delivery");
-  const event = req.get("x-github-event");
-  const signature = req.get("x-hub-signature-256");
-  const targetId = req.get(TARGET_ID_HEADER);
-  const targetType = req.get(TARGET_TYPE_HEADER);
-
-  if (deliveryId === undefined || event === undefined || signature === undefined) {
-    res.status(400).json({ error: "missing required GitHub webhook headers" });
-    return;
-  }
-
-  // Only App-level deliveries are meaningful; a repository or organisation
-  // webhook has no App to attribute it to and no secret we would know.
-  if (targetType !== undefined && targetType.toLowerCase() !== "integration") {
-    log.warn(
-      { deliveryId, event, targetType },
-      "Ignoring delivery that did not come from a GitHub App",
-    );
-    res.status(400).json({ error: "unsupported webhook target type" });
-    return;
-  }
-
-  const appId = Number(targetId);
-  if (!Number.isInteger(appId) || appId <= 0) {
-    log.warn({ deliveryId, event, targetId }, "Delivery has no usable App ID");
-    res.status(400).json({ error: "missing App ID header" });
-    return;
-  }
-
-  const app = registry.get(appId);
-  if (app === undefined) {
-    // Not an error condition: something is pointed at this endpoint that we
-    // are not configured to serve. Say so once, clearly, and move on.
-    log.warn(
-      { deliveryId, event, appId },
-      "Rejected delivery for an App this instance does not serve",
-    );
-    res.status(404).json({ error: "unknown App" });
-    return;
-  }
-
-  const payload = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body ?? "");
-
-  try {
-    // Verification uses this App's own secret. The target ID header that
-    // selected it is unauthenticated, but that is harmless: it only decides
-    // which key to try, and a forged value simply picks a key the sender
-    // cannot produce a valid signature for.
-    await app.probot.webhooks.verifyAndReceive({
-      id: deliveryId,
-      name: event as never,
-      signature,
-      payload,
-    });
-    res.status(200).json({ ok: true });
-  } catch (error) {
-    if (isRequestRejection(error)) {
-      log.warn(
-        { deliveryId, event, app: app.label },
-        "Rejected delivery with an invalid signature",
-      );
-      res.status(400).json({ error: "invalid signature" });
-      return;
-    }
-
-    // A handler threw. The guard has already logged it with full context;
-    // return 500 so the delivery is marked failed and can be redelivered.
-    res.status(500).json({ error: "handler failed" });
-  }
 }
 
 main().catch((error: unknown) => {

@@ -29,16 +29,55 @@ export type GuardedHandler<E extends EmitterWebhookEventName> = (
   scope: EventScope,
 ) => Promise<void> | void;
 
+/**
+ * Lookup from a Probot instance to the GuardedApp wrapping it.
+ *
+ * The GuardedApp is constructed inside the app function Probot loads, so the
+ * registry never holds a reference to it. The constructor keys itself here
+ * instead, letting the webhook route ask what a routed App handles before the
+ * delivery reaches Probot. Keyed weakly: an App's Probot and GuardedApp share
+ * a lifetime.
+ */
+export const guardedByProbot = new WeakMap<Probot, GuardedApp>();
+
+/** The GuardedApp wrapping `probot`, or undefined if there is none. */
+export function guardedFor(probot: Probot): GuardedApp | undefined {
+  return guardedByProbot.get(probot);
+}
+
 function repoName(payload: unknown): string | undefined {
   const name = (payload as { repository?: { name?: unknown } } | null)?.repository?.name;
   return typeof name === "string" ? name : undefined;
 }
 
 export class GuardedApp {
+  /** Event names exactly as registered, e.g. "push", "pull_request.opened". */
+  private readonly registrations = new Set<string>();
+
   constructor(
     private readonly app: Probot,
     private readonly allowlist: Allowlist,
-  ) {}
+  ) {
+    guardedByProbot.set(app, this);
+  }
+
+  /**
+   * Whether a delivery for `event` (and, when known, `action`) has a handler.
+   *
+   * Records are verbatim (design D1): registering "pull_request.opened" does
+   * not record the bare "pull_request" form, so it cannot make
+   * "pull_request.edited" look covered. With an action known, a bare
+   * registration of the event covers every action of it.
+   *
+   * "*" is recognised because @octokit/webhooks treats it as a listener for
+   * every event. That is recognition of a registration the library supports —
+   * Woodhouse registers none — not a wildcard this guard adds.
+   */
+  handlesEvent(event: string, action?: string): boolean {
+    if (this.registrations.has("*")) return true;
+    if (this.registrations.has(event)) return true;
+    return action !== undefined && this.registrations.has(`${event}.${action}`);
+  }
 
   /**
    * Register a handler for one or more events, behind the allowlist.
@@ -48,6 +87,13 @@ export class GuardedApp {
     name: string,
     handler: GuardedHandler<E>,
   ): void {
+    // Record only; this adds nothing to the Probot emitter. Each submitted
+    // name is stored exactly as given, and array registrations contribute
+    // their elements individually.
+    for (const event of Array.isArray(events) ? events : [events]) {
+      this.registrations.add(event);
+    }
+
     // Probot types the emitter callback as the raw webhook event intersected
     // with a partial Context; at runtime it is always a full Context. The cast
     // is confined to this one line rather than leaking into every handler.
