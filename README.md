@@ -414,13 +414,17 @@ digest of the push build that CI tested. The raw `latest` tag keeps following
 - **Merging the release pull request** cuts the release: tag, GitHub release,
   `vX.Y.Z` and `vX` image tags, and the two deployment pins all move in the
   release commit.
-- **Prerequisite:** Settings → Actions → General must have *Allow GitHub
-  Actions to create and approve pull requests* enabled, or the release pull
-  request cannot be opened.
-- **The release pull request runs no CI checks of its own.** Pull requests
-  created with the default `GITHUB_TOKEN` do not trigger workflows. Accepted:
-  the release pull request's content is generated from commits that already
-  passed CI on their own pull requests.
+- **Setup prerequisite:** the release GitHub App must be installed on this
+  repository, with `RELEASE_APP_ID` set as an Actions **variable** and the App's
+  private key as the `RELEASE_APP_PRIVATE_KEY` **secret**. Without them the
+  release-please job fails at token exchange. The *Allow GitHub Actions to
+  create and approve pull requests* setting is irrelevant: that gate applies
+  only to the default `GITHUB_TOKEN`, which release-please no longer uses.
+- **The release pull request runs the normal CI checks.** release-please
+  authenticates with a GitHub App installation token, and pull requests
+  created with an app token trigger workflows as any other pull request
+  would — so `ci.yml` runs lint, tests and the build on the release pull
+  request too (the image job stays push-to-`main` only).
 - **The re-tag job waits for the image build.** It starts in the same workflow
   run as the release merge, before `ci.yml`'s image push has finished, so it
   polls for the short-SHA image to appear — up to 20 minutes — and then re-tags
