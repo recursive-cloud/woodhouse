@@ -1,6 +1,6 @@
 {
   "name": "woodhouse",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "A personal butler for GitHub repositories: settings sync, auto-approval, and check consolidation.",
   "type": "module",
