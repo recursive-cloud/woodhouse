@@ -1,0 +1,3 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/recursive-cloud/woodhouse/main/schema/woodhouse.schema.json
+settings:
+  enabled: true
