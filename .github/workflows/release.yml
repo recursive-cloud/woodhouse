@@ -11,8 +11,8 @@ jobs:
     name: Release pull request
     runs-on: ubuntu-latest
 
-    # Scoped to the job, not the workflow, so a future job added here (the
-    # image re-tag) can hold its own narrower grant instead of inheriting this
+    # Scoped to the job, not the workflow, so the image re-tag job below can
+    # hold its own narrower grant instead of inheriting this
     # one. Opening and updating the release pull request needs
     # `pull-requests: write`; labeling it `autorelease: pending` needs
     # `issues: write`, and that label is load-bearing — release-please only
@@ -20,6 +20,15 @@ jobs:
     # would merge without ever being tagged. `contents: write` writes the
     # release commit, tag and GitHub release. This set is exactly what the
     # action's README documents under "Workflow Permissions".
+    #
+    # These caps bind the workflow's default `GITHUB_TOKEN`. The actual writes
+    # are performed by a GitHub App installation token minted in the step
+    # below (app token-created pull requests do trigger workflows,
+    # `GITHUB_TOKEN` ones do not — that difference is the whole reason for
+    # the App). A `permissions` block cannot reach the app token, so the App's
+    # repository permissions must mirror this set: `contents`,
+    # `pull-requests` and `issues` read/write plus the bundled read-only
+    # Metadata, and nothing more.
     permissions:
       contents: write
       issues: write
@@ -37,18 +46,35 @@ jobs:
       major: ${{ steps.release.outputs.major }}
 
     steps:
+      # Exchanges RELEASE_APP_ID (a repository **variable**, not a secret —
+      # an App ID is public) + RELEASE_APP_PRIVATE_KEY (a **secret**) for a
+      # 1-hour installation token scoped to the one repository. The whole
+      # exchange happens here, in this job: the minted credential never
+      # leaves it.
+      - id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: recursive-cloud
+          repositories: woodhouse
+
       # With release-please-config.json and .release-please-manifest.json at
       # the repo root, the action's defaults already resolve to exactly those
-      # files - no `with` block is needed. The `id` is what lets the job's
-      # `outputs` block read this step's results.
+      # files - only the credential is overridden. Without `token` the action
+      # would act as `GITHUB_TOKEN`, whose pull requests trigger no
+      # workflows. The `id` is what lets the job's `outputs` block read this
+      # step's results.
       - id: release
         uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
   retag-image:
     name: Re-tag image with release version
-    # Chained by `needs`, not a `release: published` trigger: a release cut
-    # with the default `GITHUB_TOKEN` fires no workflow events at all, so an
-    # event-triggered re-tag job would never run. Action outputs are always
+    # Chained by `needs`, not a `release: published` trigger (one that an
+    # app-token release would fire): the chain pins the re-tag into the same
+    # run, so the release outputs are already in hand. Action outputs are always
     # strings, so this compares against the literal 'true' — 'false' is truthy
     # in a GitHub expression, and a truthiness check would run the job on every
     # push.

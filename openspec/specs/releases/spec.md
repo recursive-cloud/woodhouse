@@ -18,11 +18,30 @@ A release SHALL be produced by release-please from the conventional-commit title
 - **THEN** a version tag and GitHub release are created and the next release pull request is opened
 
 ### Requirement: Release workflows hold least privilege per job
-The release-please job SHALL run with only the write permissions it needs to open and label the running release pull request and cut the release (`contents: write`, `issues: write`, `pull-requests: write`); the image re-tag job SHALL run with only the registry access it needs (`packages: write`). No workflow triggered by pull requests SHALL hold write access to contents, issues, pull requests, or packages.
+The release-please job SHALL declare only the write permissions it needs to open and label the running release pull request and cut the release (`contents: write`, `issues: write`, `pull-requests: write`); the image re-tag job SHALL run with only the registry access it needs (`packages: write`) and SHALL authenticate with the workflow's default `GITHUB_TOKEN`. No workflow triggered by pull requests SHALL hold write access to contents, issues, pull requests, or packages.
 
 #### Scenario: Pull-request runs stay read-only
 - **WHEN** CI runs on a pull request
 - **THEN** no workflow invoked by that pull request holds `contents: write`, `issues: write`, `pull-requests: write`, or `packages: write`
+
+### Requirement: Release automation authenticates as a GitHub App installation
+release-please SHALL authenticate with an installation token minted from the repository's configured release GitHub App (App ID in the `RELEASE_APP_ID` variable, private key in the `RELEASE_APP_PRIVATE_KEY` secret) and scoped to this repository — not with the workflow's default `GITHUB_TOKEN`, whose events trigger no workflows. The App SHALL hold no permissions beyond release-please's grant and SHALL carry no webhook configuration: it exists only to mint installation tokens for CI.
+
+#### Scenario: The release pull request triggers CI
+- **WHEN** the release pull request is created or updated with the app token
+- **THEN** the pull-request workflows run on it as on any other pull request
+
+#### Scenario: The App holds nothing beyond release-please's grant
+- **WHEN** the App's repository permissions are reviewed
+- **THEN** they are exactly the release-please job's grant (metadata read-only bundled) and no other repository access
+
+#### Scenario: Missing or unusable app credentials fail the job
+- **WHEN** the release-please job runs without a usable app installation (credentials absent, or the App not installed on this repository)
+- **THEN** the token exchange fails and the job fails rather than falling back to the default `GITHUB_TOKEN`
+
+#### Scenario: App presence does not grant release identity beyond its permissions
+- **WHEN** a change's release pull request or release commit would require a permission the App installation does not hold
+- **THEN** the release job fails instead of silently performing the action with the workflow's wider (or other) credentials
 
 ### Requirement: Images are tagged with release versions without rebuilding
 On a published release, the container image built for the release commit SHALL be tagged with the release version (`vX.Y.Z`) and the floating major tag (`vX`) by re-tagging the existing image, not by building a new one. The re-tag SHALL first wait — bounded — for the release commit's image to exist rather than fail while the push build is still running, and SHALL fail loudly when the wait times out.
