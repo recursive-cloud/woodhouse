@@ -1,6 +1,13 @@
 # Woodhouse
-Self-hosted GitHub App (Probot as a library): cascading settings sync, PR auto-approval, and the `woodhouse/white-glove` consolidated check. Private homelab, not multi-tenant.
-Sensitivity: private
+Self-hosted GitHub App (Probot as a library): cascading settings sync, PR auto-approval, and the `woodhouse/white-glove` consolidated check. Self-hosted homelab deployment, not multi-tenant.
+Sensitivity: public
+
+## Maintainer workflow (autonomous agents)
+This section describes how the maintainer's agents deliver work. Contributors, human or
+agent, follow the Commands, Architecture and Rules above and the normal PR process;
+no Linear access or worktree workflow is expected.
+
+The maintainer's agents plan in the Linear project woodhouse (P-REC-2), implement in their own worktrees, and deliver pull requests against main. Decisions that must outlive a session are recorded in `docs/adr/`; those ADRs supplement the executable specs, and `docs/adr/README.md` explains the convention.
 
 ## Commands
 - toolchain: `mise install` (Node 22, hk, pkl) then `mise run install` — `npm ci` and the git hooks
