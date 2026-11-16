@@ -106,19 +106,17 @@ export function createApp(options: AppOptions) {
         }
       }
 
-      const { config, sources } = await resolver.resolve(
+      const resolved = await resolver.resolve(
         context.octokit as never,
         scope.owner,
         repo,
         scope.log,
       );
 
-      if (!config.settings.enabled) return;
-
-      scope.log.debug({ sources }, "Running settings sync");
-
-      // Serialise per repository so a merge push and the merged pull request's
-      // own event cannot run the sync concurrently.
+      // The gate lives in `syncSettings`: file presence is the opt-in signal,
+      // `settings.enabled` is the kill switch, and an invalid resolution fails
+      // closed. Serialise per repository so a merge push and the merged pull
+      // request's own event cannot run the sync concurrently.
       await settingsMutex.run(`${scope.owner}/${repo}`, () =>
         syncSettings(
           {
@@ -128,7 +126,7 @@ export function createApp(options: AppOptions) {
             log: scope.log,
             dryRun: options.dryRun,
           },
-          config,
+          resolved,
         ),
       );
     });

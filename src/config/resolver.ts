@@ -61,6 +61,11 @@ export interface ResolvedConfig {
   readonly sources: readonly string[];
   /** Non-fatal validation problems; config falls back to defaults on error. */
   readonly issues: readonly ValidationIssue[];
+  /**
+   * The local layer's source when the repository carried a settings file, absent
+   * otherwise. Its presence is the opt-in signal for settings sync.
+   */
+  readonly localSource?: string;
 }
 
 function isNotFound(error: unknown): boolean {
@@ -227,11 +232,16 @@ export class ConfigResolver {
         { owner, repo, sources, issues: result.issues },
         "Invalid woodhouse configuration; falling back to defaults",
       );
-      return { config: defaultConfig(), sources, issues: result.issues };
+      return {
+        config: defaultConfig(),
+        sources,
+        issues: result.issues,
+        localSource: local?.source,
+      };
     }
 
     log.debug({ owner, repo, sources }, "Resolved woodhouse configuration");
-    return { config: result.config, sources, issues: [] };
+    return { config: result.config, sources, issues: [], localSource: local?.source };
   }
 }
 

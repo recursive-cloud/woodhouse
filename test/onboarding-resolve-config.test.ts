@@ -55,8 +55,9 @@ describe("resolveOnboardingConfig", () => {
     );
 
     // The resolver hands back defaults with issues; the wrapper must not pass
-    // those defaults on as if the repository were simply unmanaged.
-    expect(result.config.settings.enabled).toBe(false);
+    // those defaults on as if the repository were simply unmanaged. The default
+    // kill switch is on, which makes the fallback all the more dangerous.
+    expect(result.config.settings.enabled).toBe(true);
     expect(config).toBeUndefined();
   });
 

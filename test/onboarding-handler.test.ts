@@ -184,7 +184,11 @@ function build(
 ) {
   const fake = fakeOctokit(config);
   const log = fakeLogger();
-  const resolve = resolveConfig ?? vi.fn(async () => defaultConfig());
+  // The fake resolver models the onboarding decision's "is the baseline already
+  // managing this repository" input. With `settings.enabled` now defaulting on,
+  // an unmanaged baseline must set the kill switch explicitly off; the real
+  // wiring owns that distinction in a separate change.
+  const resolve = resolveConfig ?? vi.fn(async () => configWithSettingsEnabled(false));
   const deps: OnboardingDeps = {
     octokit: fake.octokit,
     log: log as unknown as Logger,

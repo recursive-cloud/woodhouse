@@ -16,8 +16,8 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "default": false,
-          "description": "Master switch. Off by default: installing this app must not silently start rewriting repository settings until it is explicitly asked to.",
+          "default": true,
+          "description": "Kill switch, on by default. A repository opts into settings sync by carrying its own `.github/woodhouse.yml` (or `.yaml`); a repository without one is never synced regardless of this value. An explicit `false` at any level of the cascade silences sync for the repository, and a repository-level `true` overrides a baseline `false`.",
           "type": "boolean"
         },
         "pruneLabels": {
@@ -32,7 +32,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Repo-settings sync: the master switch plus the prune toggles for labels and rulesets. Off by default."
+      "description": "Repo-settings sync: the `enabled` kill switch and the prune toggles for labels and rulesets. A repository opts in by carrying its own settings file."
     },
     "repository": {
       "default": {},
@@ -113,7 +113,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Repository settings synced when `settings.enabled` is true."
+      "description": "Repository settings synced when the repository carries its own settings file and `settings.enabled` is not false."
     },
     "branchProtection": {
       "default": {},

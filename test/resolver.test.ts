@@ -4,6 +4,7 @@ import {
   invalidateTouchedConfig,
   type ContentsClient,
 } from "../src/config/resolver.js";
+import { settingsSyncBlock } from "../src/settings/apply.js";
 
 function fakeLogger() {
   const log: Record<string, unknown> = {
@@ -42,7 +43,7 @@ describe("ConfigResolver — cascade", () => {
       "app:.github/woodhouse.yml": "repository:\n  has_issues: true\n",
     });
 
-    const { config, sources } = await new ConfigResolver().resolve(
+    const { config, sources, localSource } = await new ConfigResolver().resolve(
       client,
       "acme",
       "app",
@@ -56,6 +57,7 @@ describe("ConfigResolver — cascade", () => {
       "acme/.github-private:woodhouse.yml",
       "acme/app:.github/woodhouse.yml",
     ]);
+    expect(localSource).toBe("acme/app:.github/woodhouse.yml");
   });
 
   it("lets the local config win", async () => {
@@ -77,7 +79,7 @@ describe("ConfigResolver — cascade", () => {
     const { client } = fakeClient({
       ".github-private:woodhouse.yml":
         "gatekeeper:\n  strictChecks: [build]\nrepository:\n  has_wiki: true\n",
-      "app:woodhouse.yml": "settings:\n  enabled: true\n",
+      "app:woodhouse.yml": "settings:\n  enabled: false\nrepository:\n  has_issues: true\n",
       "app:.github/woodhouse.yml": "repository:\n  has_wiki: false\n",
     });
 
@@ -97,8 +99,70 @@ describe("ConfigResolver — cascade", () => {
     // Baseline and local cascade normally...
     expect(config.gatekeeper.strictChecks).toEqual(["build"]);
     expect(config.repository.has_wiki).toBe(false);
-    // ...and the ignored root file did not turn settings management on.
+    // ...and the ignored root file contributed nothing: its explicit false did
+    // not reach the cascade, whose implicit default is now on, and its
+    // repository setting never landed.
+    expect(config.settings.enabled).toBe(true);
+    expect(config.repository.has_issues).toBeUndefined();
+  });
+
+  it("lets a repository-level true override a baseline false", async () => {
+    const { client } = fakeClient({
+      ".github-private:woodhouse.yml": "settings:\n  enabled: false\n",
+      "app:.github/woodhouse.yml": "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
+    });
+
+    const { config, sources, localSource } = await new ConfigResolver().resolve(
+      client,
+      "acme",
+      "app",
+      fakeLogger(),
+    );
+
+    // The raw layers merge before validation, so the local true is what zod
+    // sees; a validated-per-layer merge would have filled the local default.
+    expect(config.settings.enabled).toBe(true);
+    expect(config.repository.has_issues).toBe(true);
+    expect(sources).toEqual([
+      "acme/.github-private:woodhouse.yml",
+      "acme/app:.github/woodhouse.yml",
+    ]);
+    expect(localSource).toBe("acme/app:.github/woodhouse.yml");
+  });
+
+  it("keeps a baseline false when the local file does not set enabled", async () => {
+    const { client } = fakeClient({
+      ".github-private:woodhouse.yml": "settings:\n  enabled: false\n",
+      "app:.github/woodhouse.yml": "repository:\n  has_issues: true\n",
+    });
+
+    const resolved = await new ConfigResolver().resolve(client, "acme", "app", fakeLogger());
+    const { config, sources, localSource } = resolved;
+
+    // The local file opts in, but the cascade's explicit false still silences
+    // the repository: only a repo-level true overrides it.
     expect(config.settings.enabled).toBe(false);
+    expect(sources).toEqual([
+      "acme/.github-private:woodhouse.yml",
+      "acme/app:.github/woodhouse.yml",
+    ]);
+    expect(localSource).toBe("acme/app:.github/woodhouse.yml");
+    expect(settingsSyncBlock(resolved)).toBe("settings-disabled");
+  });
+
+  it("reports no-local-file for a baseline-only repository", async () => {
+    const { client } = fakeClient({
+      ".github-private:woodhouse.yml": "gatekeeper:\n  strictChecks: [build]\n",
+    });
+
+    const resolved = await new ConfigResolver().resolve(client, "acme", "app", fakeLogger());
+
+    // The baseline contributes, but without a local file the repository never
+    // opted in: the implicit enabled default must not drive a sync.
+    expect(resolved.sources).toEqual(["acme/.github-private:woodhouse.yml"]);
+    expect(resolved.localSource).toBeUndefined();
+    expect(resolved.config.settings.enabled).toBe(true);
+    expect(settingsSyncBlock(resolved)).toBe("no-local-file");
   });
 
   it("honours inherit: false", async () => {
@@ -119,14 +183,15 @@ describe("ConfigResolver — cascade", () => {
 
   it("falls back to defaults when nothing exists anywhere", async () => {
     const { client } = fakeClient({});
-    const { config, sources } = await new ConfigResolver().resolve(
+    const { config, sources, localSource } = await new ConfigResolver().resolve(
       client,
       "acme",
       "app",
       fakeLogger(),
     );
     expect(sources).toEqual([]);
-    expect(config.settings.enabled).toBe(false);
+    expect(config.settings.enabled).toBe(true);
+    expect(localSource).toBeUndefined();
     expect(config.gatekeeper.enabled).toBe(true);
   });
 
@@ -143,7 +208,7 @@ describe("ConfigResolver — cascade", () => {
     const { client } = fakeClient({
       "app:.github/woodhouse.yml": "gatekeeper:\n  enabled: nonsense\n",
     });
-    const { config, issues } = await new ConfigResolver().resolve(
+    const { config, issues, localSource } = await new ConfigResolver().resolve(
       client,
       "acme",
       "app",
@@ -151,6 +216,9 @@ describe("ConfigResolver — cascade", () => {
     );
     expect(issues.length).toBeGreaterThan(0);
     expect(config.gatekeeper.enabled).toBe(true);
+    // The local file was present, so its source survives the fallback; the
+    // invalid-config gate keeps this resolution from being synced.
+    expect(localSource).toBe("acme/app:.github/woodhouse.yml");
   });
 });
 
@@ -224,7 +292,7 @@ describe("ConfigResolver — baseline repository", () => {
   it("falls back to defaults when the baseline repo has no root configuration", async () => {
     const { client } = fakeClient({});
 
-    const { config, sources } = await new ConfigResolver().resolve(
+    const { config, sources, localSource } = await new ConfigResolver().resolve(
       client,
       "acme",
       ".github-private",
@@ -232,7 +300,8 @@ describe("ConfigResolver — baseline repository", () => {
     );
 
     expect(sources).toEqual([]);
-    expect(config.settings.enabled).toBe(false);
+    expect(config.settings.enabled).toBe(true);
+    expect(localSource).toBeUndefined();
   });
 
   it("needs no inherit: false special case in the baseline repo's own root file", async () => {
