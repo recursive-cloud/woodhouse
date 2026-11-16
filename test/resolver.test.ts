@@ -71,11 +71,9 @@ describe("ConfigResolver — cascade", () => {
   });
 
   it("ignores a root woodhouse.yml in a non-baseline repository", async () => {
-    // Pins the Narrow boundary of issue #26: root baseline-shaped files are a
-    // local layer only for the baseline repository itself. A non-baseline
-    // repository's root file must contribute nothing — otherwise it could
-    // enable settings management for every repository, which the change
-    // explicitly rejects.
+    // Root baseline-shaped files are never a repository's local layer: the
+    // owner baseline root and the local `.github/` path are the only layers. A
+    // non-baseline repository's root file contributes nothing.
     const { client } = fakeClient({
       ".github-private:woodhouse.yml":
         "gatekeeper:\n  strictChecks: [build]\nrepository:\n  has_wiki: true\n",
@@ -181,6 +179,26 @@ describe("ConfigResolver — cascade", () => {
     expect(sources).toEqual(["acme/app:.github/woodhouse.yml"]);
   });
 
+  it("honours inherit: false in the baseline repository's own .github/woodhouse.yml", async () => {
+    // The root file is the baseline layer; the local file's inherit:false drops
+    // it, and the local file remains the repository's opt-in.
+    const { client } = fakeClient({
+      ".github-private:woodhouse.yml": "repository:\n  has_wiki: false\n",
+      ".github-private:.github/woodhouse.yml": "inherit: false\n",
+    });
+
+    const { config, sources, localSource } = await new ConfigResolver().resolve(
+      client,
+      "acme",
+      ".github-private",
+      fakeLogger(),
+    );
+
+    expect(config.repository.has_wiki).toBeUndefined();
+    expect(sources).toEqual(["acme/.github-private:.github/woodhouse.yml"]);
+    expect(localSource).toBe("acme/.github-private:.github/woodhouse.yml");
+  });
+
   it("falls back to defaults when nothing exists anywhere", async () => {
     const { client } = fakeClient({});
     const { config, sources, localSource } = await new ConfigResolver().resolve(
@@ -257,49 +275,76 @@ describe("ConfigResolver — baseline repository", () => {
     expect(getContent.mock.calls.map((c) => c[0].repo)).toContain(".github");
   });
 
-  it("resolves the baseline repo's own root woodhouse.yaml as its local layer", async () => {
-    // Issue #26: the baseline repository must be able to enable settings
-    // management on itself. Its own root file is the local layer, and no
-    // separate baseline layer is fetched — nothing merges into itself.
+  it("resolves the baseline repository's root file as its baseline layer, not a local file", async () => {
     const { client, getContent } = fakeClient({
-      ".github-private:woodhouse.yaml":
-        "settings:\n  enabled: true\nrepository:\n  has_wiki: false\n",
+      ".github-private:woodhouse.yml":
+        "gatekeeper:\n  strictChecks: [build]\nrepository:\n  has_wiki: false\n",
     });
 
-    const { config, sources, localSource } = await new ConfigResolver().resolve(
+    const resolved = await new ConfigResolver().resolve(
       client,
       "acme",
       ".github-private",
       fakeLogger(),
     );
 
-    expect(config.settings.enabled).toBe(true);
-    expect(config.repository.has_wiki).toBe(false);
-    // Listed once: the root file is the local layer, never also the baseline.
-    expect(sources).toEqual(["acme/.github-private:woodhouse.yaml"]);
-    expect(localSource).toBe("acme/.github-private:woodhouse.yaml");
-    // Only the root paths were probed, and only once each: no baseline fetch
-    // and no `.github/` local-layer probe for the baseline repository.
-    expect(getContent.mock.calls.map((call) => call[0].path)).toEqual([
-      "woodhouse.yml",
-      "woodhouse.yaml",
+    expect(resolved.config.gatekeeper.strictChecks).toEqual(["build"]);
+    expect(resolved.config.repository.has_wiki).toBe(false);
+    // The root file is the baseline layer; it does not opt the baseline
+    // repository itself into settings management.
+    expect(resolved.sources).toEqual(["acme/.github-private:woodhouse.yml"]);
+    expect(resolved.localSource).toBeUndefined();
+    expect(settingsSyncBlock(resolved)).toBe("no-local-file");
+    // Its root file is fetched as the baseline layer, and its `.github/` paths
+    // are still probed as the local layer like any other repository.
+    expect(getContent.mock.calls.map((call) => [call[0].repo, call[0].path])).toEqual([
+      [".github-private", "woodhouse.yml"],
+      [".github-private", ".github/woodhouse.yml"],
+      [".github-private", ".github/woodhouse.yaml"],
     ]);
-    expect(getContent.mock.calls.every((call) => call[0].repo === ".github-private")).toBe(true);
   });
 
-  it("resolves a custom baseline repo's own root file as its local layer", async () => {
+  it("manages the baseline repository through its own .github/woodhouse.yml", async () => {
+    const { client } = fakeClient({
+      ".github-private:woodhouse.yml": "repository:\n  has_wiki: true\n",
+      ".github-private:.github/woodhouse.yml":
+        "settings:\n  enabled: true\nrepository:\n  has_wiki: false\n",
+    });
+
+    const resolved = await new ConfigResolver().resolve(
+      client,
+      "acme",
+      ".github-private",
+      fakeLogger(),
+    );
+
+    expect(resolved.config.settings.enabled).toBe(true);
+    expect(resolved.config.repository.has_wiki).toBe(false);
+    expect(resolved.sources).toEqual([
+      "acme/.github-private:woodhouse.yml",
+      "acme/.github-private:.github/woodhouse.yml",
+    ]);
+    expect(resolved.localSource).toBe("acme/.github-private:.github/woodhouse.yml");
+    expect(settingsSyncBlock(resolved)).toBeNull();
+  });
+
+  it("resolves a custom baseline repo's own root file as its baseline layer", async () => {
     const { client, getContent } = fakeClient({
       ".github:woodhouse.yml": "settings:\n  enabled: true\n",
     });
 
-    const { config, sources, localSource } = await new ConfigResolver({
-      baselineRepo: ".github",
-    }).resolve(client, "acme", ".github", fakeLogger());
+    const resolved = await new ConfigResolver({ baselineRepo: ".github" }).resolve(
+      client,
+      "acme",
+      ".github",
+      fakeLogger(),
+    );
 
-    expect(config.settings.enabled).toBe(true);
-    expect(sources).toEqual(["acme/.github:woodhouse.yml"]);
-    expect(localSource).toBe("acme/.github:woodhouse.yml");
-    expect(getContent.mock.calls.map((call) => call[0].path)).toEqual(["woodhouse.yml"]);
+    expect(resolved.config.settings.enabled).toBe(true);
+    expect(resolved.sources).toEqual(["acme/.github:woodhouse.yml"]);
+    expect(resolved.localSource).toBeUndefined();
+    expect(settingsSyncBlock(resolved)).toBe("no-local-file");
+    expect(getContent.mock.calls.map((call) => call[0].path)).toContain(".github/woodhouse.yml");
   });
 
   it("falls back to defaults when the baseline repo has no root configuration", async () => {
@@ -315,24 +360,6 @@ describe("ConfigResolver — baseline repository", () => {
     expect(sources).toEqual([]);
     expect(config.settings.enabled).toBe(true);
     expect(localSource).toBeUndefined();
-  });
-
-  it("needs no inherit: false special case in the baseline repo's own root file", async () => {
-    // With no baseline layer to drop, `inherit: false` is simply the local
-    // layer's own declaration and the file still resolves normally.
-    const { client } = fakeClient({
-      ".github-private:woodhouse.yml": "inherit: false\nrepository:\n  has_wiki: false\n",
-    });
-
-    const { config, sources } = await new ConfigResolver().resolve(
-      client,
-      "acme",
-      ".github-private",
-      fakeLogger(),
-    );
-
-    expect(config.repository.has_wiki).toBe(false);
-    expect(sources).toEqual(["acme/.github-private:woodhouse.yml"]);
   });
 
   it("identifies the baseline repo case-insensitively", () => {

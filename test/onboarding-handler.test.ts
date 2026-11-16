@@ -218,13 +218,12 @@ describe("handleOnboarding", () => {
 
     await handleOnboarding(deps, OWNER, created("widgets"));
 
-    // Cheap-first: the four settings paths, 404 for each, then the open-offer
-    // search, then the write facts — only after all of them does the seam run.
+    // Cheap-first: the two `.github/` settings paths, 404 for each, then the
+    // open-offer search, then the write facts — only after all of them does the
+    // seam run.
     expect(calls).toEqual([
       `repos.getContent widgets:.github/woodhouse.yml`,
       `repos.getContent widgets:.github/woodhouse.yaml`,
-      `repos.getContent widgets:woodhouse.yml`,
-      `repos.getContent widgets:woodhouse.yaml`,
       "pulls.list widgets",
       "repos.get widgets",
       `git.getRef widgets:heads/main`,
@@ -235,7 +234,7 @@ describe("handleOnboarding", () => {
       "issues.addLabels widgets",
     ]);
 
-    expect(getContent).toHaveBeenCalledTimes(4);
+    expect(getContent).toHaveBeenCalledTimes(2);
     expect(list).toHaveBeenCalledWith({
       owner: OWNER,
       repo: "widgets",
@@ -272,36 +271,59 @@ describe("handleOnboarding", () => {
     });
   });
 
-  it("skips an already-configured repository without ever searching for a pull request", async () => {
-    // A root-level baseline path: the two `.github/` locals must be probed and
-    // found absent before the baseline-shaped path is reached.
-    const { deps, calls, list, createRef, createOrUpdateFileContents, create, addLabels, log } =
-      build({ presentPaths: ["woodhouse.yml"] });
+  it("probes only the local .github paths, never the root baseline file", async () => {
+    // A repository's root `woodhouse.yml` is the owner baseline, not a local
+    // settings file, so the walk never requests it.
+    const { deps, calls, getContent, list, create, addLabels, log } = build();
 
     await handleOnboarding(deps, OWNER, created("widgets"));
 
-    // All the probes that ran, and nothing more. Crucially no `pulls.list`.
-    expect(calls).toEqual([
+    expect(calls.slice(0, 3)).toEqual([
       "repos.getContent widgets:.github/woodhouse.yml",
       "repos.getContent widgets:.github/woodhouse.yaml",
-      "repos.getContent widgets:woodhouse.yml",
+      "pulls.list widgets",
     ]);
-    expect(list).not.toHaveBeenCalled();
+    expect(getContent.mock.calls.map(([params]) => params.path)).toEqual([
+      ".github/woodhouse.yml",
+      ".github/woodhouse.yaml",
+    ]);
+    expect(list).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "widgets" }));
+    expect(addLabels).toHaveBeenCalledOnce();
+    expect(log.debug).not.toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "settings-file-present" }),
+      "Onboarding skipped",
+    );
+  });
 
-    // No writes at all.
-    expect(createRef).not.toHaveBeenCalled();
-    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
+  it("offers onboarding to the baseline repository when it lacks .github/woodhouse.yml", async () => {
+    const { deps, calls, create, addLabels } = build();
+
+    await handleOnboarding(deps, OWNER, created(".github-private"));
+
+    // Walked like any other repository: its root baseline file is not probed
+    // and does not suppress the offer.
+    expect(calls.slice(0, 3)).toEqual([
+      "repos.getContent .github-private:.github/woodhouse.yml",
+      "repos.getContent .github-private:.github/woodhouse.yaml",
+      "pulls.list .github-private",
+    ]);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: ".github-private" }));
+    expect(addLabels).toHaveBeenCalledOnce();
+  });
+
+  it("skips the baseline repository when it carries .github/woodhouse.yml", async () => {
+    const { deps, calls, create, addLabels, log } = build({
+      presentPaths: [".github-private:.github/woodhouse.yml"],
+    });
+
+    await handleOnboarding(deps, OWNER, created(".github-private"));
+
+    expect(calls).not.toContain("pulls.list .github-private");
     expect(create).not.toHaveBeenCalled();
     expect(addLabels).not.toHaveBeenCalled();
-
-    // "Silently" means no pull request, not no log: the machine-readable reason
-    // is recorded for the operator.
     expect(log.debug).toHaveBeenCalledWith(
-      expect.objectContaining({
-        owner: OWNER,
-        repo: "widgets",
-        reason: "settings-file-present",
-      }),
+      expect.objectContaining({ repo: ".github-private", reason: "settings-file-present" }),
       "Onboarding skipped",
     );
   });
@@ -334,15 +356,13 @@ describe("handleOnboarding", () => {
 
     await handleOnboarding(deps, OWNER, created("widgets"));
 
-    // There is no resolution step: the four settings paths and the open-offer
-    // search are the whole decision, so a baseline `settings.enabled: true`
-    // cannot suppress the invitation.
-    expect(getContent).toHaveBeenCalledTimes(4);
-    expect(calls.slice(0, 5)).toEqual([
+    // There is no resolution step: the two local settings paths and the
+    // open-offer search are the whole decision, so a baseline
+    // `settings.enabled: true` cannot suppress the invitation.
+    expect(getContent).toHaveBeenCalledTimes(2);
+    expect(calls.slice(0, 3)).toEqual([
       "repos.getContent widgets:.github/woodhouse.yml",
       "repos.getContent widgets:.github/woodhouse.yaml",
-      "repos.getContent widgets:woodhouse.yml",
-      "repos.getContent widgets:woodhouse.yaml",
       "pulls.list widgets",
     ]);
     expect(calls.some((call) => call.includes(".github-private"))).toBe(false);
@@ -512,7 +532,7 @@ describe("handleOnboarding", () => {
     await handleOnboarding(deps, OWNER, created("widgets"));
 
     // The decision was evaluated in full — every read happened.
-    expect(getContent).toHaveBeenCalledTimes(4);
+    expect(getContent).toHaveBeenCalledTimes(2);
     expect(list).toHaveBeenCalledOnce();
     expect(get).toHaveBeenCalledOnce();
     expect(getRef).toHaveBeenCalledTimes(2);

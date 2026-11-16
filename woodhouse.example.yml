@@ -13,6 +13,10 @@
 #
 # Local settings win. Objects merge; arrays replace wholesale, so a repository
 # can narrow an inherited list rather than only ever extending it.
+#
+# This root file applies to every repository you own, but it does not manage the
+# baseline repository itself: `.github-private` opts in with its own
+# `.github/woodhouse.yml`, like any other repository.
 
 # Set `inherit: false` in a repository's local file to ignore this baseline
 # entirely rather than merging with it.

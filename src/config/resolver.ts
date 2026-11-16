@@ -6,9 +6,10 @@
  *   2. `woodhouse.yml` in the owner's `.github` repository  (global baseline)
  *   3. `.github/woodhouse.yml` in the repository itself     (local override)
  *
- * The baseline repository is the one exception to layer 3: its own root
- * `woodhouse.yml` / `woodhouse.yaml` are its local layer, and no baseline layer
- * is fetched into its own resolution. There is nothing to inherit from itself.
+ * The baseline file cascades to every repository the owner has, the baseline
+ * repository included: for the baseline repository its own root file is the
+ * baseline layer. The baseline repository manages itself through its own
+ * `.github/woodhouse.yml` (or `.yaml`), exactly like any other repository.
  *
  * The raw YAML of each layer is merged *before* validation. Validating each
  * layer independently would be wrong: zod would fill in defaults for the local
@@ -191,21 +192,18 @@ export class ConfigResolver {
     log: Logger,
     ref: string | undefined,
   ): Promise<ResolvedConfig> {
-    // The baseline repository's own root files are its local layer; every
-    // other repository's local override lives under `.github/`.
-    const localPaths = this.isBaselineRepo(repo) ? BASELINE_PATHS : LOCAL_PATHS;
+    // Every repository's local override lives under `.github/`, the baseline
+    // repository included; its root files are the owner-wide baseline layer.
+    const localPaths = LOCAL_PATHS;
 
     // Fetched in parallel: they are independent and this halves the latency
     // added to every event.
     const [baseline, local] = await Promise.all([
       // The baseline always comes from the default branch of the baseline
       // repository; pinning it to the current repo's ref would be meaningless.
-      // The baseline *layer* is skipped when the repo *is* the baseline — there
-      // is nothing to inherit from itself — while its own root files still
-      // serve as its local layer above.
-      this.isBaselineRepo(repo)
-        ? Promise.resolve(undefined)
-        : fetchLayer(client, owner, this.baselineRepo, BASELINE_PATHS, undefined, log),
+      // For the baseline repository itself this is its own root file, which
+      // makes it the baseline layer rather than a local one.
+      fetchLayer(client, owner, this.baselineRepo, BASELINE_PATHS, undefined, log),
       fetchLayer(client, owner, repo, localPaths, ref, log),
     ]);
 

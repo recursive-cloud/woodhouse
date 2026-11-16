@@ -31,9 +31,10 @@ before writing, so an unchanged repository costs no write calls. Merging a pull
 request that changes a settings file into the default branch triggers the same
 sync, and Woodhouse comments on that pull request with the outcome: what was
 applied in each area, any failures with their reason, or that nothing further
-needed changing. A merge on the baseline repository says so truthfully — the
-baseline was synced directly, and other repositories adopt the change at their
-next event — and a repository with settings disabled stays silent. Re-delivering
+needed changing. A merge on the baseline repository that carries its own
+`.github/woodhouse.yml` says so truthfully — the baseline was synced directly,
+and other repositories adopt the change at their next event; without a local
+file that merge stays silent. A repository with settings disabled stays silent. Re-delivering
 the event updates the comment in place rather than duplicating it. Both triggers
 serialise per repository, so a merge push and the closed event cannot apply the
 same change twice.
@@ -167,10 +168,11 @@ else stays at its schema default.
 The walk is stateless — every decision is read from GitHub's current state, not
 remembered:
 
-- A repository that already has any settings file (either `.github/` path, or a
-  root `woodhouse.yml`/`.yaml`, which is how the baseline repository carries its
-  own) is skipped silently. An existing file is a deliberate state, even if
-  settings are off.
+- A repository that already has a local settings file (either `.github/`
+  path) is skipped silently. An existing file is a deliberate state, even if
+  settings are off. A root `woodhouse.yml`/`.yaml` does not count: in the
+  baseline repository it is the owner-wide baseline, so `.github-private`
+  itself is offered onboarding unless it carries its own `.github/woodhouse.yml`.
 - A repository with an open onboarding pull request is skipped, so re-delivered
   installation events never duplicate the branch, the commit, or the pull
   request.
@@ -202,9 +204,10 @@ Two things worth knowing:
   *All repositories* delivers an enumerated
   `installation_repositories.added` event, walked the same way; if a burst of
   onboarding pull requests is not wanted, do that flip under `DRY_RUN=true`. A
-  repository that already has a settings file is skipped. A repository without
-  one receives the offer even when the owner baseline enables settings
-  management: the file is the per-repository opt-in. The walk runs on the
+  repository that already has a local settings file is skipped. A repository
+  without one receives the offer even when the owner baseline enables settings
+  management: the file is the per-repository opt-in, for the baseline repository
+  too. The walk runs on the
   delivery's response path, so a large installation can outlive GitHub's ~10s
   redelivery window. A redelivered delivery re-enumerates and walks again, but
   the same probes absorb it — settings file, open onboarding pull request,

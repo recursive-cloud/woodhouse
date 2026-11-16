@@ -32,15 +32,15 @@ When the App is installed on a repository, or a repository is added to an existi
 - **THEN** no onboarding pull requests are opened for that delivery and the failure is logged
 
 ### Requirement: Already-configured repositories are skipped
-A repository in which any settings file already exists SHALL NOT receive an onboarding pull request — it manages itself.
+A repository in which a local `.github/woodhouse.yml` or `.github/woodhouse.yaml` already exists SHALL NOT receive an onboarding pull request — it manages itself. A root `woodhouse.yml` in the baseline repository is the owner-wide baseline, not a local settings file.
 
 #### Scenario: Local config already present
 - **WHEN** the App is installed on a repository that already has `.github/woodhouse.yaml`
 - **THEN** no onboarding pull request is opened
 
-#### Scenario: The baseline repository is skipped
-- **WHEN** the App is installed on the baseline repository, which carries a root `woodhouse.yml`
-- **THEN** no onboarding pull request is opened
+#### Scenario: The baseline repository is offered like any other
+- **WHEN** the App is installed on the baseline repository, which carries a root `woodhouse.yml` but no `.github/woodhouse.yml`
+- **THEN** the onboarding offer is made for it — the root baseline file is not a local settings file
 
 #### Scenario: A repository under an enabled baseline still receives the offer
 - **WHEN** a repository has no settings file and the owner baseline resolves settings management on

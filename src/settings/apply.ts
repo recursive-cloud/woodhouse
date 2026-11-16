@@ -36,13 +36,15 @@ export type SettingsSyncBlockReason = "no-local-file" | "settings-disabled" | "i
  * Why settings sync must not run for a resolved configuration, or null to run.
  *
  * The repository's own `.github/woodhouse.yml` (or `.yaml`) is the opt-in
- * signal: without one the repository is never synced, no matter what the
- * cascade says. `settings.enabled` is a kill switch that defaults on; an
- * explicit `false` anywhere in the cascade silences the repository, and a
- * repository-level `true` overrides a baseline `false` because raw layers are
- * merged before validation. Invalid configuration fails closed exactly as it
- * did when the switch defaulted off: the resolver hands back fallback defaults
- * alongside its issues, and those must never drive a sync.
+ * signal, in every repository, the baseline repository included: without one
+ * the repository is never synced, no matter what the cascade says. A root
+ * baseline file is not a local file. `settings.enabled` is a kill switch that
+ * defaults on; an explicit `false` anywhere in the cascade silences the
+ * repository, and a repository-level `true` overrides a baseline `false`
+ * because raw layers are merged before validation. Invalid configuration fails
+ * closed exactly as it did when the switch defaulted off: the resolver hands
+ * back fallback defaults alongside its issues, and those must never drive a
+ * sync.
  */
 export function settingsSyncBlock(resolved: ResolvedConfig): SettingsSyncBlockReason | null {
   if (resolved.localSource === undefined) return "no-local-file";

@@ -158,7 +158,7 @@ trace rather than an offer: that is the fail-closed edge, not this phase's targe
 The two repositories above are already configured, so they are skipped by design —
 the same skip reason as check 0.8.
 
-Phase 0 expects `LOG_LEVEL=debug`. The four settings-path probes surface through
+Phase 0 expects `LOG_LEVEL=debug`. The two `.github/` settings-path probes surface through
 Probot's request logging and the `Onboarding skipped` lines are `debug` entries,
 so at the documented default (`info`) the product looks dead while behaving
 correctly. The `DRY_RUN: would …` lines, the summary line and the 403 hint all
@@ -171,7 +171,7 @@ installation settings → *Repository access* → add it. That fires
 
 | # | Test | Action | Expected |
 | --- | --- | --- | --- |
-| 0.1 | Dry run shows the offer | Add the scratch repo with `DRY_RUN=true` | Logs show the four settings-path probes (each 404), then `DRY_RUN: would create branch woodhouse/onboarding`, `DRY_RUN: would commit .github/woodhouse.yml to woodhouse/onboarding` and `DRY_RUN: would open pull request "chore: onboard to Woodhouse"`, then one summary line carrying `branch`, `file`, `title` and `body`. **Verify GitHub shows no branch, commit or pull request** |
+| 0.1 | Dry run shows the offer | Add the scratch repo with `DRY_RUN=true` | Logs show the two `.github/` settings-path probes (each 404), then `DRY_RUN: would create branch woodhouse/onboarding`, `DRY_RUN: would commit .github/woodhouse.yml to woodhouse/onboarding` and `DRY_RUN: would open pull request "chore: onboard to Woodhouse"`, then one summary line carrying `branch`, `file`, `title` and `body`. **Verify GitHub shows no branch, commit or pull request** |
 | 0.2 | The offer is made | `DRY_RUN=false`, then re-fire the event (remove and re-add the repo, or redeliver from the App's *Advanced* tab) | PR `chore: onboard to Woodhouse` from `woodhouse/onboarding` adds `.github/woodhouse.yml` (schema modeline and pointers) and carries the `woodhouse: onboarding` label |
 | 0.3 | The offer is validated by the product | Watch the PR's checks | `woodhouse/config` **passes** on the added file and `woodhouse/white-glove` goes green — the product validates its own onboarding pull request |
 | 0.4 | Nothing else runs | Watch the logs while the PR is open | No settings sync for the scratch repository; white-glove and config validation are the only activity |
@@ -276,7 +276,7 @@ letting it write.
 | 5.17 | Feature-branch merge | Merge a settings PR into a feature branch | No sync, no comment |
 | 5.18 | Disabled on merge | Merge a PR setting `settings.enabled: false` | No sync, no comment; log only |
 | 5.19 | Merge push already applied | With `DRY_RUN=false`, merge a settings PR | Comment says the settings are in effect and nothing further needed changing |
-| 5.20 | Baseline merge | Merge a settings PR in `.github-private` | Comment states the baseline was synced directly and other repositories adopt the change at their next event |
+| 5.20 | Baseline merge | Merge a PR changing `.github-private`'s root `woodhouse.yml` | Without `.github/woodhouse.yml` in `.github-private`: no sync and no comment (gate `no-local-file`). With its own `.github/woodhouse.yml`: the comment states the baseline was synced directly and other repositories adopt the change at their next event |
 
 ## Phase 6 — end to end
 
@@ -310,9 +310,10 @@ findings are tracked as GitHub issues and pulled in separately:
   `branchProtection` block present the sync issues the PUT unconditionally, so
   a no-op merge never reaches the "nothing further needed changing" wording
   (#25).
-- **5.20 — the baseline repository resolves to defaults.** Its own root
-  `woodhouse.yml` is never read as its config, so a baseline merge posts no
-  merge comment (#26).
+- **5.20 — a baseline root merge no longer syncs the baseline repository by
+  itself.** Its root `woodhouse.yml` is the owner baseline, not a local file; the
+  baseline repository opts in with `.github/woodhouse.yml`. A root-only merge
+  produces no sync and no comment by design.
 - **2.9 — a red check can wear a "Waiting on…" title.** After a
   completed→pending PATCH GitHub keeps the old conclusion, so the old status
   and the new title disagree; fail-safe but visually odd (#27).

@@ -31,11 +31,11 @@ A push to a repository's default branch SHALL trigger a settings sync for that r
 
 ### Requirement: A repository without its own settings file is never synced
 A settings sync SHALL run only when the repository's resolution includes its
-own local settings file — `.github/woodhouse.yml` or `.github/woodhouse.yaml`
-(the baseline repository's root `woodhouse.yml`/`woodhouse.yaml` count as its
-local file). The existence of that file is the signal that the repository
-accepts settings management; a repository without it is never synced and is
-offered onboarding instead. `settings.enabled` remains as a kill switch with an
+own local settings file — `.github/woodhouse.yml` or `.github/woodhouse.yaml`.
+The existence of that file is the signal that the repository accepts settings
+management; a repository without it is never synced and is offered onboarding
+instead, the baseline repository included. A root `woodhouse.yml` in the
+baseline repository is the owner-wide baseline, not a local file. `settings.enabled` remains as a kill switch with an
 implicit default of true: an explicit `false` at any level of the cascade
 silences sync for that repository, and a repository-level `true` overrides a
 baseline `false`. A resolution that produced validation issues SHALL NOT sync.
@@ -123,39 +123,46 @@ no sync and no comment SHALL follow.
 - **WHEN** the owner baseline sets `settings.enabled: false` and the merged local file does not set `enabled`
 - **THEN** no settings sync runs and no comment is left
 
-### Requirement: The baseline repository resolves its own configuration
+### Requirement: The baseline file cascades to every repository, including its own
 
-For the baseline repository, its own root baseline-shaped files
-(`woodhouse.yml`, `woodhouse.yaml`) SHALL be resolved as the repository's
-local configuration layer, so a root file opts the baseline repository itself
-into settings management. The baseline layer MUST NOT be fetched from the
-baseline repository into its own resolution — no file merges into itself.
+The baseline repository's root `woodhouse.yml`/`woodhouse.yaml` SHALL be fetched
+as the baseline layer for every repository the owner has, the baseline
+repository included. The baseline repository manages itself through its own
+`.github/woodhouse.yml` like any other repository; a root file alone MUST NOT opt
+it into settings management or cause a sync.
 
-#### Scenario: Baseline repository merge syncs itself
-
-- **WHEN** a settings change merges on the baseline repository whose root configuration enables settings management
-- **THEN** the merged configuration has settings management enabled and the baseline repository is synced to its own root configuration
-- **AND** the outcome comment reports that the baseline was synced and other repositories adopt it at their next event
-
-#### Scenario: No self-merge
+#### Scenario: Baseline repository resolution
 
 - **WHEN** the baseline repository resolves its cascaded configuration
-- **THEN** only its own root configuration contributes as the local layer; the baseline layer is absent from the merge
+- **THEN** its root file contributes as the baseline layer, not as a local file
+- **AND** its configuration resolves to defaults when it has neither a root file nor `.github/woodhouse.yml`
 
-#### Scenario: Root paths absent from the baseline repository
+#### Scenario: Baseline repository merge without a local file
 
-- **WHEN** the baseline repository has no root `woodhouse.yml` or `woodhouse.yaml`
-- **THEN** its configuration resolves to defaults, as any other repository without a settings file
+- **WHEN** a settings change merging on the baseline repository touches only its root baseline file, and `.github-private` carries no `.github/woodhouse.yml`
+- **THEN** no sync runs and no outcome comment is left, because the file-presence gate reports no local file
+
+#### Scenario: Baseline repository merge with a local file
+
+- **WHEN** a settings change merges on `.github-private` while it carries its own `.github/woodhouse.yml`, and the merged resolution passes the gate
+- **THEN** the baseline repository is synced and the outcome comment reports that the baseline was synced directly
 
 ### Requirement: Baseline changes are reported truthfully
-When the merged settings pull request is on the baseline repository, the
-outcome comment SHALL state that the baseline was synced and that other
-repositories adopt the change at their next event. It MUST NOT claim every
-repository was re-synced.
+When the merged settings pull request is on the baseline repository and that
+repository carries its own `.github/woodhouse.yml`, the outcome comment SHALL
+state that the baseline was synced and that other repositories adopt the change
+at their next event. It MUST NOT claim every repository was re-synced. When the
+baseline repository carries no local file, no sync and no comment follow.
 
 #### Scenario: Baseline repository pull request merges
-- **WHEN** a settings-changing pull request on the baseline repository merges
+
+- **WHEN** a settings-changing pull request on the baseline repository merges and the repository carries its own `.github/woodhouse.yml`
 - **THEN** the comment reports the baseline sync and adoption at each repository's next event
+
+#### Scenario: Baseline repository pull request without a local file
+
+- **WHEN** a settings-changing pull request on the baseline repository merges and the repository has no `.github/woodhouse.yml`
+- **THEN** no sync and no comment follow, the same as any other repository
 
 ### Requirement: Syncs serialize per repository
 Concurrent sync triggers for the same repository — a merge push and the

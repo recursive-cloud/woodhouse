@@ -506,32 +506,32 @@ describe("commentSettingsApplied", () => {
   });
 
   it("reports the baseline variant and invalidates owner-wide when the baseline repository is the target", async () => {
-    const { deps, scope, pr, resolver, createComment } = build();
-    resolver.resolver.isBaselineRepo.mockReturnValue(true);
+    const built = build(ENABLED, [], {
+      sources: ["acme/.github-private:.github/woodhouse.yml"],
+      localSource: "acme/.github-private:.github/woodhouse.yml",
+    });
+    built.resolver.resolver.isBaselineRepo.mockReturnValue(true);
 
-    await commentSettingsApplied(deps, scope, pr);
+    await commentSettingsApplied(built.deps, { ...built.scope, repo: ".github-private" }, built.pr);
 
     // The baseline was touched, so the whole owner cache is dropped, not just
     // this repository's entry.
-    expect(resolver.calls).toEqual(["invalidateOwner", "resolve"]);
-    expect(resolver.resolver.invalidate).not.toHaveBeenCalled();
+    expect(built.resolver.calls).toEqual(["invalidateOwner", "resolve"]);
+    expect(built.resolver.resolver.invalidate).not.toHaveBeenCalled();
 
     // The comment states the baseline was synced directly and that other
     // repositories adopt the change at their next event — never that every
     // repository was re-synced.
-    const { body } = createComment.mock.calls[0][0] as { body: string };
+    const { body } = built.createComment.mock.calls[0][0] as { body: string };
     expect(body).toContain("This is the baseline repository, sir, so it has been synced directly.");
     expect(body).toContain("Other repositories will adopt the change at their next event.");
     expect(body).not.toMatch(/every repository/i);
     expect(body.trimEnd().endsWith(SIGN_OFF)).toBe(true);
   });
 
-  it("syncs the baseline repository from its own root configuration on a merged settings PR", async () => {
-    // Issue #26 end to end: the merged PR changes the baseline repository's own
-    // root file, which is also its local layer. Before that was wired up, the
-    // resolver probed only `.github/woodhouse.*`, everything 404'd, settings
-    // resolved disabled, and this path skipped with "Settings management
-    // disabled" instead of syncing.
+  it("does not sync a baseline root-file merge when .github-private has no local file", async () => {
+    // The root file is the owner baseline, not a local file: the gate reports
+    // no-local-file, so no sync runs and no outcome comment is left.
     const octokit = fakeOctokit([{ filename: "woodhouse.yaml", status: "modified" }], [], {
       ".github-private:woodhouse.yaml":
         "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
@@ -552,22 +552,46 @@ describe("commentSettingsApplied", () => {
       { number: 7, merged: true, baseRef: "main" },
     );
 
-    // The owner cache was dropped and the sync ran against the config the
-    // repository's own root file resolved to.
+    expect(invalidateOwner).toHaveBeenCalledWith("acme");
+    // The baseline merged, but the baseline repository did not opt in.
+    expect(octokit.calls).toEqual([]);
+    expect(octokit.createComment).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledWith(
+      { owner: "acme", repo: ".github-private", reason: "no-local-file" },
+      "Settings sync skipped",
+    );
+  });
+
+  it("syncs a baseline merge from its own .github/woodhouse.yml", async () => {
+    // The baseline repository manages itself through its local file, exactly
+    // like any other repository; the owner baseline still cascades underneath.
+    const octokit = fakeOctokit([{ filename: "woodhouse.yaml", status: "modified" }], [], {
+      ".github-private:woodhouse.yml": "repository:\n  has_wiki: false\n",
+      ".github-private:.github/woodhouse.yml":
+        "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
+    });
+    const log = fakeLogger();
+    const resolver = new ConfigResolver();
+    const invalidateOwner = vi.spyOn(resolver, "invalidateOwner");
+
+    await commentSettingsApplied(
+      {
+        octokit: octokit.octokit,
+        resolver,
+        mutex: new KeyedMutex(),
+        log,
+        dryRun: false,
+      },
+      { owner: "acme", repo: ".github-private", defaultBranch: "main" },
+      { number: 7, merged: true, baseRef: "main" },
+    );
+
     expect(invalidateOwner).toHaveBeenCalledWith("acme");
     expect(octokit.calls).toEqual(["repos.get", "repos.update"]);
 
-    // The outcome comment is the baseline variant: synced directly, and other
-    // repositories adopt the change at their next event.
     const { body } = octokit.createComment.mock.calls[0][0] as { body: string };
     expect(body).toContain("This is the baseline repository, sir, so it has been synced directly.");
     expect(body).toContain("Other repositories will adopt the change at their next event.");
-
-    // Never the pre-fix skip path.
-    expect(log.debug).not.toHaveBeenCalledWith(
-      { owner: "acme", repo: ".github-private" },
-      "Settings management disabled; skipping sync",
-    );
   });
 
   it("in dry-run writes no comment, makes no comment call, and logs the body", async () => {
