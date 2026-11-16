@@ -6,13 +6,15 @@
  * `installation_repositories.added`) through `GuardedApp` and forwards here;
  * this module owns the per-repository walk from design D2 and nothing else.
  *
- * The walk is cheap-first and stateless. For each repository: probe the four
- * settings paths; if any exists, skip without ever searching for a pull request.
- * Only when no file exists is the open-offer search made, and only when that
- * comes back negative are the write facts resolved and the offer made. Nothing
- * is remembered between deliveries — idempotency comes entirely from what GitHub
- * currently shows, so a re-delivery and a closed-unmerged offer both do the
- * right thing without a mutex.
+ * The walk is cheap-first and stateless. For each repository: probe the two
+ * `.github/` settings paths; if either exists, skip without ever searching for
+ * a pull request. Only when no file exists is the open-offer search made, and
+ * only when that comes back negative are the write facts resolved and the offer
+ * made. The baseline repository is probed the same way: its root baseline file
+ * does not count as a local settings file. Nothing is remembered between
+ * deliveries — idempotency comes entirely from what GitHub currently shows, so
+ * a re-delivery and a closed-unmerged offer both do the right thing without a
+ * mutex.
  *
  * Repositories are walked strictly sequentially, one awaited before the next.
  * Homelab installations are single digits; the settings applier's sequential
@@ -34,8 +36,7 @@
  * that delivery opens no offers.
  */
 
-import { BASELINE_PATHS, LOCAL_PATHS } from "../config/paths.js";
-import type { WoodhouseConfig } from "../config/schema.js";
+import { LOCAL_PATHS } from "../config/paths.js";
 import { messageOf, statusOf } from "../settings/forbidden.js";
 import { shouldOnboard, type OnboardingProbe } from "./decide.js";
 import {
@@ -47,26 +48,19 @@ import { ONBOARDING_BRANCH, ONBOARDING_LABEL } from "./wording.js";
 
 /**
  * Everything the handler needs: the same client and dry-run context as the
- * write seam, plus the resolved configuration for a candidate repository.
- *
- * `resolveConfig` is a narrow injected function rather than the resolver itself
- * (design D2): the injection point is where "unresolvable" is defined, so the
- * decision layer never sees the resolver's fallback defaults. It resolves the
- * full cascade (defaults → owner baseline → local 404 — the handler only calls
- * it after `configPresent` said the repository has no local file) and returns
- * `undefined` when that configuration cannot be determined.
+ * write seam. The walk never consults the resolved configuration: a settings
+ * file's presence is the consent signal, and an open offer means the repository
+ * was already invited.
  */
-export interface OnboardingDeps extends OnboardingWriteDeps {
-  readonly resolveConfig: (owner: string, repo: string) => Promise<WoodhouseConfig | undefined>;
-}
+export type OnboardingDeps = OnboardingWriteDeps;
 
 /**
- * The four paths that count as "already configured", in probe order: the two
- * local `.github/` paths, then the two root-level baseline-shaped paths (so a
- * baseline repository carrying a root `woodhouse.yml` is skipped too). Shared
- * with the resolver rather than re-hardcoded, so the set is defined once.
+ * The two paths that count as "already configured", in probe order: the local
+ * `.github/` settings paths. They are the same for every repository, the
+ * baseline repository included; a root baseline file is not a local file.
+ * Shared with the resolver rather than re-hardcoded, so the set is defined once.
  */
-const CONFIG_PATHS = [...LOCAL_PATHS, ...BASELINE_PATHS];
+const CONFIG_PATHS = [...LOCAL_PATHS];
 
 /**
  * The payload shapes this handler understands, structurally.
@@ -152,7 +146,7 @@ async function listInstallationRepositories(deps: OnboardingDeps): Promise<strin
 }
 
 /**
- * True when any of the four settings paths exists in the repository.
+ * True when either local `.github/` settings path exists in the repository.
  *
  * One `repos.getContent` per candidate, stopping at the first success: a
  * successful response of any kind is treated as present, which fails toward
@@ -239,19 +233,15 @@ async function resolveFacts(
 /**
  * Walk one repository: probe, decide, and only then offer.
  *
- * When a settings file is present the configuration is never resolved and the
- * pull-request search is never made — `openOnboardingPr` is left unset and
- * `shouldOnboard` skips on config alone (cheap-first). When it is absent the
- * resolved cascade decides whether the owner baseline already manages the
- * repository; a managed repository skips before the pull-request search, so it
- * never pays for `pulls.list`. Only an unmanaged repository is searched, and
- * that boolean result is what lets `shouldOnboard` offer: omitting it would
- * fail closed.
- *
- * An unresolvable configuration is an operational failure, not a decision: it
- * throws here so the per-repository catch logs it and the walk continues with
- * no offer. Handing the decision layer fallback defaults would offer a pull
- * request on unknown management state.
+ * When a settings file is present the pull-request search is never made —
+ * `openOnboardingPr` is left unset and `shouldOnboard` skips on config alone
+ * (cheap-first). When it is absent the open-offer search decides: an existing
+ * offer skips, a confirmed absence offers, and an unprobed state fails closed.
+ * Only the two local settings paths and that search are consulted; the
+ * resolved configuration plays no part, so a repository without a local file is
+ * invited even when the owner baseline enables settings management. The
+ * baseline repository is walked the same way: its root file is not a local
+ * settings file.
  */
 async function walkRepository(deps: OnboardingDeps, owner: string, repo: string): Promise<void> {
   const present = await configPresent(deps, owner, repo);
@@ -260,19 +250,10 @@ async function walkRepository(deps: OnboardingDeps, owner: string, repo: string)
   if (present) {
     probe = { configPresent: true };
   } else {
-    const config = await deps.resolveConfig(owner, repo);
-    if (config === undefined) {
-      throw new Error(`Could not resolve woodhouse configuration for ${owner}/${repo}`);
-    }
-
-    const managed = config.settings.enabled === true;
-    probe = managed
-      ? { configPresent: false, managed: true }
-      : {
-          configPresent: false,
-          managed: false,
-          openOnboardingPr: await onboardingPullRequestOpen(deps, owner, repo),
-        };
+    probe = {
+      configPresent: false,
+      openOnboardingPr: await onboardingPullRequestOpen(deps, owner, repo),
+    };
   }
 
   const decision = shouldOnboard({ owner, name: repo }, probe);

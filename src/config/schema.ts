@@ -151,7 +151,9 @@ export const repositorySchema = z
     // repository you own. Change those two by hand.
   })
   .strict()
-  .describe("Repository settings synced when `settings.enabled` is true.")
+  .describe(
+    "Repository settings synced when the repository carries its own settings file and `settings.enabled` is not false.",
+  )
   .prefault({});
 
 /**
@@ -339,9 +341,9 @@ export const settingsSchema = z
   .object({
     enabled: z
       .boolean()
-      .default(false)
+      .default(true)
       .describe(
-        "Master switch. Off by default: installing this app must not silently start rewriting repository settings until it is explicitly asked to.",
+        "Kill switch, on by default. A repository opts into settings sync by carrying its own `.github/woodhouse.yml` (or `.yaml`); a repository without one is never synced regardless of this value. An explicit `false` at any level of the cascade silences sync for the repository, and a repository-level `true` overrides a baseline `false`.",
       ),
     pruneLabels: z
       .boolean()
@@ -354,7 +356,7 @@ export const settingsSchema = z
   })
   .strict()
   .describe(
-    "Repo-settings sync: the master switch plus the prune toggles for labels and rulesets. Off by default.",
+    "Repo-settings sync: the `enabled` kill switch and the prune toggles for labels and rulesets. A repository opts in by carrying its own settings file.",
   )
   .prefault({});
 

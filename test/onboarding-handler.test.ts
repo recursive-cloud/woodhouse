@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
-import { defaultConfig, type WoodhouseConfig } from "../src/config/schema.js";
 import { handleOnboarding, type OnboardingDeps } from "../src/onboarding/handler.js";
 import {
   ONBOARDING_BRANCH,
@@ -99,8 +98,8 @@ function fakeOctokit(config: FakeConfig = {}) {
     return { data: { number: 42 } };
   });
 
-  const addLabels = vi.fn(async () => {
-    calls.push("issues.addLabels");
+  const addLabels = vi.fn(async ({ repo }: { repo: string }) => {
+    calls.push(`issues.addLabels ${repo}`);
     return { data: [] };
   });
 
@@ -177,29 +176,16 @@ function fakeLogger() {
   return { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-function build(
-  config: FakeConfig = {},
-  dryRun = false,
-  resolveConfig?: OnboardingDeps["resolveConfig"],
-) {
+function build(config: FakeConfig = {}, dryRun = false) {
   const fake = fakeOctokit(config);
   const log = fakeLogger();
-  const resolve = resolveConfig ?? vi.fn(async () => defaultConfig());
   const deps: OnboardingDeps = {
     octokit: fake.octokit,
     log: log as unknown as Logger,
     dryRun,
-    resolveConfig: resolve,
   };
 
-  return { ...fake, log, deps, resolveConfig: resolve };
-}
-
-/** Defaults with the settings master switch set, as a baseline resolution would. */
-function configWithSettingsEnabled(enabled: boolean): WoodhouseConfig {
-  const config = defaultConfig();
-  config.settings.enabled = enabled;
-  return config;
+  return { ...fake, log, deps };
 }
 
 /** `installation` `created` payload carrying the freshly installed repositories. */
@@ -232,13 +218,12 @@ describe("handleOnboarding", () => {
 
     await handleOnboarding(deps, OWNER, created("widgets"));
 
-    // Cheap-first: the four settings paths, 404 for each, then the open-offer
-    // search, then the write facts — only after all of them does the seam run.
+    // Cheap-first: the two `.github/` settings paths, 404 for each, then the
+    // open-offer search, then the write facts — only after all of them does the
+    // seam run.
     expect(calls).toEqual([
       `repos.getContent widgets:.github/woodhouse.yml`,
       `repos.getContent widgets:.github/woodhouse.yaml`,
-      `repos.getContent widgets:woodhouse.yml`,
-      `repos.getContent widgets:woodhouse.yaml`,
       "pulls.list widgets",
       "repos.get widgets",
       `git.getRef widgets:heads/main`,
@@ -246,10 +231,10 @@ describe("handleOnboarding", () => {
       "git.createRef",
       "repos.createOrUpdateFileContents",
       "pulls.create widgets",
-      "issues.addLabels",
+      "issues.addLabels widgets",
     ]);
 
-    expect(getContent).toHaveBeenCalledTimes(4);
+    expect(getContent).toHaveBeenCalledTimes(2);
     expect(list).toHaveBeenCalledWith({
       owner: OWNER,
       repo: "widgets",
@@ -286,36 +271,59 @@ describe("handleOnboarding", () => {
     });
   });
 
-  it("skips an already-configured repository without ever searching for a pull request", async () => {
-    // A root-level baseline path: the two `.github/` locals must be probed and
-    // found absent before the baseline-shaped path is reached.
-    const { deps, calls, list, createRef, createOrUpdateFileContents, create, addLabels, log } =
-      build({ presentPaths: ["woodhouse.yml"] });
+  it("probes only the local .github paths, never the root baseline file", async () => {
+    // A repository's root `woodhouse.yml` is the owner baseline, not a local
+    // settings file, so the walk never requests it.
+    const { deps, calls, getContent, list, create, addLabels, log } = build();
 
     await handleOnboarding(deps, OWNER, created("widgets"));
 
-    // All the probes that ran, and nothing more. Crucially no `pulls.list`.
-    expect(calls).toEqual([
+    expect(calls.slice(0, 3)).toEqual([
       "repos.getContent widgets:.github/woodhouse.yml",
       "repos.getContent widgets:.github/woodhouse.yaml",
-      "repos.getContent widgets:woodhouse.yml",
+      "pulls.list widgets",
     ]);
-    expect(list).not.toHaveBeenCalled();
+    expect(getContent.mock.calls.map(([params]) => params.path)).toEqual([
+      ".github/woodhouse.yml",
+      ".github/woodhouse.yaml",
+    ]);
+    expect(list).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "widgets" }));
+    expect(addLabels).toHaveBeenCalledOnce();
+    expect(log.debug).not.toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "settings-file-present" }),
+      "Onboarding skipped",
+    );
+  });
 
-    // No writes at all.
-    expect(createRef).not.toHaveBeenCalled();
-    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
+  it("offers onboarding to the baseline repository when it lacks .github/woodhouse.yml", async () => {
+    const { deps, calls, create, addLabels } = build();
+
+    await handleOnboarding(deps, OWNER, created(".github-private"));
+
+    // Walked like any other repository: its root baseline file is not probed
+    // and does not suppress the offer.
+    expect(calls.slice(0, 3)).toEqual([
+      "repos.getContent .github-private:.github/woodhouse.yml",
+      "repos.getContent .github-private:.github/woodhouse.yaml",
+      "pulls.list .github-private",
+    ]);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: ".github-private" }));
+    expect(addLabels).toHaveBeenCalledOnce();
+  });
+
+  it("skips the baseline repository when it carries .github/woodhouse.yml", async () => {
+    const { deps, calls, create, addLabels, log } = build({
+      presentPaths: [".github-private:.github/woodhouse.yml"],
+    });
+
+    await handleOnboarding(deps, OWNER, created(".github-private"));
+
+    expect(calls).not.toContain("pulls.list .github-private");
     expect(create).not.toHaveBeenCalled();
     expect(addLabels).not.toHaveBeenCalled();
-
-    // "Silently" means no pull request, not no log: the machine-readable reason
-    // is recorded for the operator.
     expect(log.debug).toHaveBeenCalledWith(
-      expect.objectContaining({
-        owner: OWNER,
-        repo: "widgets",
-        reason: "settings-file-present",
-      }),
+      expect.objectContaining({ repo: ".github-private", reason: "settings-file-present" }),
       "Onboarding skipped",
     );
   });
@@ -343,99 +351,30 @@ describe("handleOnboarding", () => {
     );
   });
 
-  it("skips a repository the owner baseline manages, without searching for a pull request", async () => {
-    const resolveConfig = vi.fn(async () => configWithSettingsEnabled(true));
-    const { deps, calls, list, createRef, createOrUpdateFileContents, create, addLabels, log } =
-      build({}, false, resolveConfig);
+  it("offers a repository with no settings file even when the owner baseline enables settings management", async () => {
+    const { deps, calls, getContent, list, create, addLabels } = build();
 
     await handleOnboarding(deps, OWNER, created("widgets"));
 
-    // The management check ran after the four settings probes and short-circuited
-    // before the open-offer search: no `pulls.list`.
-    expect(resolveConfig).toHaveBeenCalledWith(OWNER, "widgets");
-    expect(calls).toEqual([
+    // There is no resolution step: the two local settings paths and the
+    // open-offer search are the whole decision, so a baseline
+    // `settings.enabled: true` cannot suppress the invitation.
+    expect(getContent).toHaveBeenCalledTimes(2);
+    expect(calls.slice(0, 3)).toEqual([
       "repos.getContent widgets:.github/woodhouse.yml",
       "repos.getContent widgets:.github/woodhouse.yaml",
-      "repos.getContent widgets:woodhouse.yml",
-      "repos.getContent widgets:woodhouse.yaml",
+      "pulls.list widgets",
     ]);
-    expect(list).not.toHaveBeenCalled();
-    expect(createRef).not.toHaveBeenCalled();
-    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
-    expect(addLabels).not.toHaveBeenCalled();
-
-    expect(log.debug).toHaveBeenCalledWith(
-      expect.objectContaining({
-        owner: OWNER,
-        repo: "widgets",
-        reason: "baseline-managed",
-      }),
-      "Onboarding skipped",
-    );
-  });
-
-  it("still offers a repository whose resolved configuration has settings disabled", async () => {
-    const resolveConfig = vi.fn(async () => configWithSettingsEnabled(false));
-    const { deps, list, create, addLabels } = build({}, false, resolveConfig);
-
-    await handleOnboarding(deps, OWNER, created("widgets"));
-
-    expect(resolveConfig).toHaveBeenCalledWith(OWNER, "widgets");
+    expect(calls.some((call) => call.includes(".github-private"))).toBe(false);
     expect(list).toHaveBeenCalledOnce();
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "widgets" }));
     expect(addLabels).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when configuration resolution rejects, then walks the next repository", async () => {
-    const resolveConfig = vi.fn(async (_owner: string, repo: string) => {
-      if (repo === "alpha") throw new Error("network unavailable");
-      return configWithSettingsEnabled(false);
+  it("issues no pull request search for a repository with a settings file while probing the others", async () => {
+    const { deps, calls, create, addLabels } = build({
+      presentPaths: ["managed:.github/woodhouse.yml"],
     });
-    const { deps, calls, create, log } = build({}, false, resolveConfig);
-
-    await handleOnboarding(deps, OWNER, created("alpha", "beta"));
-
-    // Alpha's failure is logged as that repository's error; no offer, no PR search.
-    expect(calls).not.toContain("pulls.list alpha");
-    expect(calls).not.toContain("pulls.create alpha");
-    expect(log.error).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: OWNER, repo: "alpha" }),
-      expect.stringContaining("network unavailable"),
-    );
-
-    // The walk continued and beta was offered normally.
-    expect(create).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "beta" }));
-  });
-
-  it("fails closed when the baseline parses but fails validation, without an offer", async () => {
-    // The wrapper in app.ts maps a resolution with non-empty `issues` to
-    // undefined; the handler must treat that as unresolvable, never as the
-    // resolver's fallback defaults (which would offer the repository).
-    const resolveConfig = vi.fn(async (_owner: string, repo: string) =>
-      repo === "alpha" ? undefined : configWithSettingsEnabled(false),
-    );
-    const { deps, calls, create, log } = build({}, false, resolveConfig);
-
-    await handleOnboarding(deps, OWNER, created("alpha", "beta"));
-
-    expect(calls).not.toContain("pulls.list alpha");
-    expect(calls).not.toContain("pulls.create alpha");
-    expect(log.error).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: OWNER, repo: "alpha" }),
-      expect.stringContaining("Could not resolve woodhouse configuration for acme/alpha"),
-    );
-
-    expect(create).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "beta" }));
-  });
-
-  it("issues no pull request search for a managed repository while probing the others", async () => {
-    const resolveConfig = vi.fn(async (_owner: string, repo: string) =>
-      configWithSettingsEnabled(repo === "managed"),
-    );
-    const { deps, calls, create, addLabels } = build({}, false, resolveConfig);
 
     await handleOnboarding(deps, OWNER, created("managed", "free"));
 
@@ -443,16 +382,12 @@ describe("handleOnboarding", () => {
     expect(calls).toContain("pulls.list free");
     expect(create).toHaveBeenCalledOnce();
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "free" }));
+
+    // The skipped repository receives no writes at all; only `free` is offered.
+    expect(calls).not.toContain("pulls.create managed");
+    expect(calls).not.toContain("issues.addLabels managed");
     expect(addLabels).toHaveBeenCalledOnce();
-  });
-
-  it("does not resolve configuration for a repository that already has a settings file", async () => {
-    const resolveConfig = vi.fn(async () => configWithSettingsEnabled(false));
-    const { deps } = build({ presentPaths: ["woodhouse.yml"] }, false, resolveConfig);
-
-    await handleOnboarding(deps, OWNER, created("widgets"));
-
-    expect(resolveConfig).not.toHaveBeenCalled();
+    expect(addLabels).toHaveBeenCalledWith(expect.objectContaining({ repo: "free" }));
   });
 
   it("offers onboarding for a repository added to an existing installation", async () => {
@@ -597,7 +532,7 @@ describe("handleOnboarding", () => {
     await handleOnboarding(deps, OWNER, created("widgets"));
 
     // The decision was evaluated in full — every read happened.
-    expect(getContent).toHaveBeenCalledTimes(4);
+    expect(getContent).toHaveBeenCalledTimes(2);
     expect(list).toHaveBeenCalledOnce();
     expect(get).toHaveBeenCalledOnce();
     expect(getRef).toHaveBeenCalledTimes(2);

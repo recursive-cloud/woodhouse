@@ -16,10 +16,12 @@
  *
  * `commentSettingsApplied` applies that gate to a real delivery and then runs
  * the existing sync machinery: it invalidates the config cache, resolves the
- * freshly-merged configuration, honours the master `settings.enabled` switch,
- * and runs `syncSettings` under the same per-repository mutex as the push
- * handler. Once the sync returns, it posts the outcome as a marker comment so
- * the merge reports what actually happened.
+ * freshly-merged configuration, checks `settingsSyncBlock`, and runs
+ * `syncSettings` under the same per-repository mutex as the push handler. File
+ * presence opts the repository in, `settings.enabled` is the kill switch (an
+ * explicit `false` anywhere in the cascade silences it), and the block reasons
+ * come from `settingsSyncBlock`. Once the sync returns, it posts the outcome as
+ * a marker comment so the merge reports what actually happened.
  */
 
 import type { Context } from "probot";
@@ -34,7 +36,7 @@ import {
 import { syncMarkerComment } from "../github/comments.js";
 import { type ChangedFile, listChangedFiles } from "../github/pulls.js";
 import type { KeyedMutex } from "../lib/mutex.js";
-import { syncSettings } from "./apply.js";
+import { settingsSyncBlock, syncSettings } from "./apply.js";
 import type { ApplySummary } from "./summary.js";
 
 /**
@@ -174,9 +176,11 @@ export interface MergedPullRequest {
  * Ordered cheapest-first: two payload facts decide whether it is even worth
  * listing files, and the file list (fetched uncapped, so a settings deletion
  * can never fall off the end of a page cap) decides whether the cache needs
- * invalidating and the config re-resolved. Only when settings management is
- * actually enabled does the sync run, serialised with every other sync for the
- * same repository.
+ * invalidating and the config re-resolved. The resolved configuration then
+ * passes through `settingsSyncBlock`: without a local file, with an explicit
+ * `false` anywhere in the cascade, or with validation issues, the merge stays
+ * silent (no sync, no outcome comment); otherwise the sync runs, serialised
+ * with every other sync for the same repository.
  */
 export async function commentSettingsApplied(
   deps: MergeFeedbackDeps,
@@ -205,17 +209,20 @@ export async function commentSettingsApplied(
     log.info("Baseline configuration changed; cleared owner cache");
   }
 
-  const { config } = await deps.resolver.resolve(deps.octokit as never, owner, repo, log);
+  const resolved = await deps.resolver.resolve(deps.octokit as never, owner, repo, log);
 
-  if (!config.settings.enabled) {
-    log.debug({ owner, repo }, "Settings management disabled; skipping sync");
+  // The same gate as the push handler: a missing local file, an explicit false
+  // anywhere in the cascade, or an invalid resolution stays silent — no sync and
+  // no outcome comment.
+  const block = settingsSyncBlock(resolved);
+  if (block !== null) {
+    log.debug({ owner, repo, reason: block }, "Settings sync skipped");
     return;
   }
 
-  log.debug({ owner, repo }, "Settings changed on merge; running settings sync");
-
   // The same key and instance as the push handler, so a merge push and this
-  // event cannot run the sync concurrently.
+  // event cannot run the sync concurrently. `syncSettings` logs the sources
+  // when it actually runs; no duplicate "running" line here.
   const summary = await deps.mutex.run(`${owner}/${repo}`, () =>
     syncSettings(
       {
@@ -225,7 +232,7 @@ export async function commentSettingsApplied(
         log,
         dryRun: deps.dryRun,
       },
-      config,
+      resolved,
     ),
   );
 

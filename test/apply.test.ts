@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
-import { type ApplyContext, syncSettings } from "../src/settings/apply.js";
+import { type ApplyContext, settingsSyncBlock, syncSettings } from "../src/settings/apply.js";
 import { formatApplySummary } from "../src/settings/summary.js";
+import type { ResolvedConfig } from "../src/config/resolver.js";
 import { woodhouseConfigSchema } from "../src/config/schema.js";
 
 const RULESETS_ROUTE = "GET /repos/{owner}/{repo}/rulesets";
@@ -96,6 +97,22 @@ const FULL_CONFIG = {
   rulesets: [{ name: "main" }],
 };
 
+const LOCAL_SOURCE = "acme/widgets:.github/woodhouse.yml";
+
+/** A resolution carrying a local layer unless overridden. */
+function resolvedConfig(
+  configInput: Record<string, unknown> = {},
+  overrides: Partial<ResolvedConfig> = {},
+): ResolvedConfig {
+  return {
+    config: woodhouseConfigSchema.parse(configInput),
+    sources: [LOCAL_SOURCE],
+    issues: [],
+    localSource: LOCAL_SOURCE,
+    ...overrides,
+  };
+}
+
 function build(configInput: Record<string, unknown> = {}, dryRun = false) {
   const fake = fakeOctokit();
   const log = fakeLogger();
@@ -107,7 +124,9 @@ function build(configInput: Record<string, unknown> = {}, dryRun = false) {
     dryRun,
   } as unknown as ApplyContext;
 
-  return { ...fake, log, ctx, config: woodhouseConfigSchema.parse(configInput) };
+  const resolved = resolvedConfig(configInput);
+
+  return { ...fake, log, ctx, resolved };
 }
 
 /** An error shaped like an Octokit request failure. */
@@ -115,11 +134,52 @@ function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
 }
 
+describe("settingsSyncBlock", () => {
+  it("allows sync when a local file exists and enabled was never set", () => {
+    const resolved = resolvedConfig({ repository: { has_issues: true } });
+
+    expect(resolved.config.settings.enabled).toBe(true);
+    expect(settingsSyncBlock(resolved)).toBeNull();
+  });
+
+  it("reports settings-disabled when the repository carries an explicit false", () => {
+    expect(settingsSyncBlock(resolvedConfig({ settings: { enabled: false } }))).toBe(
+      "settings-disabled",
+    );
+  });
+
+  it("reports settings-disabled for a resolution whose merged enabled is false", () => {
+    // The resolver case that produces this shape lives in resolver.test.ts;
+    // here the gate only needs the merged outcome.
+    const resolved = resolvedConfig({ settings: { enabled: false } });
+
+    expect(settingsSyncBlock(resolved)).toBe("settings-disabled");
+  });
+
+  it("reports no-local-file first, even when enabled is true and issues exist", () => {
+    const resolved = resolvedConfig(
+      { settings: { enabled: true } },
+      { localSource: undefined, issues: [{ path: "x", message: "bad" }] },
+    );
+
+    expect(settingsSyncBlock(resolved)).toBe("no-local-file");
+  });
+
+  it("reports invalid-config when a local file resolved with validation issues", () => {
+    const resolved = resolvedConfig({}, { issues: [{ path: "x", message: "bad" }] });
+
+    expect(settingsSyncBlock(resolved)).toBe("invalid-config");
+  });
+});
+
 describe("syncSettings", () => {
   it("runs the appliers in the declared order, observable in the call sequence", async () => {
-    const { ctx, config, calls } = build(FULL_CONFIG);
+    const { ctx, resolved, log, calls } = build(FULL_CONFIG);
 
-    const result = await syncSettings(ctx, config);
+    const result = await syncSettings(ctx, resolved);
+
+    // A sync that runs names the layers that contributed.
+    expect(log.debug).toHaveBeenCalledWith({ sources: [LOCAL_SOURCE] }, "Running settings sync");
 
     expect(calls).toEqual([
       "repos.get",
@@ -141,10 +201,10 @@ describe("syncSettings", () => {
   });
 
   it("aggregates changes and records a thrown non-403 failure, continuing to later appliers", async () => {
-    const { ctx, config, log, createLabel, updateBranchProtection, request } = build(FULL_CONFIG);
+    const { ctx, resolved, log, createLabel, updateBranchProtection, request } = build(FULL_CONFIG);
     createLabel.mockRejectedValueOnce(httpError(500, "boom"));
 
-    const result = await syncSettings(ctx, config);
+    const result = await syncSettings(ctx, resolved);
 
     // The labels failure did not stop branch-protection or rulesets.
     expect(updateBranchProtection).toHaveBeenCalledOnce();
@@ -162,11 +222,11 @@ describe("syncSettings", () => {
   });
 
   it("folds a thrown 403 into a failure carrying the describeForbidden detail", async () => {
-    const { ctx, config, log, update, updateBranchProtection, request } = build(FULL_CONFIG);
+    const { ctx, resolved, log, update, updateBranchProtection, request } = build(FULL_CONFIG);
     const raw = "Resource not accessible by integration";
     update.mockRejectedValueOnce(httpError(403, raw));
 
-    const result = await syncSettings(ctx, config);
+    const result = await syncSettings(ctx, resolved);
 
     // Pinned exactly: the collected message is the classified detail, not the
     // raw GitHub message (design D1's deliberate improvement).
@@ -185,26 +245,69 @@ describe("syncSettings", () => {
   });
 
   it("performs zero calls and returns an empty summary when settings are disabled", async () => {
-    const { ctx, config, log, calls, get } = build({
+    const { ctx, resolved, log, calls, get } = build({
       ...FULL_CONFIG,
       settings: { enabled: false },
     });
 
-    const result = await syncSettings(ctx, config);
+    const result = await syncSettings(ctx, resolved);
 
     expect(calls).toEqual([]);
     expect(get).not.toHaveBeenCalled();
     expect(result).toEqual({ changes: [], failures: [], dryRun: false });
-    expect(log.debug).toHaveBeenCalledWith("Settings sync not enabled for this repository");
+    expect(log.debug).toHaveBeenCalledWith(
+      { reason: "settings-disabled" },
+      "Settings sync skipped",
+    );
+    expect(log.debug).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sources: expect.anything() }),
+      "Running settings sync",
+    );
+  });
+
+  it("runs the appliers when a local file exists and enabled was never set", async () => {
+    // File presence alone is the opt-in: the implicit default is on.
+    const { ctx, resolved, calls } = build({ repository: { has_issues: true } });
+
+    const result = await syncSettings(ctx, resolved);
+
+    expect(resolved.config.settings.enabled).toBe(true);
+    expect(calls).toEqual(["repos.get", "repos.update"]);
+    expect(result.changes).toEqual([
+      { area: "repository", action: "update", target: "has_issues" },
+    ]);
+  });
+
+  it("runs nothing when the repository has no local settings file", async () => {
+    const { ctx, log, calls, get } = build();
+    const resolved = resolvedConfig(FULL_CONFIG, { localSource: undefined });
+
+    const result = await syncSettings(ctx, resolved);
+
+    expect(calls).toEqual([]);
+    expect(get).not.toHaveBeenCalled();
+    expect(result).toEqual({ changes: [], failures: [], dryRun: false });
+    expect(log.debug).toHaveBeenCalledWith({ reason: "no-local-file" }, "Settings sync skipped");
+  });
+
+  it("runs nothing when the local config failed validation", async () => {
+    const { ctx, log, calls } = build();
+    const resolved = resolvedConfig(FULL_CONFIG, {
+      issues: [{ path: "settings.enabled", message: "bad" }],
+    });
+
+    const result = await syncSettings(ctx, resolved);
+
+    expect(calls).toEqual([]);
+    expect(result).toEqual({ changes: [], failures: [], dryRun: false });
+    expect(log.debug).toHaveBeenCalledWith({ reason: "invalid-config" }, "Settings sync skipped");
   });
 
   it("performs zero writes in dry-run and logs the summary through the formatter", async () => {
-    const { ctx, config, log, calls, update, createLabel, updateBranchProtection, request } = build(
-      FULL_CONFIG,
-      true,
-    );
+    const { ctx, resolved, log, calls, update, createLabel, updateBranchProtection, request } =
+      build(FULL_CONFIG, true);
 
-    const result = await syncSettings(ctx, config);
+    const result = await syncSettings(ctx, resolved);
 
     // Reads still fire; every write is suppressed by performWrite.
     expect(update).not.toHaveBeenCalled();
@@ -224,9 +327,9 @@ describe("syncSettings", () => {
   });
 
   it("logs the empty summary at debug when nothing changed and nothing failed", async () => {
-    const { ctx, config, log } = build({ settings: { enabled: true } });
+    const { ctx, resolved, log } = build({ settings: { enabled: true } });
 
-    const result = await syncSettings(ctx, config);
+    const result = await syncSettings(ctx, resolved);
 
     expect(result).toEqual({ changes: [], failures: [], dryRun: false });
     expect(log.info).not.toHaveBeenCalled();
@@ -234,18 +337,20 @@ describe("syncSettings", () => {
   });
 
   it("logs no summary when there are failures but no changes", async () => {
-    const { ctx, config, log, update } = build({
+    const { ctx, resolved, log, update } = build({
       settings: { enabled: true },
       repository: { has_issues: true },
     });
     update.mockRejectedValueOnce(httpError(500, "boom"));
 
-    const result = await syncSettings(ctx, config);
+    const result = await syncSettings(ctx, resolved);
 
     expect(result.changes).toEqual([]);
     expect(result.failures).toEqual([{ area: "repository", message: "boom" }]);
     expect(log.info).not.toHaveBeenCalled();
-    expect(log.debug).not.toHaveBeenCalled();
+    // The only debug line is the run announcement; there is no empty summary.
+    expect(log.debug).toHaveBeenCalledTimes(1);
+    expect(log.debug).toHaveBeenCalledWith({ sources: [LOCAL_SOURCE] }, "Running settings sync");
     expect(log.error).toHaveBeenCalledWith(
       { applier: "repository", status: 500, err: "boom" },
       "Failed applying repository",
