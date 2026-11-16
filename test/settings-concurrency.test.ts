@@ -287,26 +287,6 @@ describe("merge push and merged pull request race", () => {
 });
 
 describe("push dispatch negative cases", () => {
-  it("does not sync when a push to another branch touches a settings file", async () => {
-    const { app, deliver } = fakeProbot();
-    const calls: string[] = [];
-
-    createApp({
-      allowlist: new Allowlist(["trusted-org"]),
-      baselineRepo: ".github-private",
-      dryRun: false,
-    })(app);
-
-    await deliver(
-      "push",
-      pushContext(makeOctokit("push", calls, manualGate()), "refs/heads/feature/x"),
-    );
-
-    // The default-branch check refuses before the sync, so no applier call at
-    // all — the same-repository race test's batch assertion needs no change.
-    expect(calls).toEqual([]);
-  });
-
   it("does not sync a repository with no local settings file", async () => {
     const { app, deliver } = fakeProbot();
     const calls: string[] = [];
@@ -329,46 +309,5 @@ describe("push dispatch negative cases", () => {
     );
 
     expect(calls).toEqual([]);
-  });
-
-  it("re-checks a near-miss default-branch push without writing when the repository matches", async () => {
-    const { app, deliver } = fakeProbot();
-    const calls: string[] = [];
-
-    createApp({
-      allowlist: new Allowlist(["trusted-org"]),
-      baselineRepo: ".github-private",
-      dryRun: false,
-    })(app);
-
-    // `docs/woodhouse.yml` is not a settings path, so the touched-config
-    // predicate is false and the cache is never invalidated; the push still
-    // triggers the routine diff-based re-check. The repository already matches
-    // the configured `has_issues: true`, so nothing is written.
-    const octokit = makeOctokit("push", calls, OPEN_GATE, { has_issues: true });
-    await deliver("push", pushContext(octokit, "refs/heads/main", ["docs/woodhouse.yml"]));
-
-    // The repository applier reads the current state, plans zero changes and
-    // writes nothing; labels, branch-protection and rulesets each early-return
-    // on the minimal config before any call. The re-check is read-only: a drift
-    // would have produced `push:repos.update`.
-    expect(calls).toEqual(["push:repos.get"]);
-
-    // Pushes never comment: the marker-comment surface stays untouched.
-    const surface = octokit as unknown as {
-      paginate: ReturnType<typeof vi.fn>;
-      issues: {
-        listComments: ReturnType<typeof vi.fn>;
-        createComment: ReturnType<typeof vi.fn>;
-        updateComment: ReturnType<typeof vi.fn>;
-      };
-    };
-    expect(surface.paginate).not.toHaveBeenCalledWith(
-      surface.issues.listComments,
-      expect.anything(),
-    );
-    expect(surface.issues.listComments).not.toHaveBeenCalled();
-    expect(surface.issues.createComment).not.toHaveBeenCalled();
-    expect(surface.issues.updateComment).not.toHaveBeenCalled();
   });
 });

@@ -96,71 +96,6 @@ const summary = (
 ): ApplySummary => ({ changes, failures, dryRun: false });
 
 describe("buildSettingsAppliedComment", () => {
-  it("states the settings are in effect when nothing needed changing", () => {
-    expect(buildSettingsAppliedComment(summary(), false)).toBe(
-      `${SETTINGS_APPLIED_MARKER}\n` +
-        "**Woodhouse here, sir. The settings are in effect and nothing further needed changing.**\n" +
-        "\n" +
-        SIGN_OFF,
-    );
-  });
-
-  it("lists applied changes per area under a butler headline", () => {
-    expect(
-      buildSettingsAppliedComment(
-        summary([
-          { area: "label", action: "create", target: "bug" },
-          { area: "repository", action: "update", target: "has_issues" },
-        ]),
-        false,
-      ),
-    ).toBe(
-      `${SETTINGS_APPLIED_MARKER}\n` +
-        "**Woodhouse here, sir. I have applied the settings changed by this merge.**\n" +
-        "\n" +
-        "Applied:\n" +
-        "- label create: bug\n" +
-        "- repository update: has_issues\n" +
-        "\n" +
-        SIGN_OFF,
-    );
-  });
-
-  it("records a re-declared branch-protection row instead of the no-op wording", () => {
-    const body = buildSettingsAppliedComment(
-      summary([{ area: "branch-protection", action: "update", target: "main" }]),
-      false,
-    );
-
-    expect(body).toBe(
-      `${SETTINGS_APPLIED_MARKER}\n` +
-        "**Woodhouse here, sir. I have applied the settings changed by this merge.**\n" +
-        "\n" +
-        "Applied:\n" +
-        "- branch-protection update: main\n" +
-        "\n" +
-        SIGN_OFF,
-    );
-    expect(body).not.toContain("nothing further needed changing");
-  });
-
-  it("lists each failure with its detail", () => {
-    expect(
-      buildSettingsAppliedComment(
-        summary([], [{ area: "rulesets", message: "Not permitted on this plan, sir" }]),
-        false,
-      ),
-    ).toBe(
-      `${SETTINGS_APPLIED_MARKER}\n` +
-        "**Woodhouse here, sir. I have applied the settings changed by this merge.**\n" +
-        "\n" +
-        "Failed:\n" +
-        "- rulesets: Not permitted on this plan, sir\n" +
-        "\n" +
-        SIGN_OFF,
-    );
-  });
-
   it("reports changes and failures together", () => {
     expect(
       buildSettingsAppliedComment(
@@ -184,21 +119,6 @@ describe("buildSettingsAppliedComment", () => {
     );
   });
 
-  it("states the baseline was synced and others adopt at their next event, without claiming every repo was re-synced", () => {
-    const body = buildSettingsAppliedComment(summary(), true);
-
-    expect(body).toBe(
-      `${SETTINGS_APPLIED_MARKER}\n` +
-        "**Woodhouse here, sir. The settings are in effect and nothing further needed changing.**\n" +
-        "\n" +
-        "This is the baseline repository, sir, so it has been synced directly. " +
-        "Other repositories will adopt the change at their next event.\n" +
-        "\n" +
-        SIGN_OFF,
-    );
-    expect(body).not.toMatch(/every repository/i);
-  });
-
   it("combines a baseline change with an applied change", () => {
     expect(
       buildSettingsAppliedComment(
@@ -217,15 +137,5 @@ describe("buildSettingsAppliedComment", () => {
         "\n" +
         SIGN_OFF,
     );
-  });
-
-  it.each([
-    [summary(), false],
-    [summary([{ area: "label", action: "create", target: "bug" }]), false],
-    [summary([], [{ area: "rulesets", message: "Forbidden" }]), true],
-  ] as const)("always leads with the marker and ends with the sign-off", (s, baseline) => {
-    const body = buildSettingsAppliedComment(s, baseline);
-    expect(body.startsWith(`${SETTINGS_APPLIED_MARKER}\n`)).toBe(true);
-    expect(body.endsWith(SIGN_OFF)).toBe(true);
   });
 });

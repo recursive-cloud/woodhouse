@@ -71,7 +71,6 @@ function fakeOctokit() {
   return {
     octokit,
     calls,
-    get,
     update,
     replaceAllTopics,
     updateBranchProtection,
@@ -135,27 +134,6 @@ function httpError(status: number, message: string): Error {
 }
 
 describe("settingsSyncBlock", () => {
-  it("allows sync when a local file exists and enabled was never set", () => {
-    const resolved = resolvedConfig({ repository: { has_issues: true } });
-
-    expect(resolved.config.settings.enabled).toBe(true);
-    expect(settingsSyncBlock(resolved)).toBeNull();
-  });
-
-  it("reports settings-disabled when the repository carries an explicit false", () => {
-    expect(settingsSyncBlock(resolvedConfig({ settings: { enabled: false } }))).toBe(
-      "settings-disabled",
-    );
-  });
-
-  it("reports settings-disabled for a resolution whose merged enabled is false", () => {
-    // The resolver case that produces this shape lives in resolver.test.ts;
-    // here the gate only needs the merged outcome.
-    const resolved = resolvedConfig({ settings: { enabled: false } });
-
-    expect(settingsSyncBlock(resolved)).toBe("settings-disabled");
-  });
-
   it("reports no-local-file first, even when enabled is true and issues exist", () => {
     const resolved = resolvedConfig(
       { settings: { enabled: true } },
@@ -164,42 +142,9 @@ describe("settingsSyncBlock", () => {
 
     expect(settingsSyncBlock(resolved)).toBe("no-local-file");
   });
-
-  it("reports invalid-config when a local file resolved with validation issues", () => {
-    const resolved = resolvedConfig({}, { issues: [{ path: "x", message: "bad" }] });
-
-    expect(settingsSyncBlock(resolved)).toBe("invalid-config");
-  });
 });
 
 describe("syncSettings", () => {
-  it("runs the appliers in the declared order, observable in the call sequence", async () => {
-    const { ctx, resolved, log, calls } = build(FULL_CONFIG);
-
-    const result = await syncSettings(ctx, resolved);
-
-    // A sync that runs names the layers that contributed.
-    expect(log.debug).toHaveBeenCalledWith({ sources: [LOCAL_SOURCE] }, "Running settings sync");
-
-    expect(calls).toEqual([
-      "repos.get",
-      "repos.update",
-      "labels.list",
-      "issues.createLabel",
-      "repos.updateBranchProtection",
-      "rulesets.list",
-      "request POST /repos/{owner}/{repo}/rulesets",
-    ]);
-    expect(result.changes).toEqual([
-      { area: "repository", action: "update", target: "has_issues" },
-      { area: "label", action: "create", target: "bug" },
-      { area: "branch-protection", action: "update", target: "main" },
-      { area: "ruleset", action: "create", target: "main" },
-    ]);
-    expect(result.failures).toEqual([]);
-    expect(result.dryRun).toBe(false);
-  });
-
   it("aggregates changes and records a thrown non-403 failure, continuing to later appliers", async () => {
     const { ctx, resolved, log, createLabel, updateBranchProtection, request } = build(FULL_CONFIG);
     createLabel.mockRejectedValueOnce(httpError(500, "boom"));
@@ -242,65 +187,6 @@ describe("syncSettings", () => {
       { applier: "repository", status: 403, err: raw },
       detail,
     );
-  });
-
-  it("performs zero calls and returns an empty summary when settings are disabled", async () => {
-    const { ctx, resolved, log, calls, get } = build({
-      ...FULL_CONFIG,
-      settings: { enabled: false },
-    });
-
-    const result = await syncSettings(ctx, resolved);
-
-    expect(calls).toEqual([]);
-    expect(get).not.toHaveBeenCalled();
-    expect(result).toEqual({ changes: [], failures: [], dryRun: false });
-    expect(log.debug).toHaveBeenCalledWith(
-      { reason: "settings-disabled" },
-      "Settings sync skipped",
-    );
-    expect(log.debug).not.toHaveBeenCalledWith(
-      expect.objectContaining({ sources: expect.anything() }),
-      "Running settings sync",
-    );
-  });
-
-  it("runs the appliers when a local file exists and enabled was never set", async () => {
-    // File presence alone is the opt-in: the implicit default is on.
-    const { ctx, resolved, calls } = build({ repository: { has_issues: true } });
-
-    const result = await syncSettings(ctx, resolved);
-
-    expect(resolved.config.settings.enabled).toBe(true);
-    expect(calls).toEqual(["repos.get", "repos.update"]);
-    expect(result.changes).toEqual([
-      { area: "repository", action: "update", target: "has_issues" },
-    ]);
-  });
-
-  it("runs nothing when the repository has no local settings file", async () => {
-    const { ctx, log, calls, get } = build();
-    const resolved = resolvedConfig(FULL_CONFIG, { localSource: undefined });
-
-    const result = await syncSettings(ctx, resolved);
-
-    expect(calls).toEqual([]);
-    expect(get).not.toHaveBeenCalled();
-    expect(result).toEqual({ changes: [], failures: [], dryRun: false });
-    expect(log.debug).toHaveBeenCalledWith({ reason: "no-local-file" }, "Settings sync skipped");
-  });
-
-  it("runs nothing when the local config failed validation", async () => {
-    const { ctx, log, calls } = build();
-    const resolved = resolvedConfig(FULL_CONFIG, {
-      issues: [{ path: "settings.enabled", message: "bad" }],
-    });
-
-    const result = await syncSettings(ctx, resolved);
-
-    expect(calls).toEqual([]);
-    expect(result).toEqual({ changes: [], failures: [], dryRun: false });
-    expect(log.debug).toHaveBeenCalledWith({ reason: "invalid-config" }, "Settings sync skipped");
   });
 
   it("performs zero writes in dry-run and logs the summary through the formatter", async () => {

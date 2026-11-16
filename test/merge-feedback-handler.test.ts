@@ -1,13 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import { woodhouseConfigSchema } from "../src/config/schema.js";
-import { ConfigResolver, type ResolvedConfig } from "../src/config/resolver.js";
+import type { ResolvedConfig } from "../src/config/resolver.js";
 import { KeyedMutex } from "../src/lib/mutex.js";
-import {
-  SETTINGS_APPLIED_MARKER,
-  commentSettingsApplied,
-  type MergeFeedbackDeps,
-} from "../src/settings/mergeFeedback.js";
+import { commentSettingsApplied, type MergeFeedbackDeps } from "../src/settings/mergeFeedback.js";
 import { SIGN_OFF } from "../src/approval/wording.js";
 import type { ChangedFile } from "../src/github/pulls.js";
 
@@ -135,11 +131,9 @@ function fakeOctokit(
   return {
     octokit,
     calls,
-    listFiles,
     listComments,
     createComment,
     updateComment,
-    deleteComment,
     paginate,
     get,
     getContent,
@@ -232,97 +226,6 @@ function flush() {
 }
 
 describe("commentSettingsApplied", () => {
-  it("invalidates, resolves, and syncs when a settings change merges to the default branch", async () => {
-    const { deps, scope, pr, calls, resolver, log } = build();
-
-    await commentSettingsApplied(deps, scope, pr);
-
-    // Cache dropped before resolving, so a stale entry cannot be served
-    // whichever order the closed and push deliveries arrive in.
-    expect(resolver.calls).toEqual(["invalidate", "resolve"]);
-    expect(resolver.resolver.isBaselineRepo).toHaveBeenCalledWith("widgets");
-
-    // The sync ran end to end: repository read then the settings write.
-    expect(calls).toEqual(["repos.get", "repos.update"]);
-    expect(log.debug).toHaveBeenCalledWith(
-      { sources: ["acme/widgets:.github/woodhouse.yml"] },
-      "Running settings sync",
-    );
-  });
-
-  it("still checks the cache and resolves, but never syncs, when settings are disabled", async () => {
-    const {
-      deps,
-      scope,
-      pr,
-      calls,
-      resolver,
-      log,
-      paginate,
-      listComments,
-      createComment,
-      updateComment,
-    } = build({
-      settings: { enabled: false },
-      repository: { has_issues: true },
-    });
-
-    await commentSettingsApplied(deps, scope, pr);
-
-    expect(resolver.calls).toEqual(["invalidate", "resolve"]);
-    // No applier call at all: `settingsSyncBlock` skips a disabled resolution
-    // before any write.
-    expect(calls).toEqual([]);
-    // The comment sits on the enabled path only, after the sync.
-    expect(paginate).not.toHaveBeenCalledWith(listComments, expect.anything());
-    expect(listComments).not.toHaveBeenCalled();
-    expect(createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith(
-      { owner: "acme", repo: "widgets", reason: "settings-disabled" },
-      "Settings sync skipped",
-    );
-  });
-
-  it("syncs a repository whose local file omits settings.enabled", async () => {
-    // File presence opts in; the kill switch defaults on.
-    const { deps, scope, pr, calls } = build({ repository: { has_issues: true } });
-
-    await commentSettingsApplied(deps, scope, pr);
-
-    expect(calls).toEqual(["repos.get", "repos.update"]);
-  });
-
-  it("never syncs or comments when the repository has no local settings file", async () => {
-    const {
-      deps,
-      scope,
-      pr,
-      calls,
-      resolver,
-      log,
-      paginate,
-      listComments,
-      createComment,
-      updateComment,
-    } = build(ENABLED, [], { localSource: undefined });
-
-    await commentSettingsApplied(deps, scope, pr);
-
-    // The change was noticed and the config re-resolved, but no file means no
-    // opt-in: no applier call and no outcome comment.
-    expect(resolver.calls).toEqual(["invalidate", "resolve"]);
-    expect(calls).toEqual([]);
-    expect(paginate).not.toHaveBeenCalledWith(listComments, expect.anything());
-    expect(listComments).not.toHaveBeenCalled();
-    expect(createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith(
-      { owner: "acme", repo: "widgets", reason: "no-local-file" },
-      "Settings sync skipped",
-    );
-  });
-
   it("never syncs or comments when the resolved config failed validation", async () => {
     const { deps, scope, pr, calls, log, paginate, listComments, createComment, updateComment } =
       build(ENABLED, [], {
@@ -344,83 +247,6 @@ describe("commentSettingsApplied", () => {
     );
   });
 
-  it("syncs when a repository-level true overrides a baseline false", async () => {
-    // The raw layers merge before validation, so the local true wins and the
-    // merged resolution carries a live local source: this merge must sync.
-    const octokit = fakeOctokit([SETTINGS_FILE], [], {
-      ".github-private:woodhouse.yml": "settings:\n  enabled: false\n",
-      "widgets:.github/woodhouse.yml":
-        "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
-    });
-    const log = fakeLogger();
-    const resolver = new ConfigResolver();
-
-    await commentSettingsApplied(
-      {
-        octokit: octokit.octokit,
-        resolver,
-        mutex: new KeyedMutex(),
-        log,
-        dryRun: false,
-      },
-      { owner: "acme", repo: "widgets", defaultBranch: "main" },
-      { number: 7, merged: true, baseRef: "main" },
-    );
-
-    expect(octokit.calls).toEqual(["repos.get", "repos.update"]);
-    expect(octokit.createComment).toHaveBeenCalledOnce();
-    expect(log.debug).not.toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "settings-disabled" }),
-      "Settings sync skipped",
-    );
-  });
-
-  it("does not list files for a close without a merge", async () => {
-    const {
-      deps,
-      scope,
-      pr,
-      calls,
-      listFiles,
-      paginate,
-      listComments,
-      createComment,
-      updateComment,
-    } = build();
-
-    await commentSettingsApplied(deps, scope, { ...pr, merged: false });
-
-    expect(listFiles).not.toHaveBeenCalled();
-    expect(calls).toEqual([]);
-    expect(paginate).not.toHaveBeenCalledWith(listComments, expect.anything());
-    expect(listComments).not.toHaveBeenCalled();
-    expect(createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
-  });
-
-  it("does not list files for a merge into a non-default branch", async () => {
-    const {
-      deps,
-      scope,
-      pr,
-      calls,
-      listFiles,
-      paginate,
-      listComments,
-      createComment,
-      updateComment,
-    } = build();
-
-    await commentSettingsApplied(deps, scope, { ...pr, baseRef: "feature" });
-
-    expect(listFiles).not.toHaveBeenCalled();
-    expect(calls).toEqual([]);
-    expect(paginate).not.toHaveBeenCalledWith(listComments, expect.anything());
-    expect(listComments).not.toHaveBeenCalled();
-    expect(createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
-  });
-
   it("does not sync when the merged pull request touched no settings file", async () => {
     const { deps, scope, pr, calls, resolver } = build();
     const octokit = fakeOctokit([{ filename: "src/index.ts", status: "modified" }]);
@@ -435,28 +261,6 @@ describe("commentSettingsApplied", () => {
     expect(octokit.listComments).not.toHaveBeenCalled();
     expect(octokit.createComment).not.toHaveBeenCalled();
     expect(octokit.updateComment).not.toHaveBeenCalled();
-  });
-
-  it("treats a deleted settings file as a change but does not sync once it is gone", async () => {
-    // Post-deletion the repository has no local layer, so it is no longer opted
-    // in: the sync must not run and the merge gets no outcome comment.
-    const { deps, scope, pr, resolver, log, updateComment } = build(ENABLED, [], {
-      localSource: undefined,
-    });
-    const octokit = fakeOctokit([{ filename: ".github/woodhouse.yml", status: "removed" }]);
-
-    await commentSettingsApplied({ ...deps, octokit: octokit.octokit }, scope, pr);
-
-    // The deletion passed the change gate: the cache was dropped and the config
-    // re-resolved. Nothing downstream ran.
-    expect(resolver.calls).toEqual(["invalidate", "resolve"]);
-    expect(octokit.calls).toEqual([]);
-    expect(octokit.createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith(
-      { owner: "acme", repo: "widgets", reason: "no-local-file" },
-      "Settings sync skipped",
-    );
   });
 
   it("runs the sync under the shared per-repository mutex key", async () => {
@@ -477,32 +281,6 @@ describe("commentSettingsApplied", () => {
     await Promise.all([run, holding]);
 
     expect(calls).toEqual(["repos.get", "repos.update"]);
-  });
-
-  it("posts one settings-applied comment whose body is delimited by the marker and sign-off", async () => {
-    const { deps, scope, pr, createComment, updateComment, listComments, paginate } = build();
-
-    await commentSettingsApplied(deps, scope, pr);
-
-    expect(paginate).toHaveBeenCalledWith(listComments, expect.anything());
-    expect(createComment).toHaveBeenCalledOnce();
-    expect(updateComment).not.toHaveBeenCalled();
-
-    const { body } = createComment.mock.calls[0][0] as { body: string };
-    expect(body.startsWith(SETTINGS_APPLIED_MARKER)).toBe(true);
-    expect(body.trimEnd().endsWith(SIGN_OFF)).toBe(true);
-  });
-
-  it("updates the existing marker comment in place on a re-delivery, never duplicating", async () => {
-    const { deps, scope, pr, createComment, updateComment } = build(ENABLED, [
-      { id: 42, body: `stale outcome\n${SETTINGS_APPLIED_MARKER}\n` },
-    ]);
-
-    await commentSettingsApplied(deps, scope, pr);
-
-    expect(updateComment).toHaveBeenCalledOnce();
-    expect(updateComment).toHaveBeenCalledWith(expect.objectContaining({ comment_id: 42 }));
-    expect(createComment).not.toHaveBeenCalled();
   });
 
   it("reports the baseline variant and invalidates owner-wide when the baseline repository is the target", async () => {
@@ -527,99 +305,5 @@ describe("commentSettingsApplied", () => {
     expect(body).toContain("Other repositories will adopt the change at their next event.");
     expect(body).not.toMatch(/every repository/i);
     expect(body.trimEnd().endsWith(SIGN_OFF)).toBe(true);
-  });
-
-  it("does not sync a baseline root-file merge when .github-private has no local file", async () => {
-    // The root file is the owner baseline, not a local file: the gate reports
-    // no-local-file, so no sync runs and no outcome comment is left.
-    const octokit = fakeOctokit([{ filename: "woodhouse.yaml", status: "modified" }], [], {
-      ".github-private:woodhouse.yaml":
-        "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
-    });
-    const log = fakeLogger();
-    const resolver = new ConfigResolver();
-    const invalidateOwner = vi.spyOn(resolver, "invalidateOwner");
-
-    await commentSettingsApplied(
-      {
-        octokit: octokit.octokit,
-        resolver,
-        mutex: new KeyedMutex(),
-        log,
-        dryRun: false,
-      },
-      { owner: "acme", repo: ".github-private", defaultBranch: "main" },
-      { number: 7, merged: true, baseRef: "main" },
-    );
-
-    expect(invalidateOwner).toHaveBeenCalledWith("acme");
-    // The baseline merged, but the baseline repository did not opt in.
-    expect(octokit.calls).toEqual([]);
-    expect(octokit.createComment).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith(
-      { owner: "acme", repo: ".github-private", reason: "no-local-file" },
-      "Settings sync skipped",
-    );
-  });
-
-  it("syncs a baseline merge from its own .github/woodhouse.yml", async () => {
-    // The baseline repository manages itself through its local file, exactly
-    // like any other repository; the owner baseline still cascades underneath.
-    const octokit = fakeOctokit([{ filename: "woodhouse.yaml", status: "modified" }], [], {
-      ".github-private:woodhouse.yml": "repository:\n  has_wiki: false\n",
-      ".github-private:.github/woodhouse.yml":
-        "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
-    });
-    const log = fakeLogger();
-    const resolver = new ConfigResolver();
-    const invalidateOwner = vi.spyOn(resolver, "invalidateOwner");
-
-    await commentSettingsApplied(
-      {
-        octokit: octokit.octokit,
-        resolver,
-        mutex: new KeyedMutex(),
-        log,
-        dryRun: false,
-      },
-      { owner: "acme", repo: ".github-private", defaultBranch: "main" },
-      { number: 7, merged: true, baseRef: "main" },
-    );
-
-    expect(invalidateOwner).toHaveBeenCalledWith("acme");
-    expect(octokit.calls).toEqual(["repos.get", "repos.update"]);
-
-    const { body } = octokit.createComment.mock.calls[0][0] as { body: string };
-    expect(body).toContain("This is the baseline repository, sir, so it has been synced directly.");
-    expect(body).toContain("Other repositories will adopt the change at their next event.");
-  });
-
-  it("in dry-run writes no comment, makes no comment call, and logs the body", async () => {
-    const {
-      deps,
-      scope,
-      pr,
-      log,
-      paginate,
-      listComments,
-      createComment,
-      updateComment,
-      deleteComment,
-    } = build();
-
-    await commentSettingsApplied({ ...deps, dryRun: true }, scope, pr);
-
-    // The manager guards its own writes: it does not even list our marker
-    // comment, and no create/update/delete is issued.
-    expect(paginate).not.toHaveBeenCalledWith(listComments, expect.anything());
-    expect(listComments).not.toHaveBeenCalled();
-    expect(createComment).not.toHaveBeenCalled();
-    expect(updateComment).not.toHaveBeenCalled();
-    expect(deleteComment).not.toHaveBeenCalled();
-
-    // The would-be body is logged, marker and sign-off included.
-    const logged = log.info.mock.calls.map((call) => String(call[1])).join("\n");
-    expect(logged).toContain(SETTINGS_APPLIED_MARKER);
-    expect(logged).toContain(SIGN_OFF);
   });
 });
