@@ -15,8 +15,6 @@ When the App is installed on a repository, or a repository is added to an existi
 
 #### Scenario: Repository added to an existing installation
 - **WHEN** a repository is added to an installation that already existed
-#### Scenario: Repository added to an existing installation
-- **WHEN** a repository is added to an installation that already existed
 - **THEN** the same onboarding offer is made for that repository
 
 #### Scenario: Fresh install on all repositories
