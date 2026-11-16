@@ -31,30 +31,10 @@ interface Comment {
  * perturb that assertion. The comment fakes are returned separately for tests
  * that assert on them.
  */
-function fakeOctokit(
-  files: readonly ChangedFile[] = [SETTINGS_FILE],
-  comments: Comment[] = [],
-  configFiles: Record<string, string> = {},
-) {
+function fakeOctokit(files: readonly ChangedFile[] = [SETTINGS_FILE], comments: Comment[] = []) {
   const calls: string[] = [];
 
   const listFiles = vi.fn(async () => ({ data: [...files] }));
-
-  // Serves the config cascade to a real `ConfigResolver`. Keyed `repo:path`,
-  // 404ing everything else, exactly as the Contents API does.
-  const getContent = vi.fn(async ({ repo, path }: { repo: string; path: string }) => {
-    const key = `${repo}:${path}`;
-    if (!(key in configFiles)) {
-      throw Object.assign(new Error("Not Found"), { status: 404 });
-    }
-    return {
-      data: {
-        type: "file",
-        encoding: "base64",
-        content: Buffer.from(configFiles[key]!).toString("base64"),
-      },
-    };
-  });
 
   const get = vi.fn(async () => {
     calls.push("repos.get");
@@ -112,7 +92,7 @@ function fakeOctokit(
   });
 
   const octokit = {
-    repos: { get, getContent, update, replaceAllTopics, updateBranchProtection },
+    repos: { get, update, replaceAllTopics, updateBranchProtection },
     issues: {
       listLabelsForRepo,
       createLabel,
@@ -136,7 +116,6 @@ function fakeOctokit(
     updateComment,
     paginate,
     get,
-    getContent,
     update,
   };
 }
