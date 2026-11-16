@@ -12,6 +12,7 @@ The maintainer's agents plan in the Linear project woodhouse (P-REC-2), implemen
 ## Commands
 - toolchain: `mise install` (Node 22, hk, pkl) then `mise run install` — `npm ci` and the git hooks
 - test: `npm test` (single file: `npx vitest run test/policy.test.ts`; hermetic unit tests — no env, network or docker)
+- bdd: Gherkin scenarios under features/ run as part of npm test (vitest-cucumber); run one scenario file with `npx vitest run features/<capability>/<name>.steps.ts`
 - lint (report only): `mise run lint` (= `hk check`: oxlint + oxfmt) · fix: `mise run fix` · `npm run lint` alone is oxlint only — misses formatting
 - typecheck: `npm run typecheck` · build: `npm run build` · everything CI runs: `mise run ci`
 - regenerate the committed JSON Schema: `npm run schema:generate` — after any change to `src/config/schema.ts`, then commit
@@ -34,3 +35,4 @@ The maintainer's agents plan in the Linear project woodhouse (P-REC-2), implemen
 - Commits follow Conventional Commits (`feat:`, `fix:`, `chore:`, …) — release-please will derive the changelog from them.
 - Running the server needs `.env` credentials (`.env.example`); `DRY_RUN=true` evaluates and logs every decision without writing to GitHub — `docs/test-plan.md` walks through validating an install end to end.
 - `TODO.md` is the live backlog — its "Accepted tradeoffs" section exists so they aren't rediscovered as bugs; read it before "fixing" one.
+- Gherkin scenarios are the spec of record after the openspec purge; every feature PR updates the scenarios it changes in the same PR.
