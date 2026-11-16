@@ -46,9 +46,9 @@ A repository in which any settings file already exists SHALL NOT receive an onbo
 - **WHEN** a repository has no settings file and the owner baseline resolves settings management on
 - **THEN** the onboarding offer is still made for it — the local file is the per-repository opt-in
 
-#### Scenario: Unprobed pull-request state fails closed
-- **WHEN** a repository has no settings file and the probe cannot confirm whether an onboarding pull request is open for it
-- **THEN** no onboarding pull request is opened for it, the skip is logged, and the walk continues with the remaining repositories
+#### Scenario: The open-pull-request probe fails
+- **WHEN** a repository has no settings file and the probe for an open onboarding pull request fails
+- **THEN** no onboarding pull request is opened for it, the failure is logged, and the walk continues with the remaining repositories
 
 ### Requirement: Onboarding is idempotent
 While an onboarding pull request is open for a repository, no further onboarding action SHALL be taken for it — re-delivered installation events and later events must not duplicate the branch, the commit, or the pull request. A pull request closed without merging leaves the repository un-onboarded; a later installation event offers again.

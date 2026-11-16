@@ -270,7 +270,8 @@ describe("commentSettingsApplied", () => {
     await commentSettingsApplied(deps, scope, pr);
 
     expect(resolver.calls).toEqual(["invalidate", "resolve"]);
-    // No applier call at all: the master switch is honoured before any write.
+    // No applier call at all: `settingsSyncBlock` skips a disabled resolution
+    // before any write.
     expect(calls).toEqual([]);
     // The comment sits on the enabled path only, after the sync.
     expect(paginate).not.toHaveBeenCalledWith(listComments, expect.anything());

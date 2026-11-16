@@ -220,6 +220,20 @@ describe("ConfigResolver — cascade", () => {
     // invalid-config gate keeps this resolution from being synced.
     expect(localSource).toBe("acme/app:.github/woodhouse.yml");
   });
+
+  it("does not treat a local file with invalid YAML as an opt-in", async () => {
+    // `fetchLayer` skips a layer that fails to parse, so a broken local file is
+    // not a consent signal: no local source, and the gate reports no file.
+    const { client } = fakeClient({
+      "app:.github/woodhouse.yml": "settings: [unclosed\n",
+    });
+
+    const resolved = await new ConfigResolver().resolve(client, "acme", "app", fakeLogger());
+
+    expect(resolved.sources).toEqual([]);
+    expect(resolved.localSource).toBeUndefined();
+    expect(settingsSyncBlock(resolved)).toBe("no-local-file");
+  });
 });
 
 describe("ConfigResolver — baseline repository", () => {
@@ -252,7 +266,7 @@ describe("ConfigResolver — baseline repository", () => {
         "settings:\n  enabled: true\nrepository:\n  has_wiki: false\n",
     });
 
-    const { config, sources } = await new ConfigResolver().resolve(
+    const { config, sources, localSource } = await new ConfigResolver().resolve(
       client,
       "acme",
       ".github-private",
@@ -263,6 +277,7 @@ describe("ConfigResolver — baseline repository", () => {
     expect(config.repository.has_wiki).toBe(false);
     // Listed once: the root file is the local layer, never also the baseline.
     expect(sources).toEqual(["acme/.github-private:woodhouse.yaml"]);
+    expect(localSource).toBe("acme/.github-private:woodhouse.yaml");
     // Only the root paths were probed, and only once each: no baseline fetch
     // and no `.github/` local-layer probe for the baseline repository.
     expect(getContent.mock.calls.map((call) => call[0].path)).toEqual([
@@ -277,15 +292,13 @@ describe("ConfigResolver — baseline repository", () => {
       ".github:woodhouse.yml": "settings:\n  enabled: true\n",
     });
 
-    const { config, sources } = await new ConfigResolver({ baselineRepo: ".github" }).resolve(
-      client,
-      "acme",
-      ".github",
-      fakeLogger(),
-    );
+    const { config, sources, localSource } = await new ConfigResolver({
+      baselineRepo: ".github",
+    }).resolve(client, "acme", ".github", fakeLogger());
 
     expect(config.settings.enabled).toBe(true);
     expect(sources).toEqual(["acme/.github:woodhouse.yml"]);
+    expect(localSource).toBe("acme/.github:woodhouse.yml");
     expect(getContent.mock.calls.map((call) => call[0].path)).toEqual(["woodhouse.yml"]);
   });
 
