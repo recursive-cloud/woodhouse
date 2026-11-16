@@ -19,6 +19,7 @@ Feature: White-glove check reconciliation
       | a white-glove run in progress                                                 | a running build check    | the white-glove run with id 301 is updated in place  |
       | a white-glove run queued                                                      | a running build check    | the white-glove run with id 500 is updated in place  |
       | a white-glove run in status "preparing"                                       | a running build check    | the white-glove run with id 600 is updated in place  |
+      | a white-glove run in status "requested"                                       | a running build check    | the white-glove run with id 700 is updated in place  |
       | a white-glove run completed and failing                                       | a passing build check    | the white-glove run with id 302 is updated in place  |
       | a white-glove run completed and failing                                       | a failing build check    | the white-glove run with id 302 is updated in place  |
       | a white-glove run completed and failing                                       | a running build check    | a new white-glove run is created on the head commit  |

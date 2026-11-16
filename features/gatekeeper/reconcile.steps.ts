@@ -61,6 +61,8 @@ function parseWhiteGloveRuns(cell: string): RawCheckRun[] {
       return [{ name: WHITE_GLOVE_CHECK_NAME, id: 500, status: "queued", conclusion: null }];
     case `a white-glove run in status "preparing"`:
       return [{ name: WHITE_GLOVE_CHECK_NAME, id: 600, status: "preparing", conclusion: null }];
+    case `a white-glove run in status "requested"`:
+      return [{ name: WHITE_GLOVE_CHECK_NAME, id: 700, status: "requested", conclusion: null }];
     case "a white-glove run completed and failing":
       return [
         {
