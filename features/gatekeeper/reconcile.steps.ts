@@ -395,6 +395,43 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     },
   );
 
+  Scenario(
+    `A completed check suite triggers a fresh reconciliation`,
+    ({ Given, When, Then, And }) => {
+      let whiteGloveRuns: RawCheckRun[] = [];
+      let childChecks: RawCheckRun[] = [];
+      let harness: Harness | undefined;
+      let result: ReconcileResult | undefined;
+
+      Given(`the head commit carries a white-glove run completed and failing`, () => {
+        whiteGloveRuns = parseWhiteGloveRuns("a white-glove run completed and failing");
+      });
+      And(`the commit carries a failing build check`, () => {
+        childChecks = parseChildChecks("a failing build check");
+      });
+      // The check_suite.completed listener calls reconcile exactly like the
+      // check_run.completed one: no options either way.
+      When(`the white-glove check is reconciled for a completed check suite event`, async () => {
+        harness = buildHarness({ whiteGloveRuns, childChecks });
+        result = await reconcile(harness.deps, OWNER, REPO, SHA);
+      });
+      Then(`the fresh verdict is re-derived from every check on the head commit`, () => {
+        const evaluation = requireResult(result).evaluation;
+        // One failing child is enough: proving the whole run set was re-read
+        // rather than trusting the single check run in the webhook payload.
+        expect(evaluation.counts.failed).toBe(1);
+        expect(evaluation.checks).toContainEqual({
+          name: "build",
+          verdict: "failed",
+          detail: "failure",
+        });
+      });
+      And(`the white-glove run with id 302 is updated in place as failed`, () => {
+        expectUpdatedAsFailed(requireHarness(harness), 302);
+      });
+    },
+  );
+
   Scenario(`A re-request re-derives the verdict fresh`, ({ Given, When, Then, And }) => {
     let whiteGloveRuns: RawCheckRun[] = [];
     let childChecks: RawCheckRun[] = [];

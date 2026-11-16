@@ -42,6 +42,14 @@ Feature: White-glove check reconciliation
     And the white-glove run with id 302 is updated in place as failed
 
   @REC-21
+  Scenario: A completed check suite triggers a fresh reconciliation
+    Given the head commit carries a white-glove run completed and failing
+    And the commit carries a failing build check
+    When the white-glove check is reconciled for a completed check suite event
+    Then the fresh verdict is re-derived from every check on the head commit
+    And the white-glove run with id 302 is updated in place as failed
+
+  @REC-21
   Scenario: A re-request re-derives the verdict fresh
     Given the head commit carries a white-glove run completed and failing
     And the commit carries a failing build check
