@@ -1,4 +1,4 @@
-# 0008. Settings Sync Opts In by Config File Presence
+# 0009. Settings Sync Opts In by Config File Presence
 
 Status: Accepted
 
