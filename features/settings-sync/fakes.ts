@@ -516,10 +516,7 @@ export interface PushContextOptions {
 }
 
 /** A `push` delivery context for the fake Probot. */
-export function pushContext(
-  octokit: Record<string, unknown>,
-  options: PushContextOptions = {},
-) {
+export function pushContext(octokit: Record<string, unknown>, options: PushContextOptions = {}) {
   const { ref = "refs/heads/main", changed = [".github/woodhouse.yml"], deleted = false } = options;
   return {
     name: "push",

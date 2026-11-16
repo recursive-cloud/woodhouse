@@ -32,6 +32,15 @@ const feature = await loadFeature("features/settings-sync/apply.feature");
 
 const ENABLED_CONFIG = "settings:\n  enabled: true\nrepository:\n  has_issues: true\n";
 
+/** One pending change in every area, so all four appliers run. Mirrors `test/apply.test.ts`. */
+const FULL_CONFIG = {
+  settings: { enabled: true },
+  repository: { has_issues: true },
+  labels: [{ name: "bug", color: "d73a4a" }],
+  branchProtection: { main: {} },
+  rulesets: [{ name: "main" }],
+};
+
 const CONFIG_FILES = { "widgets:.github/woodhouse.yml": ENABLED_CONFIG };
 
 type ScenarioVariables = Record<string, unknown>;
@@ -112,10 +121,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       });
       And(`no outcome comment is left`, () => {
         const surface = requireValue(octokit, "fake octokit");
-        expect(surface.paginate).not.toHaveBeenCalledWith(
-          surface.listComments,
-          expect.anything(),
-        );
+        expect(surface.paginate).not.toHaveBeenCalledWith(surface.listComments, expect.anything());
         expect(surface.listComments).not.toHaveBeenCalled();
         expect(surface.createComment).not.toHaveBeenCalled();
         expect(surface.updateComment).not.toHaveBeenCalled();
@@ -221,10 +227,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       );
       And(`no outcome comment is left`, () => {
         const surface = requireValue(octokit, "fake octokit");
-        expect(surface.paginate).not.toHaveBeenCalledWith(
-          surface.listComments,
-          expect.anything(),
-        );
+        expect(surface.paginate).not.toHaveBeenCalledWith(surface.listComments, expect.anything());
         expect(surface.listComments).not.toHaveBeenCalled();
         expect(surface.createComment).not.toHaveBeenCalled();
         expect(surface.updateComment).not.toHaveBeenCalled();
@@ -298,7 +301,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     Given(`a resolved configuration from a local settings file`, () => {
       built = makeApplyOctokit({ current: { has_issues: false } });
       const log = fakeLogger();
-      resolved = resolvedConfig({ repository: { has_issues: true } });
+      resolved = resolvedConfig(FULL_CONFIG);
       ctx = applyContext(built.octokit, log);
 
       expect(resolved.config.settings.enabled).toBe(true);
@@ -311,11 +314,22 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       );
     });
     Then(`the appliers run in their declared order`, () => {
-      expect(requireValue(built, "fake octokit").calls).toEqual(["repos.get", "repos.update"]);
+      expect(requireValue(built, "fake octokit").calls).toEqual([
+        "repos.get",
+        "repos.update",
+        "labels.list",
+        "issues.createLabel",
+        "repos.updateBranchProtection",
+        "rulesets.list",
+        "request POST /repos/{owner}/{repo}/rulesets",
+      ]);
     });
     And(`the summary lists the applied changes`, () => {
       expect(requireValue(summary, "apply summary").changes).toEqual([
         { area: "repository", action: "update", target: "has_issues" },
+        { area: "label", action: "create", target: "bug" },
+        { area: "branch-protection", action: "update", target: "main" },
+        { area: "ruleset", action: "create", target: "main" },
       ]);
     });
   });
@@ -343,7 +357,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       expect(fake.request).toHaveBeenCalledOnce();
       expect(fake.request).toHaveBeenCalledWith(
         "PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}",
-        expect.objectContaining({ ruleset_id: 42 }),
+        expect.objectContaining({ ruleset_id: 42, name: "main" }),
       );
     });
     And(`the summary reports a ruleset update for each configured ruleset`, () => {
@@ -355,42 +369,47 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     });
   });
 
-  Scenario(
-    `Branch protection converges by re-declaration`,
-    ({ Given, When, Then, And }) => {
-      let built: ReturnType<typeof makeApplyOctokit> | undefined;
-      let ctx: ApplyContext | undefined;
-      let resolved: ResolvedConfig | undefined;
-      let summary: Awaited<ReturnType<typeof syncSettings>> | undefined;
+  Scenario(`Branch protection converges by re-declaration`, ({ Given, When, Then, And }) => {
+    let built: ReturnType<typeof makeApplyOctokit> | undefined;
+    let ctx: ApplyContext | undefined;
+    let resolved: ResolvedConfig | undefined;
+    let summary: Awaited<ReturnType<typeof syncSettings>> | undefined;
 
-      Given(`branch protection configured for branches whose protection already matches`, () => {
-        built = makeApplyOctokit();
-        const log = fakeLogger();
-        resolved = resolvedConfig({ branchProtection: { main: {} } });
-        ctx = applyContext(built.octokit, log);
+    Given(`branch protection configured for branches whose protection already matches`, () => {
+      built = makeApplyOctokit();
+      const log = fakeLogger();
+      resolved = resolvedConfig({ branchProtection: { main: {} } });
+      ctx = applyContext(built.octokit, log);
+    });
+    When(`the settings sync runs`, async () => {
+      summary = await syncSettings(
+        requireValue(ctx, "apply context"),
+        requireValue(resolved, "resolved configuration"),
+      );
+    });
+    Then(`protection for each configured branch is re-declared`, () => {
+      const fake = requireValue(built, "fake octokit");
+      expect(fake.updateBranchProtection).toHaveBeenCalledOnce();
+      expect(fake.updateBranchProtection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: "acme",
+          repo: "widgets",
+          branch: "main",
+          required_status_checks: null,
+          enforce_admins: null,
+          required_pull_request_reviews: null,
+          restrictions: null,
+        }),
+      );
+    });
+    And(`the summary reports a branch-protection update row per branch`, () => {
+      expect(requireValue(summary, "apply summary").changes).toContainEqual({
+        area: "branch-protection",
+        action: "update",
+        target: "main",
       });
-      When(`the settings sync runs`, async () => {
-        summary = await syncSettings(
-          requireValue(ctx, "apply context"),
-          requireValue(resolved, "resolved configuration"),
-        );
-      });
-      Then(`protection for each configured branch is re-declared`, () => {
-        const fake = requireValue(built, "fake octokit");
-        expect(fake.updateBranchProtection).toHaveBeenCalledOnce();
-        expect(fake.updateBranchProtection).toHaveBeenCalledWith(
-          expect.objectContaining({ branch: "main" }),
-        );
-      });
-      And(`the summary reports a branch-protection update row per branch`, () => {
-        expect(requireValue(summary, "apply summary").changes).toContainEqual({
-          area: "branch-protection",
-          action: "update",
-          target: "main",
-        });
-      });
-    },
-  );
+    });
+  });
 
   Scenario(
     `A removed branchProtection block stops the re-assertion`,
@@ -428,63 +447,66 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     },
   );
 
-  Scenario(`A merge push and the merged event are serialised per repository`, ({ Given, When, Then }) => {
-    let calls: string[] = [];
-    let gate: Gate | undefined;
-    let push: Promise<void> | undefined;
-    let closed: Promise<void> | undefined;
+  Scenario(
+    `A merge push and the merged event are serialised per repository`,
+    ({ Given, When, Then }) => {
+      let calls: string[] = [];
+      let gate: Gate | undefined;
+      let push: Promise<void> | undefined;
+      let closed: Promise<void> | undefined;
 
-    Given(
-      `a merge push delivery and the merged pull request delivery for the same repository nearly simultaneously`,
-      () => {
-        const { app, deliver } = fakeProbot();
-        createApp({
-          allowlist: new Allowlist(["trusted-org"]),
-          baselineRepo: ".github-private",
-          dryRun: false,
-        })(app);
+      Given(
+        `a merge push delivery and the merged pull request delivery for the same repository nearly simultaneously`,
+        () => {
+          const { app, deliver } = fakeProbot();
+          createApp({
+            allowlist: new Allowlist(["trusted-org"]),
+            baselineRepo: ".github-private",
+            dryRun: false,
+          })(app);
 
-        gate = manualGate();
-        const pushOctokit = makeAppOctokit({
-          label: "push",
-          calls,
-          gate,
-          configFiles: CONFIG_FILES,
-        });
-        const closedOctokit = makeAppOctokit({
-          label: "closed",
-          calls,
-          gate,
-          configFiles: CONFIG_FILES,
-        });
+          gate = manualGate();
+          const pushOctokit = makeAppOctokit({
+            label: "push",
+            calls,
+            gate,
+            configFiles: CONFIG_FILES,
+          });
+          const closedOctokit = makeAppOctokit({
+            label: "closed",
+            calls,
+            gate,
+            configFiles: CONFIG_FILES,
+          });
 
-        // Fire both without awaiting: whichever reaches its first applier read
-        // first claims the gate, and the shared mutex holds the other back.
-        push = deliver("push", pushContext(pushOctokit.octokit));
-        closed = deliver("pull_request.closed", closedContext(closedOctokit.octokit));
-        expect(push).toBeInstanceOf(Promise);
-        expect(closed).toBeInstanceOf(Promise);
-      },
-    );
-    When(`both syncs run`, async () => {
-      await settle();
-      expect(calls).toHaveLength(1);
-      expect(calls[0]).toMatch(/:repos\.get$/);
-    });
-    Then(`the two syncs run in some order without interleaving`, async () => {
-      requireValue(gate, "manual gate").release();
-      await Promise.all([
-        requireValue(push, "push delivery"),
-        requireValue(closed, "closed delivery"),
-      ]);
+          // Fire both without awaiting: whichever reaches its first applier read
+          // first claims the gate, and the shared mutex holds the other back.
+          push = deliver("push", pushContext(pushOctokit.octokit));
+          closed = deliver("pull_request.closed", closedContext(closedOctokit.octokit));
+          expect(push).toBeInstanceOf(Promise);
+          expect(closed).toBeInstanceOf(Promise);
+        },
+      );
+      When(`both syncs run`, async () => {
+        await settle();
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatch(/:repos\.get$/);
+      });
+      Then(`the two syncs run in some order without interleaving`, async () => {
+        requireValue(gate, "manual gate").release();
+        await Promise.all([
+          requireValue(push, "push delivery"),
+          requireValue(closed, "closed delivery"),
+        ]);
 
-      const pushBatch = ["push:repos.get", "push:repos.update"];
-      const closedBatch = ["closed:repos.get", "closed:repos.update"];
+        const pushBatch = ["push:repos.get", "push:repos.update"];
+        const closedBatch = ["closed:repos.get", "closed:repos.update"];
 
-      expect([
-        [...pushBatch, ...closedBatch],
-        [...closedBatch, ...pushBatch],
-      ]).toContainEqual(calls);
-    });
-  });
+        expect([
+          [...pushBatch, ...closedBatch],
+          [...closedBatch, ...pushBatch],
+        ]).toContainEqual(calls);
+      });
+    },
+  );
 });

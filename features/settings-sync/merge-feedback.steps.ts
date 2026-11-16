@@ -110,9 +110,7 @@ function realHarness(options: HarnessOptions = {}) {
 }
 
 /** The created comment's body, as the handler posted it. */
-function createdBody(
-  createComment: ReturnType<typeof fakeHarness>["createComment"],
-): string {
+function createdBody(createComment: ReturnType<typeof fakeHarness>["createComment"]): string {
   const call = createComment.mock.calls[0];
   if (call === undefined) throw new Error("No outcome comment was created.");
   return (call[0] as { body: string }).body;
@@ -172,10 +170,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
     And(`no comment is left`, () => {
       const built = requireValue(harness, "feedback harness");
-      expect(built.paginate).not.toHaveBeenCalledWith(
-        built.listComments,
-        expect.anything(),
-      );
+      expect(built.paginate).not.toHaveBeenCalledWith(built.listComments, expect.anything());
       expect(built.listComments).not.toHaveBeenCalled();
       expect(built.createComment).not.toHaveBeenCalled();
       expect(built.updateComment).not.toHaveBeenCalled();
@@ -201,10 +196,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
     And(`no comment is left`, () => {
       const built = requireValue(harness, "feedback harness");
-      expect(built.paginate).not.toHaveBeenCalledWith(
-        built.listComments,
-        expect.anything(),
-      );
+      expect(built.paginate).not.toHaveBeenCalledWith(built.listComments, expect.anything());
       expect(built.listComments).not.toHaveBeenCalled();
       expect(built.createComment).not.toHaveBeenCalled();
       expect(built.updateComment).not.toHaveBeenCalled();
@@ -239,44 +231,36 @@ describeFeature(feature, ({ Scenario }) => {
     });
     And(`no comment is left`, () => {
       const built = requireValue(harness, "feedback harness");
-      expect(built.paginate).not.toHaveBeenCalledWith(
-        built.listComments,
-        expect.anything(),
-      );
+      expect(built.paginate).not.toHaveBeenCalledWith(built.listComments, expect.anything());
       expect(built.listComments).not.toHaveBeenCalled();
       expect(built.createComment).not.toHaveBeenCalled();
       expect(built.updateComment).not.toHaveBeenCalled();
     });
   });
 
-  Scenario(
-    `A re-delivery updates the outcome comment in place`,
-    ({ Given, When, Then, And }) => {
-      let harness: ReturnType<typeof fakeHarness> | undefined;
+  Scenario(`A re-delivery updates the outcome comment in place`, ({ Given, When, Then, And }) => {
+    let harness: ReturnType<typeof fakeHarness> | undefined;
 
-      Given(`a merged settings pull request that already has an outcome comment`, () => {
-        harness = fakeHarness({
-          comments: [{ id: 42, body: `stale outcome\n${SETTINGS_APPLIED_MARKER}\n` }],
-        });
-        expect(harness.listComments).toBeDefined();
+    Given(`a merged settings pull request that already has an outcome comment`, () => {
+      harness = fakeHarness({
+        comments: [{ id: 42, body: `stale outcome\n${SETTINGS_APPLIED_MARKER}\n` }],
       });
-      When(`the merged delivery is handled again`, async () => {
-        const built = requireValue(harness, "feedback harness");
-        await commentSettingsApplied(built.deps, built.scope, built.pr);
-      });
-      Then(`the existing comment is updated in place`, () => {
-        const built = requireValue(harness, "feedback harness");
-        expect(built.updateComment).toHaveBeenCalledOnce();
-        expect(built.updateComment).toHaveBeenCalledWith(
-          expect.objectContaining({ comment_id: 42 }),
-        );
-      });
-      And(`no second comment is created`, () => {
-        const built = requireValue(harness, "feedback harness");
-        expect(built.createComment).not.toHaveBeenCalled();
-      });
-    },
-  );
+      expect(harness.listComments).toBeDefined();
+    });
+    When(`the merged delivery is handled again`, async () => {
+      const built = requireValue(harness, "feedback harness");
+      await commentSettingsApplied(built.deps, built.scope, built.pr);
+    });
+    Then(`the existing comment is updated in place`, () => {
+      const built = requireValue(harness, "feedback harness");
+      expect(built.updateComment).toHaveBeenCalledOnce();
+      expect(built.updateComment).toHaveBeenCalledWith(expect.objectContaining({ comment_id: 42 }));
+    });
+    And(`no second comment is created`, () => {
+      const built = requireValue(harness, "feedback harness");
+      expect(built.createComment).not.toHaveBeenCalled();
+    });
+  });
 
   Scenario(
     `A merged pull request that disables settings management is silent`,
@@ -302,10 +286,7 @@ describeFeature(feature, ({ Scenario }) => {
       And(`no sync runs and no comment is left`, () => {
         const built = requireValue(harness, "feedback harness");
         expect(built.calls).toEqual([]);
-        expect(built.paginate).not.toHaveBeenCalledWith(
-          built.listComments,
-          expect.anything(),
-        );
+        expect(built.paginate).not.toHaveBeenCalledWith(built.listComments, expect.anything());
         expect(built.listComments).not.toHaveBeenCalled();
         expect(built.createComment).not.toHaveBeenCalled();
         expect(built.updateComment).not.toHaveBeenCalled();
@@ -317,42 +298,39 @@ describeFeature(feature, ({ Scenario }) => {
     },
   );
 
-  Scenario(
-    `A repository-level true overrides a baseline false`,
-    ({ Given, When, Then, And }) => {
-      let harness: ReturnType<typeof realHarness> | undefined;
+  Scenario(`A repository-level true overrides a baseline false`, ({ Given, When, Then, And }) => {
+    let harness: ReturnType<typeof realHarness> | undefined;
 
-      Given(
-        `an owner baseline that disables settings management and a local settings file that enables it`,
-        () => {
-          harness = realHarness({
-            files: [SETTINGS_FILE],
-            configFiles: {
-              ".github-private:woodhouse.yml": "settings:\n  enabled: false\n",
-              "widgets:.github/woodhouse.yml":
-                "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
-            },
-          });
-        },
+    Given(
+      `an owner baseline that disables settings management and a local settings file that enables it`,
+      () => {
+        harness = realHarness({
+          files: [SETTINGS_FILE],
+          configFiles: {
+            ".github-private:woodhouse.yml": "settings:\n  enabled: false\n",
+            "widgets:.github/woodhouse.yml":
+              "settings:\n  enabled: true\nrepository:\n  has_issues: true\n",
+          },
+        });
+      },
+    );
+    When(`the merged delivery is handled`, async () => {
+      const built = requireValue(harness, "feedback harness");
+      await commentSettingsApplied(built.deps, built.scope, built.pr);
+    });
+    Then(`the repository is synced`, () => {
+      const built = requireValue(harness, "feedback harness");
+      expect(built.calls).toEqual(["repos.get", "repos.update"]);
+    });
+    And(`the pull request receives an outcome comment`, () => {
+      const built = requireValue(harness, "feedback harness");
+      expect(built.createComment).toHaveBeenCalledOnce();
+      expect(built.log.debug).not.toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "settings-disabled" }),
+        "Settings sync skipped",
       );
-      When(`the merged delivery is handled`, async () => {
-        const built = requireValue(harness, "feedback harness");
-        await commentSettingsApplied(built.deps, built.scope, built.pr);
-      });
-      Then(`the repository is synced`, () => {
-        const built = requireValue(harness, "feedback harness");
-        expect(built.calls).toEqual(["repos.get", "repos.update"]);
-      });
-      And(`the pull request receives an outcome comment`, () => {
-        const built = requireValue(harness, "feedback harness");
-        expect(built.createComment).toHaveBeenCalledOnce();
-        expect(built.log.debug).not.toHaveBeenCalledWith(
-          expect.objectContaining({ reason: "settings-disabled" }),
-          "Settings sync skipped",
-        );
-      });
-    },
-  );
+    });
+  });
 
   Scenario(
     `A baseline merge without a local settings file is silent`,
@@ -381,9 +359,7 @@ describeFeature(feature, ({ Scenario }) => {
       });
       Then(`no sync runs because the file-presence gate reports no local file`, () => {
         const built = requireValue(harness, "feedback harness");
-        expect(requireValue(invalidateOwner, "invalidateOwner spy")).toHaveBeenCalledWith(
-          "acme",
-        );
+        expect(requireValue(invalidateOwner, "invalidateOwner spy")).toHaveBeenCalledWith("acme");
         expect(built.calls).toEqual([]);
         expect(built.log.debug).toHaveBeenCalledWith(
           { owner: "acme", repo: ".github-private", reason: "no-local-file" },
@@ -433,9 +409,7 @@ describeFeature(feature, ({ Scenario }) => {
           expect(body).toContain(
             "This is the baseline repository, sir, so it has been synced directly.",
           );
-          expect(body).toContain(
-            "Other repositories will adopt the change at their next event.",
-          );
+          expect(body).toContain("Other repositories will adopt the change at their next event.");
         },
       );
       And(`the comment does not claim every repository was re-synced`, () => {
@@ -454,9 +428,7 @@ describeFeature(feature, ({ Scenario }) => {
         existingRulesets: [],
         current: { has_issues: false },
       });
-      harness.request.mockRejectedValue(
-        httpError(403, "Resource not accessible by integration"),
-      );
+      harness.request.mockRejectedValue(httpError(403, "Resource not accessible by integration"));
     });
     When(`the sync runs and the outcome comment is built`, async () => {
       const built = requireValue(harness, "feedback harness");
@@ -467,39 +439,34 @@ describeFeature(feature, ({ Scenario }) => {
       const body = createdBody(built.createComment);
       expect(body).toContain("Failed:");
       expect(body).toMatch(/(?:^|\n)- rulesets: /);
-      expect(body).toContain(
-        "Forbidden applying rulesets: Resource not accessible by integration",
-      );
+      expect(body).toContain("Forbidden applying rulesets: Resource not accessible by integration");
     });
   });
 
-  Scenario(
-    `Nothing further to change`,
-    ({ Given, When, Then }) => {
-      let harness: ReturnType<typeof fakeHarness> | undefined;
+  Scenario(`Nothing further to change`, ({ Given, When, Then }) => {
+    let harness: ReturnType<typeof fakeHarness> | undefined;
 
-      Given(`a merged settings pull request whose settings were already fully applied`, () => {
-        harness = fakeHarness({
-          configInput: { repository: { has_issues: true } },
-          current: { has_issues: true },
-        });
+    Given(`a merged settings pull request whose settings were already fully applied`, () => {
+      harness = fakeHarness({
+        configInput: { repository: { has_issues: true } },
+        current: { has_issues: true },
       });
-      When(`the merged delivery is handled`, async () => {
+    });
+    When(`the merged delivery is handled`, async () => {
+      const built = requireValue(harness, "feedback harness");
+      await commentSettingsApplied(built.deps, built.scope, built.pr);
+    });
+    Then(
+      `the comment states the settings are in effect and nothing further needed changing`,
+      () => {
         const built = requireValue(harness, "feedback harness");
-        await commentSettingsApplied(built.deps, built.scope, built.pr);
-      });
-      Then(
-        `the comment states the settings are in effect and nothing further needed changing`,
-        () => {
-          const built = requireValue(harness, "feedback harness");
-          expect(built.calls).toEqual(["repos.get"]);
-          expect(createdBody(built.createComment)).toContain(
-            "The settings are in effect and nothing further needed changing.",
-          );
-        },
-      );
-    },
-  );
+        expect(built.calls).toEqual(["repos.get"]);
+        expect(createdBody(built.createComment)).toContain(
+          "The settings are in effect and nothing further needed changing.",
+        );
+      },
+    );
+  });
 
   Scenario(
     `The no-op wording is not used when branch protection was re-declared`,
@@ -521,59 +488,47 @@ describeFeature(feature, ({ Scenario }) => {
       });
       Then(`the comment lists the re-declared branch-protection update rows`, () => {
         const built = requireValue(harness, "feedback harness");
-        expect(createdBody(built.createComment)).toContain(
-          "- branch-protection update: main",
-        );
+        expect(createdBody(built.createComment)).toContain("- branch-protection update: main");
       });
       And(`the comment does not state that nothing further needed changing`, () => {
         const built = requireValue(harness, "feedback harness");
-        expect(createdBody(built.createComment)).not.toContain(
-          "nothing further needed changing",
-        );
+        expect(createdBody(built.createComment)).not.toContain("nothing further needed changing");
       });
     },
   );
 
-  Scenario(
-    `A dry run logs the outcome and writes nothing`,
-    ({ Given, When, Then, And }) => {
-      let harness: ReturnType<typeof fakeHarness> | undefined;
+  Scenario(`A dry run logs the outcome and writes nothing`, ({ Given, When, Then, And }) => {
+    let harness: ReturnType<typeof fakeHarness> | undefined;
 
-      Given(`a merged settings pull request while dry-run mode is on`, () => {
-        harness = fakeHarness({
-          configInput: { repository: { has_issues: true } },
-          current: { has_issues: false },
-          dryRun: true,
-        });
-        expect(harness.deps.dryRun).toBe(true);
+    Given(`a merged settings pull request while dry-run mode is on`, () => {
+      harness = fakeHarness({
+        configInput: { repository: { has_issues: true } },
+        current: { has_issues: false },
+        dryRun: true,
       });
-      When(`the merged delivery is handled`, async () => {
-        const built = requireValue(harness, "feedback harness");
-        await commentSettingsApplied(built.deps, built.scope, built.pr);
-      });
-      Then(`the decision and comment body are logged`, () => {
-        const built = requireValue(harness, "feedback harness");
-        // Reads still happen; every write is suppressed by performWrite.
-        expect(built.get).toHaveBeenCalled();
-        expect(built.update).not.toHaveBeenCalled();
+      expect(harness.deps.dryRun).toBe(true);
+    });
+    When(`the merged delivery is handled`, async () => {
+      const built = requireValue(harness, "feedback harness");
+      await commentSettingsApplied(built.deps, built.scope, built.pr);
+    });
+    Then(`the decision and comment body are logged`, () => {
+      const built = requireValue(harness, "feedback harness");
+      // Reads still happen; every write is suppressed by performWrite.
+      expect(built.get).toHaveBeenCalled();
+      expect(built.update).not.toHaveBeenCalled();
 
-        const logged = built.log.info.mock.calls
-          .map((call) => String(call[1]))
-          .join("\n");
-        expect(logged).toContain(SETTINGS_APPLIED_MARKER);
-        expect(logged).toContain(SIGN_OFF);
-      });
-      And(`GitHub receives no comment`, () => {
-        const built = requireValue(harness, "feedback harness");
-        expect(built.paginate).not.toHaveBeenCalledWith(
-          built.listComments,
-          expect.anything(),
-        );
-        expect(built.listComments).not.toHaveBeenCalled();
-        expect(built.createComment).not.toHaveBeenCalled();
-        expect(built.updateComment).not.toHaveBeenCalled();
-        expect(built.deleteComment).not.toHaveBeenCalled();
-      });
-    },
-  );
+      const logged = built.log.info.mock.calls.map((call) => String(call[1])).join("\n");
+      expect(logged).toContain(SETTINGS_APPLIED_MARKER);
+      expect(logged).toContain(SIGN_OFF);
+    });
+    And(`GitHub receives no comment`, () => {
+      const built = requireValue(harness, "feedback harness");
+      expect(built.paginate).not.toHaveBeenCalledWith(built.listComments, expect.anything());
+      expect(built.listComments).not.toHaveBeenCalled();
+      expect(built.createComment).not.toHaveBeenCalled();
+      expect(built.updateComment).not.toHaveBeenCalled();
+      expect(built.deleteComment).not.toHaveBeenCalled();
+    });
+  });
 });
