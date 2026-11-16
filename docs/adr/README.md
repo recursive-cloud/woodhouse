@@ -5,3 +5,5 @@ ADRs record decisions that shape how Woodhouse is built and must outlive the ses
 Decisions 0001 through 0007 predate this directory: they were in force before the 1.0 release. They are recorded here as Accepted so the reasoning is not rediscovered or reversed by accident.
 
 Format: status line, then Context (the forces at the time), Decision, and Consequences.
+
+[0008. Release Process](./0008-release-process.md) records the release process: release-please, least-privilege jobs, the App-minted token, image re-tagging and the manifest pins.
