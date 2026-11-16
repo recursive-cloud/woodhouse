@@ -14,6 +14,7 @@
 import express from "express";
 import { createServer, type Server as HttpServer } from "node:http";
 import { AppRegistry, loadAppDefinitions } from "./apps/registry.js";
+import { handleHealth } from "./health.js";
 import { ConfigurationError, loadEnv } from "./lib/env.js";
 import { createLogger } from "./lib/logger.js";
 import { handleWebhook } from "./webhook-route.js";
@@ -86,9 +87,7 @@ async function main(): Promise<void> {
     (req, res) => void handleWebhook(req, res, registry, log),
   );
 
-  server.get("/healthz", (_req, res) => {
-    res.status(200).json({ status: "ok", apps: registry.size });
-  });
+  server.get("/healthz", (req, res) => handleHealth(req, res, registry));
 
   const httpServer: HttpServer = createServer(server);
 
