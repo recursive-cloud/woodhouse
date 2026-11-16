@@ -10,7 +10,7 @@ settings pull requests.
 ## Requirements
 
 ### Requirement: Default-branch pushes trigger a settings sync
-A push to a repository's default branch SHALL trigger a settings sync for that repository — a re-check that writes nothing when the repository already matches its configuration, except two areas that converge by unconditional re-declaration with an idempotent update and are reported as applied on every pass: rulesets (GitHub's ruleset reads are normalised and cannot be compared against the planned body) and branch protection (the GET representation differs structurally from the PUT payload, so diffing is more error-prone than an idempotent write). Pushes to other branches and branch deletions MUST NOT trigger a sync.
+A push to a repository's default branch SHALL trigger a settings sync for that repository, subject to the gate in the next requirement — a re-check that writes nothing when the repository already matches its configuration, except two areas that converge by unconditional re-declaration with an idempotent update and are reported as applied on every pass: rulesets (GitHub's ruleset reads are normalised and cannot be compared against the planned body) and branch protection (the GET representation differs structurally from the PUT payload, so diffing is more error-prone than an idempotent write). Pushes to other branches and branch deletions MUST NOT trigger a sync.
 
 #### Scenario: Settings change lands on the default branch
 - **WHEN** a push to the default branch modifies `.github/woodhouse.yml`
@@ -29,12 +29,40 @@ A push to a repository's default branch SHALL trigger a settings sync for that r
 - **WHEN** a sync runs on a repository with `branchProtection` blocks configured, whether or not the protection already matches
 - **THEN** protection for each configured branch is re-PUT and a `branch-protection update` row is reported per branch, even when the content already matches
 
+### Requirement: A repository without its own settings file is never synced
+A settings sync SHALL run only when the repository's resolution includes its
+own local settings file — `.github/woodhouse.yml` or `.github/woodhouse.yaml`
+(the baseline repository's root `woodhouse.yml`/`woodhouse.yaml` count as its
+local file). The existence of that file is the signal that the repository
+accepts settings management; a repository without it is never synced and is
+offered onboarding instead. `settings.enabled` remains as a kill switch with an
+implicit default of true: an explicit `false` at any level of the cascade
+silences sync for that repository, and a repository-level `true` overrides a
+baseline `false`. A resolution that produced validation issues SHALL NOT sync.
+
+#### Scenario: No local settings file
+- **WHEN** a repository has no local settings file and the owner baseline resolves settings management on
+- **THEN** no sync runs for it, and it is offered onboarding instead
+
+#### Scenario: Baseline kill switch silences a local file
+- **WHEN** the owner baseline sets `settings.enabled: false` and the repository's local file does not set `enabled`
+- **THEN** no sync runs
+
+#### Scenario: Repository true overrides a baseline false
+- **WHEN** the owner baseline sets `settings.enabled: false` and the repository's local file sets `settings.enabled: true`
+- **THEN** the repository syncs
+
+#### Scenario: Invalid configuration fails closed
+- **WHEN** the cascade resolution produces validation issues
+- **THEN** no sync runs
+
 ### Requirement: Merged settings pull requests get an outcome comment
 When a pull request that changes any settings file — added, modified, or
 removed — merges into the default branch, Woodhouse SHALL sync the
 repository's settings and SHALL comment on that pull request reporting the
-apply outcome. Pull requests merged into other branches, or closed without
-merging, MUST NOT trigger a comment.
+apply outcome — but only when the merged resolution passes the file-presence
+and kill-switch gate above. Pull requests merged into other branches, or closed
+without merging, MUST NOT trigger a comment.
 
 #### Scenario: Settings pull request merges
 - **WHEN** a pull request changing `.github/woodhouse.yml` merges into the default branch
@@ -48,9 +76,9 @@ merging, MUST NOT trigger a comment.
 - **WHEN** a settings-changing pull request is closed without merging
 - **THEN** no comment is left
 
-#### Scenario: Deleting the settings file counts
+#### Scenario: Deleting the settings file ends management
 - **WHEN** a merged pull request deletes the repository's `.github/woodhouse.yml`
-- **THEN** the deletion is treated as a settings change and the outcome comment reports the resulting fallback
+- **THEN** the deletion is treated as a settings change, and because the local file is now absent the repository is no longer synced: no sync runs and no comment is left
 
 #### Scenario: Re-delivery does not duplicate
 - **WHEN** the merged event re-delivers for the same pull request
@@ -80,20 +108,27 @@ never writes a change without listing it.
 - **THEN** the outcome comment does not use the no-op wording; it lists the re-declared `branch-protection update` row(s)
 
 ### Requirement: Silence when settings management is disabled
-An outcome comment SHALL be left only when settings management is enabled
-for the repository in the merged configuration. When the merged pull request
-itself disables settings management, no sync and no comment SHALL follow.
+An outcome comment SHALL be left only when the merged resolution passes the
+gate: the repository carries its own local settings file, the resolved
+`settings.enabled` is not false, and the resolution produced no validation
+issues. An explicit `false` at any level of the cascade silences the
+repository. When the merged pull request itself disables settings management,
+no sync and no comment SHALL follow.
 
 #### Scenario: Pull request disables settings management
 - **WHEN** a merged pull request sets `settings.enabled: false`
+- **THEN** no settings sync runs and no comment is left
+
+#### Scenario: Baseline kill switch silences a local file
+- **WHEN** the owner baseline sets `settings.enabled: false` and the merged local file does not set `enabled`
 - **THEN** no settings sync runs and no comment is left
 
 ### Requirement: The baseline repository resolves its own configuration
 
 For the baseline repository, its own root baseline-shaped files
 (`woodhouse.yml`, `woodhouse.yaml`) SHALL be resolved as the repository's
-local configuration layer, so settings management can be enabled on the
-baseline repository itself. The baseline layer MUST NOT be fetched from the
+local configuration layer, so a root file opts the baseline repository itself
+into settings management. The baseline layer MUST NOT be fetched from the
 baseline repository into its own resolution — no file merges into itself.
 
 #### Scenario: Baseline repository merge syncs itself
