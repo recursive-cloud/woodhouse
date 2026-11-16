@@ -8,7 +8,7 @@
  * Three fake worlds live in this file because the three capabilities it spans
  * have different octokit surfaces:
  *
- *  - the onboarding walk (scenarios 1-12), a recording fake modelled on the one
+ *  - the onboarding walk (scenarios 1-12 and 15), a recording fake modelled on the one
  *    `test/onboarding-handler.test.ts` used;
  *  - the merge-feedback handler (scenario 13), a fake applier surface plus the
  *    issue-comment surface, with a literal resolver whose config has a local
@@ -628,7 +628,7 @@ describeFeature(feature, ({ Scenario }) => {
       `the App is newly installed with repository selection All and the delivery carries no repository list`,
       async () => {
         world = buildOnboarding({
-          accessibleRepos: [{ name: "alpha" }, { name: "beta" }],
+          accessibleRepos: [{ name: "alpha" }, { name: "" }, null, { name: "beta" }],
         });
         const payload = { action: "created" };
         expect(payload).not.toHaveProperty("installation");
@@ -650,6 +650,8 @@ describeFeature(feature, ({ Scenario }) => {
           "alpha",
           "beta",
         ]);
+        // The empty-name and null entries in the enumeration are dropped by the
+        // same filter the payload path uses.
         expect(addLabels).toHaveBeenCalledTimes(2);
       },
     );
