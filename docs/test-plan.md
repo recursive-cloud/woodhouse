@@ -33,7 +33,9 @@ Both must be included in the App installation, or the baseline cannot be read.
 # Owner-wide baseline for recursive-cloud.
 
 settings:
-  enabled: false        # phase 3 turns this on
+  # Kill switch. A repository opts in with its own local file; a local
+  # `settings.enabled: true` overrides this baseline `false`.
+  enabled: false
   pruneLabels: false
   pruneRulesets: false
 
@@ -70,6 +72,9 @@ autoApproval:
 Deliberately minimal, to prove the cascade is doing the work:
 
 ```yaml
+settings:
+  enabled: true         # the local file opts in; overrides the baseline kill switch
+
 repository:
   has_issues: false     # overrides the baseline's `true`
 
@@ -80,7 +85,9 @@ gatekeeper:
 
 Expected merge result: `has_wiki: false` and the label list inherited from the
 baseline, `has_issues: false` from the local override, `allowedActors:
-{owners: [gunzy83]}` inherited, and `ignoredChecks: [advisory]` local.
+{owners: [gunzy83]}` inherited, and `ignoredChecks: [advisory]` local. The
+local `settings.enabled: true` overrides the baseline's kill switch, so the
+phase 5 sync applies.
 
 ### `woodhouse-test` → `.github/workflows/ci.yml`
 
@@ -151,7 +158,7 @@ trace rather than an offer: that is the fail-closed edge, not this phase's targe
 The two repositories above are already configured, so they are skipped by design —
 the same skip reason as check 0.8.
 
-Phase 0 expects `LOG_LEVEL=debug`. The four settings-path probes surface through
+Phase 0 expects `LOG_LEVEL=debug`. The two `.github/` settings-path probes surface through
 Probot's request logging and the `Onboarding skipped` lines are `debug` entries,
 so at the documented default (`info`) the product looks dead while behaving
 correctly. The `DRY_RUN: would …` lines, the summary line and the 403 hint all
@@ -164,15 +171,15 @@ installation settings → *Repository access* → add it. That fires
 
 | # | Test | Action | Expected |
 | --- | --- | --- | --- |
-| 0.1 | Dry run shows the offer | Add the scratch repo with `DRY_RUN=true` | Logs show the four settings-path probes (each 404), then `DRY_RUN: would create branch woodhouse/onboarding`, `DRY_RUN: would commit .github/woodhouse.yml to woodhouse/onboarding` and `DRY_RUN: would open pull request "chore: onboard to Woodhouse"`, then one summary line carrying `branch`, `file`, `title` and `body`. **Verify GitHub shows no branch, commit or pull request** |
-| 0.2 | The offer is made | `DRY_RUN=false`, then re-fire the event (remove and re-add the repo, or redeliver from the App's *Advanced* tab) | PR `chore: onboard to Woodhouse` from `woodhouse/onboarding` adds `.github/woodhouse.yml` (`settings.enabled: true`, schema modeline) and carries the `woodhouse: onboarding` label |
+| 0.1 | Dry run shows the offer | Add the scratch repo with `DRY_RUN=true` | Logs show the two `.github/` settings-path probes (each 404), then `DRY_RUN: would create branch woodhouse/onboarding`, `DRY_RUN: would commit .github/woodhouse.yml to woodhouse/onboarding` and `DRY_RUN: would open pull request "chore: onboard to Woodhouse"`, then one summary line carrying `branch`, `file`, `title` and `body`. **Verify GitHub shows no branch, commit or pull request** |
+| 0.2 | The offer is made | `DRY_RUN=false`, then re-fire the event (remove and re-add the repo, or redeliver from the App's *Advanced* tab) | PR `chore: onboard to Woodhouse` from `woodhouse/onboarding` adds `.github/woodhouse.yml` (schema modeline and pointers) and carries the `woodhouse: onboarding` label |
 | 0.3 | The offer is validated by the product | Watch the PR's checks | `woodhouse/config` **passes** on the added file and `woodhouse/white-glove` goes green — the product validates its own onboarding pull request |
 | 0.4 | Nothing else runs | Watch the logs while the PR is open | No settings sync for the scratch repository; white-glove and config validation are the only activity |
 | 0.5 | Re-delivery is idempotent | Redeliver the installation event from the App's *Advanced* tab | No second branch, commit or pull request; one debug line `Onboarding skipped`, `reason: onboarding-pull-request-open` |
 | 0.6 | Closed without merging re-offers | Close the PR without merging, then re-fire the event | The existing `woodhouse/onboarding` branch is reused as-is (not rewritten) and a fresh PR opens from it |
-| 0.7 | Merging is the opt-in | Merge the onboarding PR | Settings sync runs for the scratch repository and leaves the outcome comment on the PR; management is on from then on |
+| 0.7 | Merging is the opt-in | Merge the onboarding PR, then set `settings.enabled: true` in the new local file and merge that change | The baseline kill switch is off, so the onboarding merge alone writes nothing; the repository-level `true` overrides it, the next merge runs the sync and leaves the outcome comment on that PR. Management is on from then on |
 | 0.8 | Already-configured skip | Re-fire the event with the settings file now on the default branch | Silent skip — one debug line `Onboarding skipped`, `reason: settings-file-present`. This is also why the two repositories above never get an offer |
-| 0.9 | All-repositories walk | (Optional) Install the App with *All repositories* | The delivery carries no repository list, so the walk enumerates the installation's accessible repositories and walks them: un-managed repositories get the onboarding offer (0.1–0.2), and ones the owner baseline already manages (no settings file of their own) log `Onboarding skipped`, `reason: baseline-managed`. Redelivering re-enumerates; the probes skip everything already handled |
+| 0.9 | All-repositories walk | (Optional) Install the App with *All repositories* | The delivery carries no repository list, so the walk enumerates the installation's accessible repositories and walks them: every repository without a local settings file gets the onboarding offer (0.1–0.2), regardless of the owner baseline's resolved settings. A baseline-enabled repository without a local file is still offered, and its sync only starts once its file merges. Redelivering re-enumerates; the probes skip everything already handled |
 | 0.10 | Restricted installation | Temporarily remove the installation's `Contents`/`Pull requests` write access and re-fire | The 403 hint log names both the read permissions and `contents: write`/`pull_requests: write`; the walk continues. Restore access — it takes effect on the next installation event |
 
 ## Phase 1 — lockdown and config resolution (`DRY_RUN=true`)
@@ -243,8 +250,10 @@ Verified live in the 2026-10-18 acceptance run (4.2–4.4).
 
 ## Phase 5 — settings sync (destructive; do this last)
 
-Set `settings.enabled: true` in the baseline, but go back to `DRY_RUN=true`
-first and read the intended changes before letting it write.
+The `woodhouse-test` local file sets `settings.enabled: true`, so it syncs
+despite the baseline's `false` kill switch (a repository-level `true` overrides
+it). Go back to `DRY_RUN=true` first and read the intended changes before
+letting it write.
 
 | # | Test | Action | Expected |
 | --- | --- | --- | --- |
@@ -267,7 +276,7 @@ first and read the intended changes before letting it write.
 | 5.17 | Feature-branch merge | Merge a settings PR into a feature branch | No sync, no comment |
 | 5.18 | Disabled on merge | Merge a PR setting `settings.enabled: false` | No sync, no comment; log only |
 | 5.19 | Merge push already applied | With `DRY_RUN=false`, merge a settings PR | Comment says the settings are in effect and nothing further needed changing |
-| 5.20 | Baseline merge | Merge a settings PR in `.github-private` | Comment states the baseline was synced directly and other repositories adopt the change at their next event |
+| 5.20 | Baseline merge | Merge a PR changing `.github-private`'s root `woodhouse.yml` | Without `.github/woodhouse.yml` in `.github-private`: no sync and no comment (gate `no-local-file`). With its own `.github/woodhouse.yml`: the comment states the baseline was synced directly and other repositories adopt the change at their next event |
 
 ## Phase 6 — end to end
 
@@ -301,9 +310,10 @@ findings are tracked as GitHub issues and pulled in separately:
   `branchProtection` block present the sync issues the PUT unconditionally, so
   a no-op merge never reaches the "nothing further needed changing" wording
   (#25).
-- **5.20 — the baseline repository resolves to defaults.** Its own root
-  `woodhouse.yml` is never read as its config, so a baseline merge posts no
-  merge comment (#26).
+- **5.20 — a baseline root merge no longer syncs the baseline repository by
+  itself.** Its root `woodhouse.yml` is the owner baseline, not a local file; the
+  baseline repository opts in with `.github/woodhouse.yml`. A root-only merge
+  produces no sync and no comment by design.
 - **2.9 — a red check can wear a "Waiting on…" title.** After a
   completed→pending PATCH GitHub keeps the old conclusion, so the old status
   and the new title disagree; fail-safe but visually odd (#27).
