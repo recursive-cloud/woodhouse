@@ -27,6 +27,7 @@
     "zod": "^4.6.4"
   },
   "devDependencies": {
+    "@amiceli/vitest-cucumber": "^4.7.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.5",
     "ajv": "^8.20.0",
