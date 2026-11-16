@@ -8,6 +8,13 @@ import {
 import { SCHEMA_MODELINE } from "../src/config/json-schema.js";
 
 describe("validateDocument", () => {
+  it("reports a schema error with kind schema", () => {
+    const verdict = validateDocument("woodhouse.yml", "gatekeeper:\n  enabled: definitely\n");
+    expect(verdict.ok).toBe(false);
+    if (verdict.ok) return;
+    expect(verdict.kind).toBe("schema");
+  });
+
   it("reports invalid YAML", () => {
     const verdict = validateDocument("woodhouse.yml", "foo: [unclosed\n");
     expect(verdict.ok).toBe(false);

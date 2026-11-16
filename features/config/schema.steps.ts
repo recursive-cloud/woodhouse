@@ -46,8 +46,12 @@ interface SchemaCheck {
   readonly output: string;
 }
 
-interface CorpusVerdict {
+interface CorpusEntry {
   readonly doc: unknown;
+  readonly expectValid: boolean;
+}
+
+interface CorpusVerdict extends CorpusEntry {
   readonly schema: boolean;
   readonly runtime: boolean;
 }
@@ -123,7 +127,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
   });
 
   Scenario(`Parity corpus`, ({ Given, When, Then }) => {
-    let corpus: unknown[] | undefined;
+    let corpus: CorpusEntry[] | undefined;
     let verdicts: CorpusVerdict[] | undefined;
 
     Given(
@@ -133,29 +137,36 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
           readFileSync(join(PROJECT_ROOT, "woodhouse.example.yml"), "utf8"),
         );
         corpus = [
-          {},
-          example,
-          { gatekeper: {} },
-          { autoApproval: { allowedActor: ["me"] } },
+          { doc: {}, expectValid: true },
+          { doc: example, expectValid: true },
+          { doc: { gatekeper: {} }, expectValid: false },
+          { doc: { autoApproval: { allowedActor: ["me"] } }, expectValid: false },
           {
-            autoApproval: {
-              allowedActors: { owners: ["my-user"], bots: ["renovate[bot]"] },
+            doc: {
+              autoApproval: {
+                allowedActors: { owners: ["my-user"], bots: ["renovate[bot]"] },
+              },
             },
+            expectValid: true,
           },
-          { autoApproval: { allowedActors: { bots: ["org/team"] } } },
-          { autoApproval: { allowedActors: ["renovate[bot]"] } },
-          { gatekeeper: { enabled: "yes" } },
-          { gatekeeper: { gracePeriodSeconds: 99999 } },
-          { gatekeeper: { strictChecks: ["build"] } },
-          { repository: { private: true } },
-          { repository: { archived: true } },
+          {
+            doc: { autoApproval: { allowedActors: { bots: ["org/team"] } } },
+            expectValid: false,
+          },
+          { doc: { autoApproval: { allowedActors: ["renovate[bot]"] } }, expectValid: false },
+          { doc: { gatekeeper: { enabled: "yes" } }, expectValid: false },
+          { doc: { gatekeeper: { gracePeriodSeconds: 99999 } }, expectValid: false },
+          { doc: { gatekeeper: { strictChecks: ["build"] } }, expectValid: true },
+          { doc: { repository: { private: true } }, expectValid: false },
+          { doc: { repository: { archived: true } }, expectValid: false },
         ];
       },
     );
     When(`the corpus runs through the published schema and the runtime validator`, () => {
       if (corpus === undefined) throw new Error("The corpus has not been built yet.");
-      verdicts = corpus.map((doc) => ({
+      verdicts = corpus.map(({ doc, expectValid }) => ({
         doc,
+        expectValid,
         schema: validate(doc) as boolean,
         runtime: parseConfig(doc).ok,
       }));
@@ -164,10 +175,31 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       if (verdicts === undefined) throw new Error("The corpus has not run yet.");
 
       expect(verdicts.length).toBeGreaterThan(0);
+      expect(verdicts.some((verdict) => verdict.expectValid)).toBe(true);
+      expect(verdicts.some((verdict) => !verdict.expectValid)).toBe(true);
+
       const disagreements = verdicts.filter((verdict) => verdict.schema !== verdict.runtime);
       expect(
         disagreements,
         `schema and runtime disagree: ${JSON.stringify(disagreements)}`,
+      ).toEqual([]);
+
+      // Agreement alone would pass if both rejected the shipped example, so
+      // the documents the corpus declares valid must be accepted by both.
+      const unexpectedRejections = verdicts
+        .filter((verdict) => verdict.expectValid && (!verdict.schema || !verdict.runtime))
+        .map((verdict) => verdict.doc);
+      expect(
+        unexpectedRejections,
+        `corpus documents expected valid were rejected: ${JSON.stringify(unexpectedRejections)}`,
+      ).toEqual([]);
+
+      const unexpectedAcceptances = verdicts
+        .filter((verdict) => !verdict.expectValid && verdict.schema !== false)
+        .map((verdict) => verdict.doc);
+      expect(
+        unexpectedAcceptances,
+        `corpus documents expected invalid were accepted: ${JSON.stringify(unexpectedAcceptances)}`,
       ).toEqual([]);
     });
   });

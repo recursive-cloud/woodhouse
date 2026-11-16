@@ -497,6 +497,14 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     });
     Then(`the existing comment is updated in place, never duplicated`, () => {
       if (capture === undefined) throw new Error("The configuration validation has not run yet.");
+      expect(capture.listComments).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: OWNER,
+          repo: REPO,
+          issue_number: PR_NUMBER,
+          per_page: 100,
+        }),
+      );
       expect(capture.updateComment).toHaveBeenCalledOnce();
       expect(capture.updateComment).toHaveBeenCalledWith(
         expect.objectContaining({ comment_id: 42 }),
