@@ -18,8 +18,10 @@
 # entirely rather than merging with it.
 
 settings:
-  # Off by default. Nothing is written to repository settings until this is
-  # explicitly turned on.
+  # A repository opts into settings management by carrying its own
+  # `.github/woodhouse.yml`. `enabled` is a kill switch that defaults to on:
+  # set it to `false` to silence sync for the repository. A baseline `false`
+  # silences every repository unless its own file explicitly sets `true`.
   enabled: true
 
   # Delete labels that exist on the repository but are absent here. Leave off

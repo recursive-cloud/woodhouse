@@ -160,9 +160,9 @@ repository added to an existing installation (`installation_repositories.added`)
 both trigger the onboarding walk: for each newly installed repository Woodhouse
 opens a pull request — branch `woodhouse/onboarding`, title
 `chore: onboard to Woodhouse`, label `woodhouse: onboarding` — that adds
-`.github/woodhouse.yml` with the schema modeline, `settings.enabled: true`, and
-pointers to the schema and `woodhouse.example.yml`. That is the whole starter
-configuration; everything else stays at its schema default.
+`.github/woodhouse.yml` with the schema modeline, and pointers to the schema and
+`woodhouse.example.yml`. That is the whole starter configuration; everything
+else stays at its schema default.
 
 The walk is stateless — every decision is read from GitHub's current state, not
 remembered:
@@ -202,14 +202,13 @@ Two things worth knowing:
   *All repositories* delivers an enumerated
   `installation_repositories.added` event, walked the same way; if a burst of
   onboarding pull requests is not wanted, do that flip under `DRY_RUN=true`. A
-  repository that already has a settings file is skipped, as is one whose
-  resolved configuration — defaults plus the owner baseline — has
-  `settings.enabled: true`; the baseline's repositories therefore get no second
-  offer. The walk runs on the delivery's response path, so a large installation
-  can outlive GitHub's ~10s redelivery window. A redelivered delivery
-  re-enumerates and walks again, but the same probes absorb it — settings file,
-  baseline-managed skip, open onboarding pull request, branch existence — so
-  nothing is duplicated.
+  repository that already has a settings file is skipped. A repository without
+  one receives the offer even when the owner baseline enables settings
+  management: the file is the per-repository opt-in. The walk runs on the
+  delivery's response path, so a large installation can outlive GitHub's ~10s
+  redelivery window. A redelivered delivery re-enumerates and walks again, but
+  the same probes absorb it — settings file, open onboarding pull request,
+  branch existence — so nothing is duplicated.
 - **A restricted installation is reported, not guessed at.** If a read or write
   is refused, the walk logs that reads need the installation's read permissions
   and writes need `contents: write` and `pull_requests: write`, then continues
