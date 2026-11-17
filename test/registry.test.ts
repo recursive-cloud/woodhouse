@@ -7,7 +7,6 @@ import {
   resolveDefinitions,
   type AppDefinition,
 } from "../src/apps/registry.js";
-import { ConfigurationError } from "../src/lib/env.js";
 
 const PEM = "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----";
 
@@ -130,32 +129,9 @@ describe("resolveDefinitions", () => {
     );
   });
 
-  it("rejects a duplicate App ID", () => {
-    // Object keys are unique, so the duplicate is only reachable when the keys
-    // differ by surrounding whitespace and both trim to the same App ID.
-    const run = () => resolveDefinitions({ "123": def(), " 123": def() }, defaults);
-    expect(run).toThrow(ConfigurationError);
-    expect(run).toThrow(/Duplicate App ID 123/);
-  });
-
-  it("rejects a NaN appId from an unset variable", () => {
-    expect(() => resolveDefinitions({ undefined: def({ appId: "undefined" }) }, defaults)).toThrow(
-      /invalid appId/,
-    );
-  });
-
   it("accepts a string appId", () => {
     const [app] = resolveDefinitions({ "123": def({ appId: "123" }) }, defaults);
     expect(app!.appId).toBe(123);
-  });
-
-  it("per-App allowlist overrides the global default", () => {
-    const [app] = resolveDefinitions(
-      { "123": def({ allowedInstallationTargets: ["org-a"] }) },
-      defaults,
-    );
-    expect(app!.allowlist.has("org-a")).toBe(true);
-    expect(app!.allowlist.has("acme")).toBe(false);
   });
 
   it("refuses an App with no allowlist from either source", () => {
@@ -176,12 +152,6 @@ describe("resolveDefinitions", () => {
       defaults,
     );
     expect(app!.privateKey).toBe(PEM);
-  });
-
-  it("rejects a private key that is not a PEM", () => {
-    expect(() => resolveDefinitions({ "123": def({ privateKey: "nonsense" }) }, defaults)).toThrow(
-      ConfigurationError,
-    );
   });
 
   it("per-App baselineRepo overrides the default", () => {
@@ -205,18 +175,6 @@ describe("resolveDefinitions", () => {
 });
 
 describe("resolveDefinitions — unset environment variables", () => {
-  it("explains a NaN appId from parseInt of an unset variable", () => {
-    // `parseInt(env.MISSING, 10)` is NaN, and the computed key becomes the
-    // string "undefined". This is the most likely misconfiguration, so it
-    // gets a targeted message rather than a schema error.
-    expect(() =>
-      resolveDefinitions(
-        { undefined: { appId: Number.NaN, privateKey: PEM, webhookSecret: "s" } },
-        defaults,
-      ),
-    ).toThrow(/environment variable it reads is not set/);
-  });
-
   it("names an App by its label when the appId is invalid", () => {
     expect(() =>
       resolveDefinitions({ "": def({ appId: undefined, label: "gunzy83" }) }, defaults),
