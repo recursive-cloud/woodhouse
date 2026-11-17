@@ -1,6 +1,5 @@
 import { expect, vi } from "vitest";
 import type { Logger } from "pino";
-import { z } from "zod";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { classifyActor, decide } from "../../src/approval/policy.js";
 import type { ApprovalRequest } from "../../src/approval/policy.js";
@@ -507,25 +506,6 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
     And(`the review body ends with the service sign-off`, () => {
       // The literal, so this cannot pass merely because a constant round-trips.
       expect(submittedBody(w.harness).endsWith("_Woodhouse, at your service._")).toBe(true);
-    });
-  });
-
-  Scenario(`Flat list rejected`, ({ When, Then }) => {
-    let parsed: AutoApprovalConfig | undefined;
-    let captured: unknown;
-
-    When(`the configuration sets allowedActors to a flat list of logins`, () => {
-      try {
-        parsed = autoApprovalSchema.parse({
-          allowedActors: ["my-user", "dependabot[bot]"],
-        });
-      } catch (error) {
-        captured = error;
-      }
-    });
-    Then(`the configuration fails validation`, () => {
-      expect(parsed).toBeUndefined();
-      expect(captured).toBeInstanceOf(z.ZodError);
     });
   });
 

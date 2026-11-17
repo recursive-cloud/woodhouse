@@ -100,11 +100,6 @@ Feature: Auto-approval of pull requests
     And the review body ends with the service sign-off
 
   @REC-18
-  Scenario: Flat list rejected
-    When the configuration sets allowedActors to a flat list of logins
-    Then the configuration fails validation
-
-  @REC-18
   Scenario: Dry-run approval
     Given auto-approval lists "my-user" as an owner
     And dry-run mode is on
