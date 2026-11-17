@@ -30,28 +30,28 @@ export const ONBOARDING_FILE_PATH = ".github/woodhouse.yml";
 /**
  * The starter configuration.
  *
- * A repository's first configuration: the schema modeline, guidance pointing at
- * the schema and the example, and `settings.enabled: true`. Nothing else —
- * every other section stays at its schema default, so the file says only what
- * the operator must decide to opt in.
+ * A repository's first configuration: the schema modeline and guidance
+ * pointing at the schema and the example. No settings section at all — the
+ * file's presence is the opt-in signal, and `settings.enabled` defaults on, so
+ * naming it would add nothing the schema does not already say.
  */
 export const ONBOARDING_TEMPLATE = `${SCHEMA_MODELINE}
 
 # Woodhouse — starter configuration.
 #
-# This file switches settings management on for this repository. Merging the
-# pull request that added it is the whole opt-in; until then Woodhouse writes
-# nothing here.
+# This file is how a repository opts into settings management: its presence on
+# the default branch is the consent signal, and merging the pull request that
+# added it is the whole opt-in. Until then Woodhouse writes no settings here.
 #
-# Everything not named below stays at its schema default. The schema is linked
-# from the modeline above, and a fully commented example lives in the
-# Woodhouse repository as \`woodhouse.example.yml\`.
+# Everything stays at its schema default. The schema is linked from the
+# modeline above, and a fully commented example lives in the Woodhouse
+# repository as \`woodhouse.example.yml\`.
+#
+# \`settings.enabled\` is a kill switch that defaults to on. Set it to \`false\`
+# to silence settings sync for this repository.
 #
 # Edit freely: Woodhouse reads this file from the default branch whenever it
 # changes, and reports what it did on the pull request.
-
-settings:
-  enabled: true
 `;
 
 /**
@@ -59,9 +59,8 @@ settings:
  * wording, and it ends with the shared sign-off.
  *
  * It has to answer three questions — what Woodhouse does, what merging this
- * enables, and how to edit it — and, because an offer only goes to a repository
- * the resolution found unmanaged, it says so: the check happened, and a local
- * file is how a repository records its own consent.
+ * enables, and how to edit it — and it explains that a local file is how a
+ * repository records its own consent while inheriting the owner baseline.
  */
 export const ONBOARDING_PR_BODY = `## An invitation
 
@@ -73,13 +72,13 @@ Woodhouse keeps repository settings, labels, branch protection, rulesets and aut
 
 ## What this pull request means
 
-- It adds \`.github/woodhouse.yml\` with \`settings.enabled: true\`.
-- Until it merges, Woodhouse writes nothing here — white-glove and configuration validation stay live, and they are what validated this very pull request.
-- Merging switches management on, and the settings sync reports its work as a comment on this pull request.
+- It adds \`.github/woodhouse.yml\`.
+- Until it merges, Woodhouse writes no settings here — white-glove and configuration validation stay live, and they are what validated this very pull request.
+- Merging opts this repository in, and the settings sync reports its work as a comment on this pull request.
 
 ## A note on baselines
 
-Woodhouse has checked the owner-level \`.github-private\` configuration, and this repository is not yet managed there. A local file is how a repository records its own consent, and it overrides anything inherited.
+The owner-level \`.github-private\` configuration is inherited and merged underneath this repository's file. A local file is how the repository records its own consent, and anything it sets overrides what it inherits.
 
 ## Editing the file
 
