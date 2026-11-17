@@ -35,4 +35,4 @@ The maintainer's agents plan in the Linear project woodhouse (P-REC-2), implemen
 - Commits follow Conventional Commits (`feat:`, `fix:`, `chore:`, …) — release-please will derive the changelog from them.
 - Running the server needs `.env` credentials (`.env.example`); `DRY_RUN=true` evaluates and logs every decision without writing to GitHub — `docs/test-plan.md` walks through validating an install end to end.
 - `TODO.md` is the live backlog — its "Accepted tradeoffs" section exists so they aren't rediscovered as bugs; read it before "fixing" one.
-- Gherkin scenarios are the spec of record after the openspec purge; every feature PR updates the scenarios it changes in the same PR.
+- Gherkin scenarios are the spec of record; every feature PR updates the scenarios it changes in the same PR.
