@@ -6,7 +6,7 @@ Status: Accepted
 
 Woodhouse ships as a container image and a self-hosted deployment. The version an operator runs must trace to a commit that passed CI, and the changelog must say what changed for them. Version bumps, tag creation and manifest edits done by hand drift and fail silently.
 
-Release behaviour is not client-observable application behaviour. It runs in GitHub Actions, not in the webhook server, so Gherkin acceptance tests cannot observe a workflow tag or a manifest pin. The process therefore needs a written record here rather than scenarios under `features/`. This ADR supersedes `openspec/specs/releases/spec.md`; the openspec purge (REC-23) removes that spec, leaving this ADR as the record of the release process.
+Release behaviour is not client-observable application behaviour. It runs in GitHub Actions, not in the webhook server, so Gherkin acceptance tests cannot observe a workflow tag or a manifest pin. The process therefore needs a written record here rather than scenarios under `features/`. This ADR supersedes the release-process spec maintained by the retired spec-change workflow; the purge (REC-23) removed that spec, and this ADR stands as the record of the release process.
 
 ## Decision
 
