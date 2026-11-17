@@ -22,10 +22,10 @@ import {
   type Comment,
   SETTINGS_FILE,
   asMergeFeedbackOctokit,
-  fakeResolver,
   httpError,
   makeOctokit,
-} from "./fakes.js";
+} from "./octokit-fakes.js";
+import { fakeResolver } from "./resolver-fakes.js";
 import { fakeLogger } from "../support/scenario.js";
 
 const feature = await loadFeature("features/settings-sync/merge-feedback.feature");

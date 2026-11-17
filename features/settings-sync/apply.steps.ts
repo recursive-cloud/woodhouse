@@ -14,17 +14,10 @@ import { createApp } from "../../src/app.js";
 import { Allowlist } from "../../src/security/allowlist.js";
 import { type ApplyContext, syncSettings } from "../../src/settings/apply.js";
 import type { ResolvedConfig } from "../../src/config/resolver.js";
-import {
-  type Gate,
-  OPEN_GATE,
-  closedContext,
-  fakeProbot,
-  makeOctokit,
-  manualGate,
-  pushContext,
-  resolvedConfig,
-  settle,
-} from "./fakes.js";
+import { type Gate, OPEN_GATE, manualGate, settle } from "./concurrency.js";
+import { makeOctokit } from "./octokit-fakes.js";
+import { closedContext, fakeProbot, pushContext } from "./probot-fakes.js";
+import { resolvedConfig } from "./resolver-fakes.js";
 import { fakeLogger, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/settings-sync/apply.feature");
