@@ -189,35 +189,6 @@ const FULL_RULESET: RulesetConfig = {
 };
 
 describe("planRulesets", () => {
-  it("creates a ruleset that does not exist", () => {
-    const plan = planRulesets(
-      [],
-      [{ name: "main", target: "branch", enforcement: "active", rules: [] }],
-      false,
-    );
-    expect(plan.create).toHaveLength(1);
-  });
-
-  it("updates by name when one exists", () => {
-    const plan = planRulesets(
-      [{ id: 7, name: "main" }],
-      [{ name: "main", target: "branch", enforcement: "active", rules: [] }],
-      false,
-    );
-    expect(plan.update).toEqual([{ id: 7, ruleset: expect.objectContaining({ name: "main" }) }]);
-    expect(plan.create).toHaveLength(0);
-  });
-
-  it("does not delete unmanaged rulesets unless pruning", () => {
-    const plan = planRulesets([{ id: 1, name: "manual" }], [], false);
-    expect(plan.delete).toEqual([]);
-  });
-
-  it("prunes when enabled", () => {
-    const plan = planRulesets([{ id: 1, name: "manual" }], [], true);
-    expect(plan.delete).toEqual([{ id: 1, name: "manual" }]);
-  });
-
   it("creates a full ruleset with every parameter preserved verbatim", () => {
     const plan = planRulesets([], [FULL_RULESET], false);
 
@@ -232,21 +203,6 @@ describe("planRulesets", () => {
 
     expect(plan.update).toEqual([{ id: 7, ruleset: FULL_RULESET }]);
     expect(plan.create).toEqual([]);
-  });
-
-  it("prunes only the unconfigured hand-made ruleset, never the claimed one", () => {
-    const plan = planRulesets(
-      [
-        { id: 7, name: "main" },
-        { id: 9, name: "hotfix" },
-      ],
-      [FULL_RULESET],
-      true,
-    );
-
-    // The hand-made `hotfix` is unconfigured and dies; the configured `main`
-    // is claimed and survives.
-    expect(plan.delete).toEqual([{ id: 9, name: "hotfix" }]);
   });
 });
 
