@@ -21,6 +21,41 @@ export function readCell(variables: ScenarioVariables, key: string): string {
   return value;
 }
 
+/**
+ * The value an earlier step built, or a plain failure when a step ran out of
+ * order. Steps hold their world in a mutable local, so every reader guards it.
+ */
+export function requireBuilt<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+/**
+ * Mirrors octokit's pagination: call the route once per page until a short page.
+ * The `per_page` fallback of 100 is the fakes' historical behaviour, not the
+ * REST API default (30): these scenarios list well under 100 rows, so one page
+ * is always short and the loop stops after a single call.
+ */
+export function paginateFake() {
+  return vi.fn(
+    async (
+      route: (params: Record<string, unknown>) => Promise<{ data: unknown[] }>,
+      params: Record<string, unknown>,
+    ) => {
+      const perPage = (params.per_page as number | undefined) ?? 100;
+      const out: unknown[] = [];
+      for (let page = 1; ; page += 1) {
+        const { data } = await route({ ...params, page });
+        out.push(...data);
+        if (data.length < perPage) break;
+      }
+      return out;
+    },
+  );
+}
+
 type LogSpy = ReturnType<typeof vi.fn>;
 
 /**

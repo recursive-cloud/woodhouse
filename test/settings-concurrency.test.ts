@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { Allowlist } from "../src/security/allowlist.js";
-import {
-  closedContext,
-  fakeProbot,
-  makeOctokit,
-  manualGate,
-  OPEN_GATE,
-  pushContext,
-  settle,
-} from "../features/settings-sync/fakes.js";
+import { makeOctokit } from "../features/settings-sync/octokit-fakes.js";
+import { OPEN_GATE, manualGate, settle } from "../features/settings-sync/concurrency.js";
+import { closedContext, fakeProbot, pushContext } from "../features/settings-sync/probot-fakes.js";
 
 /**
  * App-level concurrency characterisation.

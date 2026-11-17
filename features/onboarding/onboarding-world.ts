@@ -17,7 +17,6 @@
  */
 
 import { vi } from "vitest";
-import { woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { ReconcileDeps } from "../../src/gatekeeper/handler.js";
 import type { ChangedFile } from "../../src/github/pulls.js";
 import { KeyedMutex } from "../../src/lib/mutex.js";
@@ -27,10 +26,11 @@ import type { MergeFeedbackDeps } from "../../src/settings/mergeFeedback.js";
 import {
   RULESETS_ROUTE,
   asMergeFeedbackOctokit,
-  fakeResolver,
   httpError,
   makeOctokit,
-} from "../settings-sync/fakes.js";
+} from "../settings-sync/octokit-fakes.js";
+import { gatekeeperDeps } from "../gatekeeper/gatekeeper-world.js";
+import { fakeResolver } from "../settings-sync/resolver-fakes.js";
 import { fakeLogger } from "../support/scenario.js";
 
 /* -------------------------------------------------------------------------
@@ -310,10 +310,10 @@ function emptyStub() {
 }
 
 /** A settings-applier stub that records the method name it stands in for. */
-function applierStub(applierCalls: string[], method: string, data: Record<string, unknown> = {}) {
+function applierStub(applierCalls: string[], method: string, data?: Record<string, unknown>) {
   return vi.fn(async () => {
     applierCalls.push(method);
-    return { data };
+    return { data: data ?? {} };
   });
 }
 
@@ -389,20 +389,7 @@ function fakeChecksOctokit() {
 
 export function buildChecksWorld() {
   const fake = fakeChecksOctokit();
-  const log = fakeLogger();
-  const config = woodhouseConfigSchema.parse({ gatekeeper: { enabled: true } });
-  const resolver = {
-    // No local layer: the un-onboarded repository, whose settings sync must
-    // stay silent while the white-glove check still runs.
-    resolve: vi.fn(async () => ({ config, sources: [], issues: [] })),
-  } as unknown as ReconcileDeps["resolver"];
-
-  const deps: ReconcileDeps = {
-    octokit: fake.octokit,
-    resolver,
-    log,
-    dryRun: false,
-  };
+  const { deps, log } = gatekeeperDeps(fake.octokit);
 
   return { ...fake, log, deps };
 }
