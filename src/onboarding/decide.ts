@@ -5,17 +5,17 @@
  * `gatekeeper/evaluate.ts`: every skip path is a plain fact about the input and
  * can be unit-tested without touching GitHub.
  *
- * Onboarding is repo-local consent. A repository that already carries any
- * settings file has deliberately configured itself (or is the baseline
- * repository, which always carries a root `woodhouse.yml`), one with an open
- * onboarding pull request has already been offered, and one the resolved
- * owner-level configuration already manages needs no invitation at all. Only a
- * repository with none of those is offered a pull request.
+ * Onboarding is repo-local consent. A repository that already carries a local
+ * `.github/woodhouse.yml` or `.yaml` has deliberately configured itself, and one
+ * with an open onboarding pull request has already been offered. Only a
+ * repository with neither is offered a pull request. A root baseline file does
+ * not count as local consent, even on the baseline repository. The file's
+ * presence is the consent signal; nothing about the resolved configuration is
+ * consulted.
  *
  * The probe result is plain data assembled by the handler. The handler derives
- * `configPresent` from the four settings paths in `config/paths.ts` — the two
- * `.github/` locals and the two root-level baselines — so the set of paths that
- * counts as "already configured" is defined in exactly one place.
+ * `configPresent` from the two `.github/` paths in `config/paths.ts`, so the set
+ * of paths that counts as "already configured" is defined in exactly one place.
  */
 
 /** One installed repository, as identified by the installation event. */
@@ -39,20 +39,8 @@ export interface OnboardingRepository {
  *   duplicate branch, commit, or pull request.
  */
 export interface OnboardingProbe {
-  /** True when any of the four settings paths already exists in the repository. */
+  /** True when either `.github/` settings path already exists in the repository. */
   readonly configPresent: boolean;
-  /**
-   * True when the repository's resolved configuration — schema defaults plus
-   * the owner baseline, resolved by the handler because no local file exists —
-   * already has `settings.enabled: true`. Such a repository is managed without
-   * a local file, so an offer would invite a redundant second opt-in.
-   *
-   * `undefined` means not managed: call sites that predate this field leave it
-   * unset, and their behavior is unchanged. The handler always populates it
-   * (and skips unresolvable candidates before deciding), so `undefined` at the
-   * decision layer is the unmanaged default, never "unknown".
-   */
-  readonly managed?: boolean;
   readonly openOnboardingPr?: boolean;
 }
 
@@ -62,7 +50,6 @@ export interface OnboardingProbe {
  */
 export type OnboardingSkipReason =
   | "settings-file-present"
-  | "baseline-managed"
   | "onboarding-pull-request-open"
   | "pull-request-state-unprobed";
 
@@ -94,13 +81,7 @@ export function shouldOnboard(
     return { onboard: false, repository, reason: "settings-file-present" };
   }
 
-  // Managed through the owner baseline: the repository already inherits settings
-  // management, so it needs no local opt-in — and the pull-request probe is
-  // skipped entirely, leaving that field unprobed.
-  if (probe.managed === true) {
-    return { onboard: false, repository, reason: "baseline-managed" };
-  }
-
+  // An offer already exists: no second invitation.
   if (probe.openOnboardingPr === true) {
     return { onboard: false, repository, reason: "onboarding-pull-request-open" };
   }

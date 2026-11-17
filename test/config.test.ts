@@ -57,6 +57,7 @@ describe("config schema", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.gatekeeper.enabled).toBe(true);
+    expect(result.config.settings.enabled).toBe(true);
     expect(result.config.gatekeeper.strictChecks).toEqual([]);
     expect(result.config.autoApproval.protectedPaths).toContain(".github/woodhouse.yml");
   });

@@ -75,11 +75,13 @@ function makeOctokit(
   /** The live repository state `repos.get` reports, so a test can choose a
    * repository that already matches the configured `has_issues: true`. */
   current: { has_issues: boolean } = { has_issues: false },
+  /** Whether the repository carries `.github/woodhouse.yml`. */
+  hasLocalConfig = true,
 ): Record<string, unknown> {
   const push = (call: string) => calls.push(`${label}:${call}`);
 
   const getContent = vi.fn(async ({ repo, path }: { repo: string; path: string }) => {
-    if (repo === "widgets" && path === ".github/woodhouse.yml") {
+    if (hasLocalConfig && repo === "widgets" && path === ".github/woodhouse.yml") {
       const body = "settings:\n  enabled: true\nrepository:\n  has_issues: true\n";
       return {
         data: {
@@ -302,6 +304,30 @@ describe("push dispatch negative cases", () => {
 
     // The default-branch check refuses before the sync, so no applier call at
     // all — the same-repository race test's batch assertion needs no change.
+    expect(calls).toEqual([]);
+  });
+
+  it("does not sync a repository with no local settings file", async () => {
+    const { app, deliver } = fakeProbot();
+    const calls: string[] = [];
+
+    createApp({
+      allowlist: new Allowlist(["trusted-org"]),
+      baselineRepo: ".github-private",
+      dryRun: false,
+    })(app);
+
+    // No local layer: the repository never opted in, so the implicit enabled
+    // default must not start a sync.
+    await deliver(
+      "push",
+      pushContext(
+        makeOctokit("push", calls, OPEN_GATE, { has_issues: false }, false),
+        "refs/heads/main",
+        ["docs/woodhouse.yml"],
+      ),
+    );
+
     expect(calls).toEqual([]);
   });
 

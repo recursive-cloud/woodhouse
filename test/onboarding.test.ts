@@ -36,24 +36,24 @@ describe("ONBOARDING_TEMPLATE", () => {
     expect(ONBOARDING_TEMPLATE.startsWith(SCHEMA_MODELINE)).toBe(true);
   });
 
-  it("is exactly the modeline, its guidance, and settings.enabled", () => {
+  it("is exactly the modeline and its guidance", () => {
     const expected = `${SCHEMA_MODELINE}
 
 # Woodhouse — starter configuration.
 #
-# This file switches settings management on for this repository. Merging the
-# pull request that added it is the whole opt-in; until then Woodhouse writes
-# nothing here.
+# This file is how a repository opts into settings management: its presence on
+# the default branch is the consent signal, and merging the pull request that
+# added it is the whole opt-in. Until then Woodhouse writes no settings here.
 #
-# Everything not named below stays at its schema default. The schema is linked
-# from the modeline above, and a fully commented example lives in the
-# Woodhouse repository as \`woodhouse.example.yml\`.
+# Everything stays at its schema default. The schema is linked from the
+# modeline above, and a fully commented example lives in the Woodhouse
+# repository as \`woodhouse.example.yml\`.
+#
+# \`settings.enabled\` is a kill switch that defaults to on. Set it to \`false\`
+# to silence settings sync for this repository.
 #
 # Edit freely: Woodhouse reads this file from the default branch whenever it
 # changes, and reports what it did on the pull request.
-
-settings:
-  enabled: true
 `;
 
     expect(ONBOARDING_TEMPLATE).toBe(expected);
@@ -66,9 +66,10 @@ settings:
     expect(result.ok).toBe(true);
   });
 
-  it("carries only settings.enabled and nothing else", () => {
-    // Starter config: every other section stays at its schema default.
-    expect(yaml.load(ONBOARDING_TEMPLATE)).toEqual({ settings: { enabled: true } });
+  it("carries no configuration keys at all", () => {
+    // File presence is the opt-in; `settings.enabled` defaults on, so the
+    // starter file needs no settings section.
+    expect(yaml.load(ONBOARDING_TEMPLATE)).toBeNull();
   });
 
   it("points at the schema and the example", () => {
@@ -89,13 +90,13 @@ Woodhouse keeps repository settings, labels, branch protection, rulesets and aut
 
 ## What this pull request means
 
-- It adds \`.github/woodhouse.yml\` with \`settings.enabled: true\`.
-- Until it merges, Woodhouse writes nothing here — white-glove and configuration validation stay live, and they are what validated this very pull request.
-- Merging switches management on, and the settings sync reports its work as a comment on this pull request.
+- It adds \`.github/woodhouse.yml\`.
+- Until it merges, Woodhouse writes no settings here — white-glove and configuration validation stay live, and they are what validated this very pull request.
+- Merging opts this repository in, and the settings sync reports its work as a comment on this pull request.
 
 ## A note on baselines
 
-Woodhouse has checked the owner-level \`.github-private\` configuration, and this repository is not yet managed there. A local file is how a repository records its own consent, and it overrides anything inherited.
+The owner-level \`.github-private\` configuration is inherited and merged underneath this repository's file. A local file is how the repository records its own consent, and anything it sets overrides what it inherits.
 
 ## Editing the file
 
@@ -112,14 +113,13 @@ ${SIGN_OFF}`;
     expect(ONBOARDING_PR_BODY).toMatch(/^- /m);
   });
 
-  it("says the repository was resolved as not yet managed by the baseline", () => {
-    // D4: an offer exists only because resolution said settings.enabled is not
-    // true, so the body states the check happened rather than warning that the
-    // repository may already be managed.
+  it("explains that the local file records consent and inherits the baseline", () => {
     expect(ONBOARDING_PR_BODY).toContain("owner-level `.github-private` configuration");
-    expect(ONBOARDING_PR_BODY).toContain("not yet managed");
+    expect(ONBOARDING_PR_BODY).toContain("inherited and merged");
     expect(ONBOARDING_PR_BODY).toContain("records its own consent");
-    expect(ONBOARDING_PR_BODY).not.toContain("may already inherit");
+    // No management check happens, so the body must not claim one did.
+    expect(ONBOARDING_PR_BODY).not.toContain("not yet managed");
+    expect(ONBOARDING_PR_BODY).not.toContain("has checked");
   });
 });
 
@@ -172,44 +172,5 @@ describe("shouldOnboard", () => {
     // Cannot confirm no offer exists; a duplicate is worse than no offer.
     const decision = shouldOnboard(repository, { configPresent: false });
     expect(decision).toMatchObject({ onboard: false, reason: "pull-request-state-unprobed" });
-  });
-
-  it("skips a repository the resolved baseline already manages", () => {
-    expect(shouldOnboard(repository, probe({ managed: true }))).toEqual({
-      onboard: false,
-      repository,
-      reason: "baseline-managed",
-    });
-  });
-
-  it("offers when the resolved baseline does not manage the repository", () => {
-    expect(shouldOnboard(repository, probe({ managed: false }))).toEqual({
-      onboard: true,
-      repository,
-      reason: "no-settings-file",
-    });
-  });
-
-  it("treats an unset managed field as not managed", () => {
-    // Call sites that predate the field leave it undefined; behavior is unchanged.
-    const decision = shouldOnboard(repository, { configPresent: false, openOnboardingPr: false });
-    expect(decision).toEqual({ onboard: true, repository, reason: "no-settings-file" });
-  });
-
-  it("skips a managed repository before the pull-request probe", () => {
-    // A managed repository skips without paying for the PR search, so the field
-    // is unprobed; the management skip must not fall through to fail-closed.
-    const decision = shouldOnboard(repository, { configPresent: false, managed: true });
-    expect(decision).toMatchObject({ onboard: false, reason: "baseline-managed" });
-  });
-
-  it("prefers the managed skip when an onboarding pull request is also open", () => {
-    const decision = shouldOnboard(repository, probe({ managed: true, openOnboardingPr: true }));
-    expect(decision).toMatchObject({ onboard: false, reason: "baseline-managed" });
-  });
-
-  it("prefers the settings-file skip over the managed skip", () => {
-    const decision = shouldOnboard(repository, probe({ configPresent: true, managed: true }));
-    expect(decision).toMatchObject({ onboard: false, reason: "settings-file-present" });
   });
 });
