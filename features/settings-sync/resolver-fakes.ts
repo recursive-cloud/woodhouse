@@ -14,6 +14,20 @@ import type { MergeFeedbackResolver } from "../../src/settings/mergeFeedback.js"
 
 const LOCAL_SOURCE = "acme/widgets:.github/woodhouse.yml";
 
+/** A `vi.fn` that records its name first, then runs `impl`. */
+function recorded<Args extends unknown[], Result>(
+  calls: string[],
+  name: string,
+  impl: (...args: Args) => Result,
+) {
+  return vi.fn((...args: Args) => {
+    calls.push(name);
+    return impl(...args);
+  });
+}
+
+const noop = () => undefined;
+
 /** A resolution carrying a local layer unless overridden. */
 export function resolvedConfig(
   configInput?: Record<string, unknown>,
@@ -49,16 +63,9 @@ export function fakeResolver(
 
   const resolver: MergeFeedbackResolver = {
     isBaselineRepo: vi.fn((_repo: string) => false),
-    invalidate: vi.fn((_owner: string, _repo: string) => {
-      calls.push("invalidate");
-    }),
-    invalidateOwner: vi.fn((_owner: string) => {
-      calls.push("invalidateOwner");
-    }),
-    resolve: vi.fn(async () => {
-      calls.push("resolve");
-      return resolved;
-    }),
+    invalidate: recorded(calls, "invalidate", noop),
+    invalidateOwner: recorded(calls, "invalidateOwner", noop),
+    resolve: recorded(calls, "resolve", async () => resolved),
   };
 
   return { resolver, calls, config, resolved };

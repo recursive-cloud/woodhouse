@@ -27,6 +27,34 @@ export function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
 }
 
+/** The call log a fake applier writes through. */
+type CallLog = (call: string) => void;
+
+/** The call-log writer: `label:call` when a label is supplied, `call` otherwise. */
+function recorder(calls: string[], label?: string): CallLog {
+  return (call) => {
+    calls.push(label === undefined ? call : `${label}:${call}`);
+  };
+}
+
+/** An empty REST payload the appliers never read past. */
+const emptyPayload = async () => ({ data: {} });
+
+/**
+ * A `vi.fn` that records its call name, then delegates to `impl`. The name may
+ * be derived from the call's arguments, for route-shaped calls.
+ */
+function recorded<Args extends unknown[], Result>(
+  record: CallLog,
+  name: string | ((...args: Args) => string),
+  impl: (...args: Args) => Result,
+) {
+  return vi.fn((...args: Args) => {
+    record(typeof name === "function" ? name(...args) : name);
+    return impl(...args);
+  });
+}
+
 /**
  * Serves the config cascade to a real `ConfigResolver`. Keyed `repo:path`,
  * 404ing everything else, exactly as the Contents API does.
@@ -129,43 +157,21 @@ export function makeOctokit(options?: OctokitOptions) {
     calls: providedCalls,
   } = options ?? {};
   const calls = providedCalls ?? [];
+  const record = recorder(calls, label);
 
-  const record = (call: string) => {
-    calls.push(label === undefined ? call : `${label}:${call}`);
-  };
-
-  const get = vi.fn(async () => {
-    record("repos.get");
+  const get = recorded(record, "repos.get", async () => {
     if (gate?.claim()) await gate.promise;
     return { data: { ...current } };
   });
   const getContent = makeGetContent(configFiles);
-  const update = vi.fn(async () => {
-    record("repos.update");
-    return { data: {} };
-  });
-  const replaceAllTopics = vi.fn(async () => {
-    record("repos.replaceAllTopics");
-    return { data: {} };
-  });
-  const updateBranchProtection = vi.fn(async () => {
-    record("repos.updateBranchProtection");
-    return { data: {} };
-  });
+  const update = recorded(record, "repos.update", emptyPayload);
+  const replaceAllTopics = recorded(record, "repos.replaceAllTopics", emptyPayload);
+  const updateBranchProtection = recorded(record, "repos.updateBranchProtection", emptyPayload);
 
   const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
-  const createLabel = vi.fn(async () => {
-    record("issues.createLabel");
-    return { data: {} };
-  });
-  const updateLabel = vi.fn(async () => {
-    record("issues.updateLabel");
-    return { data: {} };
-  });
-  const deleteLabel = vi.fn(async () => {
-    record("issues.deleteLabel");
-    return { data: {} };
-  });
+  const createLabel = recorded(record, "issues.createLabel", emptyPayload);
+  const updateLabel = recorded(record, "issues.updateLabel", emptyPayload);
+  const deleteLabel = recorded(record, "issues.deleteLabel", emptyPayload);
 
   const listFiles = vi.fn(async () => ({ data: [...files] }));
 
@@ -187,10 +193,7 @@ export function makeOctokit(options?: OctokitOptions) {
     return [];
   });
 
-  const request = vi.fn(async (route: string) => {
-    record(`request ${route}`);
-    return { data: {} };
-  });
+  const request = recorded(record, (route: string) => `request ${route}`, emptyPayload);
 
   const octokit: RecordingOctokit = {
     repos: { get, getContent, update, replaceAllTopics, updateBranchProtection },

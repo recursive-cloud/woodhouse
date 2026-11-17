@@ -280,10 +280,10 @@ export interface CommentParams {
 export function buildMergeWorld() {
   const octokit = makeOctokit({ files: [ONBOARDING_CHANGED_FILE] });
   const log = fakeLogger();
-  const { resolver } = fakeResolver({
-    settings: { enabled: true, pruneRulesets: true },
-    repository: { has_issues: true },
-  });
+  const { resolver } = fakeResolver(
+    { settings: { enabled: true, pruneRulesets: true }, repository: { has_issues: true } },
+    {},
+  );
 
   const deps: MergeFeedbackDeps = {
     octokit: asMergeFeedbackOctokit(octokit.octokit),
