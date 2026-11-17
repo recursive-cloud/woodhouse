@@ -130,6 +130,14 @@ describe("resolveDefinitions", () => {
     );
   });
 
+  it("rejects a duplicate App ID", () => {
+    // Object keys are unique, so the duplicate is only reachable when the keys
+    // differ by surrounding whitespace and both trim to the same App ID.
+    const run = () => resolveDefinitions({ "123": def(), " 123": def() }, defaults);
+    expect(run).toThrow(ConfigurationError);
+    expect(run).toThrow(/Duplicate App ID 123/);
+  });
+
   it("rejects a NaN appId from an unset variable", () => {
     expect(() => resolveDefinitions({ undefined: def({ appId: "undefined" }) }, defaults)).toThrow(
       /invalid appId/,
