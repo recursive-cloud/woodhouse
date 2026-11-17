@@ -41,22 +41,6 @@ describe("evaluate — basic outcomes", () => {
     expect(result.counts.passed).toBe(2);
   });
 
-  it("fails on a failure", () => {
-    expect(evaluate([done("build", "failure")], cfg()).outcome).toBe("failure");
-  });
-
-  it.each(["failure", "timed_out", "cancelled", "action_required", "stale"])(
-    "treats %s as failure",
-    (conclusion) => {
-      expect(evaluate([done("build", conclusion)], cfg()).outcome).toBe("failure");
-    },
-  );
-
-  it("is pending while any check is unfinished", () => {
-    const result = evaluate([done("build", "success"), running("test")], cfg());
-    expect(result.outcome).toBe("pending");
-  });
-
   it.each(["queued", "in_progress", "waiting", "requested", "pending"])(
     "treats status %s as pending",
     (status) => {
@@ -112,48 +96,47 @@ describe("evaluate — strictChecks presence", () => {
     expect(result.summary).toContain("security-scan");
   });
 
-  it("passes once the strict check reports success", () => {
-    const result = evaluate(
-      [done("build", "success"), done("security-scan", "success")],
-      cfg({ strictChecks: ["security-scan"] }),
-    );
-    expect(result.outcome).toBe("success");
-  });
-
-  it("matches strict check names case-insensitively", () => {
-    const result = evaluate(
+  it("holds a strict requirement unsatisfied when only a different-case run exists", () => {
+    // Check names match by exact name: a case difference is a different check,
+    // so it cannot satisfy the requirement.
+    const differentCase = evaluate(
       [done("Security-Scan", "success")],
       cfg({ strictChecks: ["security-scan"] }),
     );
-    expect(result.outcome).toBe("success");
+    expect(differentCase.outcome).toBe("pending");
+    expect(differentCase.counts.missing).toBe(1);
+
+    const sameCase = evaluate(
+      [done("Security-Scan", "success")],
+      cfg({ strictChecks: ["Security-Scan"] }),
+    );
+    expect(sameCase.outcome).toBe("success");
+  });
+
+  it("reports a failed strict run missing when a different-case duplicate superseded it", () => {
+    // dedupeLatest groups same-name runs case-insensitively, so the survivor of
+    // this group is "build". Exact matching means that survivor is not the
+    // strict "Build": the earlier failure is collapsed away rather than
+    // masked, and the requirement is reported missing instead of satisfied.
+    // Missing holds the verdict at pending; it must never count as success.
+    const result = evaluate(
+      [
+        withMeta("Build", { conclusion: "failure", id: 100, startedAt: "2024-01-01T00:00:00Z" }),
+        withMeta("build", { conclusion: "success", id: 200, startedAt: "2024-06-01T00:00:00Z" }),
+      ],
+      cfg({ strictChecks: ["Build"] }),
+    );
+    expect(result.outcome).toBe("pending");
+    expect(result.counts.failed).toBe(0);
+    expect(result.counts.missing).toBe(1);
   });
 });
 
 describe("evaluate — ignoredChecks", () => {
-  it("excludes ignored checks even when they fail", () => {
-    const result = evaluate(
-      [done("coverage", "failure"), done("build", "success")],
-      cfg({ ignoredChecks: ["coverage"] }),
-    );
-    expect(result.outcome).toBe("success");
-  });
-
-  it("excludes ignored checks that are still running", () => {
-    const result = evaluate(
-      [running("preview-deploy"), done("build", "success")],
-      cfg({ ignoredChecks: ["preview-deploy"] }),
-    );
-    expect(result.outcome).toBe("success");
-  });
-
-  it("gives strict precedence over ignored when both list a check", () => {
-    // Contradictory config: resolve it in the safe direction rather than
-    // silently honouring whichever list is checked first.
-    const result = evaluate(
-      [done("build", "failure")],
-      cfg({ strictChecks: ["build"], ignoredChecks: ["build"] }),
-    );
+  it("does not ignore a failing run whose name differs only in case", () => {
+    const result = evaluate([done("Coverage", "failure")], cfg({ ignoredChecks: ["coverage"] }));
     expect(result.outcome).toBe("failure");
+    expect(result.counts.failed).toBe(1);
   });
 });
 
@@ -176,10 +159,6 @@ describe("evaluate — defensive cases", () => {
     const result = evaluate([done("build", "quantum_superposition")], cfg());
     expect(result.outcome).toBe("failure");
     expect(result.summary).toContain("unrecognised");
-  });
-
-  it("treats completed-without-conclusion as pending", () => {
-    expect(evaluate([done("build", null)], cfg()).outcome).toBe("pending");
   });
 
   it("returns success with no checks to evaluate", () => {

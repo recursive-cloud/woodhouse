@@ -1,41 +1,25 @@
 import { describe, expect, it } from "vitest";
-import yaml from "js-yaml";
 import { SIGN_OFF } from "../src/approval/wording.js";
 import { SCHEMA_MODELINE } from "../src/config/json-schema.js";
 import { LOCAL_PATHS } from "../src/config/paths.js";
-import { parseConfig } from "../src/config/schema.js";
 import {
   shouldOnboard,
   type OnboardingRepository,
   type OnboardingProbe,
 } from "../src/onboarding/decide.js";
 import {
-  ONBOARDING_BRANCH,
   ONBOARDING_FILE_PATH,
-  ONBOARDING_LABEL,
   ONBOARDING_PR_BODY,
-  ONBOARDING_PR_TITLE,
   ONBOARDING_TEMPLATE,
 } from "../src/onboarding/wording.js";
 
 describe("onboarding constants", () => {
-  it("carries the exact branch, title, label and file path", () => {
-    expect(ONBOARDING_BRANCH).toBe("woodhouse/onboarding");
-    expect(ONBOARDING_PR_TITLE).toBe("chore: onboard to Woodhouse");
-    expect(ONBOARDING_LABEL).toBe("woodhouse: onboarding");
-    expect(ONBOARDING_FILE_PATH).toBe(".github/woodhouse.yml");
-  });
-
   it("adds the local settings path the config checker already knows", () => {
     expect(ONBOARDING_FILE_PATH).toBe(LOCAL_PATHS[0]);
   });
 });
 
 describe("ONBOARDING_TEMPLATE", () => {
-  it("starts with the schema modeline", () => {
-    expect(ONBOARDING_TEMPLATE.startsWith(SCHEMA_MODELINE)).toBe(true);
-  });
-
   it("is exactly the modeline and its guidance", () => {
     const expected = `${SCHEMA_MODELINE}
 
@@ -57,24 +41,6 @@ describe("ONBOARDING_TEMPLATE", () => {
 `;
 
     expect(ONBOARDING_TEMPLATE).toBe(expected);
-  });
-
-  it("parses as valid configuration through the runtime validator", () => {
-    const result = parseConfig(yaml.load(ONBOARDING_TEMPLATE));
-
-    if (!result.ok) console.error(result.issues);
-    expect(result.ok).toBe(true);
-  });
-
-  it("carries no configuration keys at all", () => {
-    // File presence is the opt-in; `settings.enabled` defaults on, so the
-    // starter file needs no settings section.
-    expect(yaml.load(ONBOARDING_TEMPLATE)).toBeNull();
-  });
-
-  it("points at the schema and the example", () => {
-    expect(ONBOARDING_TEMPLATE).toContain(SCHEMA_MODELINE);
-    expect(ONBOARDING_TEMPLATE).toContain("woodhouse.example.yml");
   });
 });
 

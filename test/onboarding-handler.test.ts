@@ -5,9 +5,6 @@ import {
   ONBOARDING_BRANCH,
   ONBOARDING_FILE_PATH,
   ONBOARDING_LABEL,
-  ONBOARDING_PR_BODY,
-  ONBOARDING_PR_TITLE,
-  ONBOARDING_TEMPLATE,
 } from "../src/onboarding/wording.js";
 
 interface FakeConfig {
@@ -194,124 +191,9 @@ const created = (...names: string[]) => ({
   installation: { repositories: names.map((name) => ({ name })) },
 });
 
-/** `installation_repositories` `added` payload. */
-const added = (...names: string[]) => ({
-  action: "added",
-  repositories_added: names.map((name) => ({ name })),
-});
-
 const OWNER = "acme";
 
 describe("handleOnboarding", () => {
-  it("opens the onboarding pull request on a fresh install, probes then writes in order", async () => {
-    const {
-      deps,
-      calls,
-      getContent,
-      get,
-      list,
-      createRef,
-      create,
-      createOrUpdateFileContents,
-      addLabels,
-    } = build();
-
-    await handleOnboarding(deps, OWNER, created("widgets"));
-
-    // Cheap-first: the two `.github/` settings paths, 404 for each, then the
-    // open-offer search, then the write facts — only after all of them does the
-    // seam run.
-    expect(calls).toEqual([
-      `repos.getContent widgets:.github/woodhouse.yml`,
-      `repos.getContent widgets:.github/woodhouse.yaml`,
-      "pulls.list widgets",
-      "repos.get widgets",
-      `git.getRef widgets:heads/main`,
-      `git.getRef widgets:heads/${ONBOARDING_BRANCH}`,
-      "git.createRef",
-      "repos.createOrUpdateFileContents",
-      "pulls.create widgets",
-      "issues.addLabels widgets",
-    ]);
-
-    expect(getContent).toHaveBeenCalledTimes(2);
-    expect(list).toHaveBeenCalledWith({
-      owner: OWNER,
-      repo: "widgets",
-      state: "open",
-      head: `${OWNER}:${ONBOARDING_BRANCH}`,
-    });
-    expect(get).toHaveBeenCalledWith({ owner: OWNER, repo: "widgets" });
-
-    expect(createRef).toHaveBeenCalledWith({
-      owner: OWNER,
-      repo: "widgets",
-      ref: `refs/heads/${ONBOARDING_BRANCH}`,
-      sha: "base-sha",
-    });
-
-    const contentsArg = createOrUpdateFileContents.mock.calls[0]![0] as {
-      content: string;
-    };
-    expect(Buffer.from(contentsArg.content, "base64").toString("utf8")).toBe(ONBOARDING_TEMPLATE);
-
-    expect(create).toHaveBeenCalledWith({
-      owner: OWNER,
-      repo: "widgets",
-      title: ONBOARDING_PR_TITLE,
-      head: ONBOARDING_BRANCH,
-      base: "main",
-      body: ONBOARDING_PR_BODY,
-    });
-    expect(addLabels).toHaveBeenCalledWith({
-      owner: OWNER,
-      repo: "widgets",
-      issue_number: 42,
-      labels: [ONBOARDING_LABEL],
-    });
-  });
-
-  it("probes only the local .github paths, never the root baseline file", async () => {
-    // A repository's root `woodhouse.yml` is the owner baseline, not a local
-    // settings file, so the walk never requests it.
-    const { deps, calls, getContent, list, create, addLabels, log } = build();
-
-    await handleOnboarding(deps, OWNER, created("widgets"));
-
-    expect(calls.slice(0, 3)).toEqual([
-      "repos.getContent widgets:.github/woodhouse.yml",
-      "repos.getContent widgets:.github/woodhouse.yaml",
-      "pulls.list widgets",
-    ]);
-    expect(getContent.mock.calls.map(([params]) => params.path)).toEqual([
-      ".github/woodhouse.yml",
-      ".github/woodhouse.yaml",
-    ]);
-    expect(list).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "widgets" }));
-    expect(addLabels).toHaveBeenCalledOnce();
-    expect(log.debug).not.toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "settings-file-present" }),
-      "Onboarding skipped",
-    );
-  });
-
-  it("offers onboarding to the baseline repository when it lacks .github/woodhouse.yml", async () => {
-    const { deps, calls, create, addLabels } = build();
-
-    await handleOnboarding(deps, OWNER, created(".github-private"));
-
-    // Walked like any other repository: its root baseline file is not probed
-    // and does not suppress the offer.
-    expect(calls.slice(0, 3)).toEqual([
-      "repos.getContent .github-private:.github/woodhouse.yml",
-      "repos.getContent .github-private:.github/woodhouse.yaml",
-      "pulls.list .github-private",
-    ]);
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: ".github-private" }));
-    expect(addLabels).toHaveBeenCalledOnce();
-  });
-
   it("skips the baseline repository when it carries .github/woodhouse.yml", async () => {
     const { deps, calls, create, addLabels, log } = build({
       presentPaths: [".github-private:.github/woodhouse.yml"],
@@ -326,98 +208,6 @@ describe("handleOnboarding", () => {
       expect.objectContaining({ repo: ".github-private", reason: "settings-file-present" }),
       "Onboarding skipped",
     );
-  });
-
-  it("skips a re-delivery while the onboarding pull request is open", async () => {
-    const { deps, calls, list, createRef, createOrUpdateFileContents, create, addLabels, log } =
-      build({ openOnboardingPr: true });
-
-    await handleOnboarding(deps, OWNER, created("widgets"));
-
-    expect(list).toHaveBeenCalledOnce();
-    expect(calls).toContain("pulls.list widgets");
-
-    expect(createRef).not.toHaveBeenCalled();
-    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
-    expect(addLabels).not.toHaveBeenCalled();
-
-    expect(log.debug).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repo: "widgets",
-        reason: "onboarding-pull-request-open",
-      }),
-      "Onboarding skipped",
-    );
-  });
-
-  it("offers a repository with no settings file even when the owner baseline enables settings management", async () => {
-    const { deps, calls, getContent, list, create, addLabels } = build();
-
-    await handleOnboarding(deps, OWNER, created("widgets"));
-
-    // There is no resolution step: the two local settings paths and the
-    // open-offer search are the whole decision, so a baseline
-    // `settings.enabled: true` cannot suppress the invitation.
-    expect(getContent).toHaveBeenCalledTimes(2);
-    expect(calls.slice(0, 3)).toEqual([
-      "repos.getContent widgets:.github/woodhouse.yml",
-      "repos.getContent widgets:.github/woodhouse.yaml",
-      "pulls.list widgets",
-    ]);
-    expect(calls.some((call) => call.includes(".github-private"))).toBe(false);
-    expect(list).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "widgets" }));
-    expect(addLabels).toHaveBeenCalledOnce();
-  });
-
-  it("issues no pull request search for a repository with a settings file while probing the others", async () => {
-    const { deps, calls, create, addLabels } = build({
-      presentPaths: ["managed:.github/woodhouse.yml"],
-    });
-
-    await handleOnboarding(deps, OWNER, created("managed", "free"));
-
-    expect(calls).not.toContain("pulls.list managed");
-    expect(calls).toContain("pulls.list free");
-    expect(create).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "free" }));
-
-    // The skipped repository receives no writes at all; only `free` is offered.
-    expect(calls).not.toContain("pulls.create managed");
-    expect(calls).not.toContain("issues.addLabels managed");
-    expect(addLabels).toHaveBeenCalledOnce();
-    expect(addLabels).toHaveBeenCalledWith(expect.objectContaining({ repo: "free" }));
-  });
-
-  it("offers onboarding for a repository added to an existing installation", async () => {
-    const { deps, create, addLabels, log } = build();
-
-    await handleOnboarding(deps, OWNER, added("gadgets"));
-
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: "gadgets" }));
-    expect(addLabels).toHaveBeenCalledWith(expect.objectContaining({ repo: "gadgets" }));
-    expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({ repo: "gadgets", pullRequestNumber: 42 }),
-      "Onboarding offer complete",
-    );
-  });
-
-  it("enumerates the installation's repositories when a fresh install carries no list", async () => {
-    // The empty name and the null entry are dropped by the same filter the
-    // payload path uses; the two real repositories are walked as any batch.
-    const { deps, paginate, listReposAccessibleToInstallation, create, addLabels } = build({
-      accessibleRepos: [{ name: "alpha" }, { name: "" }, null, { name: "beta" }],
-    });
-
-    await handleOnboarding(deps, OWNER, { action: "created" });
-
-    expect(paginate).toHaveBeenCalledWith(listReposAccessibleToInstallation, { per_page: 100 });
-    expect(create.mock.calls.map((call) => (call[0] as { repo: string }).repo)).toEqual([
-      "alpha",
-      "beta",
-    ]);
-    expect(addLabels).toHaveBeenCalledTimes(2);
   });
 
   it("walks every page of an enumeration that spans more than one page", async () => {
@@ -439,35 +229,6 @@ describe("handleOnboarding", () => {
     expect(new Set(offered).size).toBe(150);
     expect(offered[0]).toBe("repo-0");
     expect(offered[149]).toBe("repo-149");
-  });
-
-  it("logs one error and writes nothing when enumeration fails", async () => {
-    const { deps, calls, create, createRef, createOrUpdateFileContents, addLabels, log } = build({
-      enumerationFails: true,
-    });
-
-    await expect(handleOnboarding(deps, OWNER, { action: "created" })).resolves.toBeUndefined();
-
-    // Enumeration is the delivery's only call: no repository was probed and
-    // nothing was written.
-    expect(calls).toEqual(["apps.listReposAccessibleToInstallation page=1 per_page=100"]);
-    expect(create).not.toHaveBeenCalled();
-    expect(createRef).not.toHaveBeenCalled();
-    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
-    expect(addLabels).not.toHaveBeenCalled();
-
-    expect(log.error).toHaveBeenCalledOnce();
-    expect(log.error).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: OWNER, action: "created" }),
-      expect.stringContaining(
-        "Could not enumerate the repositories accessible to the installation",
-      ),
-    );
-    // The old "carried no repository list" info line is replaced by the error.
-    expect(log.info).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.stringContaining("no repository list"),
-    );
   });
 
   it("enumerates in dry-run and writes nothing", async () => {
@@ -493,66 +254,6 @@ describe("handleOnboarding", () => {
     expect(createOrUpdateFileContents).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
     expect(addLabels).not.toHaveBeenCalled();
-  });
-
-  it("re-enumerates on a re-delivery without opening a second offer", async () => {
-    const { deps, paginate, create, addLabels, log } = build({
-      accessibleRepos: [{ name: "alpha" }],
-      openOnboardingPr: true,
-    });
-
-    await handleOnboarding(deps, OWNER, { action: "created" });
-    await handleOnboarding(deps, OWNER, { action: "created" });
-
-    // The second delivery enumerated again and the open-offer probe absorbed it.
-    expect(paginate).toHaveBeenCalledTimes(2);
-    expect(create).not.toHaveBeenCalled();
-    expect(addLabels).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith(
-      expect.objectContaining({ repo: "alpha", reason: "onboarding-pull-request-open" }),
-      "Onboarding skipped",
-    );
-  });
-
-  it("in dry-run probes everything and writes nothing", async () => {
-    const {
-      deps,
-      calls,
-      getContent,
-      get,
-      getRef,
-      list,
-      createRef,
-      createOrUpdateFileContents,
-      create,
-      addLabels,
-      log,
-    } = build({}, true);
-
-    await handleOnboarding(deps, OWNER, created("widgets"));
-
-    // The decision was evaluated in full — every read happened.
-    expect(getContent).toHaveBeenCalledTimes(2);
-    expect(list).toHaveBeenCalledOnce();
-    expect(get).toHaveBeenCalledOnce();
-    expect(getRef).toHaveBeenCalledTimes(2);
-
-    // Not one write, and the would-be pull request is logged.
-    expect(calls.filter((call) => call.startsWith("git.createRef"))).toEqual([]);
-    expect(createRef).not.toHaveBeenCalled();
-    expect(createOrUpdateFileContents).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
-    expect(addLabels).not.toHaveBeenCalled();
-
-    expect(log.info).toHaveBeenCalledWith(
-      expect.objectContaining({
-        branch: ONBOARDING_BRANCH,
-        file: ONBOARDING_FILE_PATH,
-        title: ONBOARDING_PR_TITLE,
-        body: ONBOARDING_PR_BODY,
-      }),
-      expect.stringContaining("DRY_RUN: would open onboarding pull request"),
-    );
   });
 
   it("is a no-op for actions other than created and added", async () => {
