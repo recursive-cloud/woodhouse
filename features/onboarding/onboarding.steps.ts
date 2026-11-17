@@ -24,7 +24,6 @@ import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import yaml from "js-yaml";
 import { SCHEMA_MODELINE } from "../../src/config/json-schema.js";
 import { parseConfig, woodhouseConfigSchema } from "../../src/config/schema.js";
-import type { ResolvedConfig } from "../../src/config/resolver.js";
 import { WHITE_GLOVE_CHECK_NAME } from "../../src/gatekeeper/constants.js";
 import { reconcile, type ReconcileDeps } from "../../src/gatekeeper/handler.js";
 import type { ChangedFile } from "../../src/github/pulls.js";
@@ -43,6 +42,7 @@ import {
   commentSettingsApplied,
   type MergeFeedbackDeps,
 } from "../../src/settings/mergeFeedback.js";
+import { fakeResolver, makeOctokit } from "../settings-sync/fakes.js";
 import { fakeLogger } from "../support/scenario.js";
 
 const feature = await loadFeature("features/onboarding/onboarding.feature");
@@ -253,11 +253,6 @@ const ONBOARDING_CHANGED_FILE: ChangedFile = {
   status: "added",
 };
 
-interface Comment {
-  id: number;
-  body?: string;
-}
-
 interface CommentParams {
   owner: string;
   repo: string;
@@ -266,144 +261,25 @@ interface CommentParams {
 }
 
 /**
- * Fake octokit for the merge-feedback path: the changed-file listing, the
- * applier surface a sync touches, and the issue-comment surface. Applier calls
- * are recorded in `calls`; the comment surface is returned separately so the
- * two assertions never interfere.
+ * The merge-feedback world reuses the shared recording octokit and resolver
+ * fakes. The resolution carries a local layer (the merged onboarding file is
+ * the opt-in), and `pruneRulesets` makes the rulesets applier read GitHub's
+ * list, which is how the scenario observes that the sync ran past the
+ * repository applier.
  */
-function fakeMergeOctokit(
-  files: readonly ChangedFile[] = [ONBOARDING_CHANGED_FILE],
-  comments: readonly Comment[] = [],
-) {
-  const calls: string[] = [];
-
-  const listFiles = vi.fn(async () => ({ data: [...files] }));
-
-  const get = vi.fn(async () => {
-    calls.push("repos.get");
-    return { data: { has_issues: false } };
-  });
-  const update = vi.fn(async () => {
-    calls.push("repos.update");
-    return { data: {} };
-  });
-  const replaceAllTopics = vi.fn(async () => {
-    calls.push("repos.replaceAllTopics");
-    return { data: {} };
-  });
-  const updateBranchProtection = vi.fn(async () => {
-    calls.push("repos.updateBranchProtection");
-    return { data: {} };
-  });
-
-  const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
-  const createLabel = vi.fn(async () => {
-    calls.push("issues.createLabel");
-    return { data: {} };
-  });
-  const updateLabel = vi.fn(async () => {
-    calls.push("issues.updateLabel");
-    return { data: {} };
-  });
-  const deleteLabel = vi.fn(async () => {
-    calls.push("issues.deleteLabel");
-    return { data: {} };
-  });
-
-  const listComments = vi.fn(async () => ({ data: [...comments] }));
-  const createComment = vi.fn(async (_params: CommentParams) => ({ data: { id: 1 } }));
-  const updateComment = vi.fn(async (_params: CommentParams & { comment_id: number }) => ({
-    data: { id: 1 },
-  }));
-  const deleteComment = vi.fn(async () => ({ data: {} }));
-
-  // Comments, changed files and rulesets each paginate a different target,
-  // while labels paginate the `listLabelsForRepo` method.
-  const paginate = vi.fn(async (target: unknown) => {
-    if (target === listComments) return [...comments];
-    if (target === listFiles) return [...files];
-    if (target === RULESETS_ROUTE) {
-      calls.push("rulesets.list");
-      return [];
-    }
-    calls.push("labels.list");
-    return [];
-  });
-
-  const request = vi.fn(async (route: string) => {
-    calls.push(`request ${route}`);
-    return { data: {} };
-  });
-
-  const octokit = {
-    repos: { get, update, replaceAllTopics, updateBranchProtection },
-    issues: {
-      listLabelsForRepo,
-      createLabel,
-      updateLabel,
-      deleteLabel,
-      listComments,
-      createComment,
-      updateComment,
-      deleteComment,
-    },
-    pulls: { listFiles },
-    paginate,
-    request,
-  } as unknown as MergeFeedbackDeps["octokit"];
-
-  return {
-    octokit,
-    calls,
-    listFiles,
-    listComments,
-    createComment,
-    updateComment,
-    deleteComment,
-    paginate,
-  };
-}
-
-/**
- * Literal fake resolver. The resolution carries a local layer, which is the
- * opt-in `settingsSyncBlock` looks for: the merged onboarding file is the
- * consent signal, exactly as in production.
- */
-function fakeMergeResolver() {
-  const localSource = `${OWNER}/widgets:.github/woodhouse.yml`;
-  const config = woodhouseConfigSchema.parse({
-    // `pruneRulesets` makes the rulesets applier read GitHub's list, which is
-    // how the scenario observes that the sync ran past the repository applier.
+function buildMergeWorld() {
+  const octokit = makeOctokit({ files: [ONBOARDING_CHANGED_FILE] });
+  const log = fakeLogger();
+  const { resolver } = fakeResolver({
     settings: { enabled: true, pruneRulesets: true },
     repository: { has_issues: true },
   });
-  const resolved: ResolvedConfig = {
-    config,
-    sources: [localSource],
-    issues: [],
-    localSource,
-  };
-
-  const resolver = {
-    isBaselineRepo: vi.fn(() => false),
-    invalidate: vi.fn(),
-    invalidateOwner: vi.fn(),
-    resolve: vi.fn(async () => resolved),
-  };
-
-  return { resolver: resolver as unknown as MergeFeedbackDeps["resolver"], resolved };
-}
-
-function buildMergeWorld() {
-  const octokit = fakeMergeOctokit();
-  const log = fakeLogger();
-  const { resolver } = fakeMergeResolver();
 
   const deps: MergeFeedbackDeps = {
-    octokit: octokit.octokit,
+    octokit: octokit.octokit as unknown as MergeFeedbackDeps["octokit"],
     resolver,
     mutex: new KeyedMutex(),
-    log: log as unknown as Logger,
+    log,
     dryRun: false,
   };
 

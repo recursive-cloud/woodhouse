@@ -2,29 +2,26 @@
  * Shared test-support fakes for the settings-sync BDD scenarios.
  *
  * This module is not a vitest entry: it is imported by the `.steps.ts` files
- * only. The fakes mirror the ones the unit suites use, so a scenario asserts
- * the same observable calls the corresponding unit test does.
+ * and by `test/settings-concurrency.test.ts`. The fakes mirror the ones the
+ * unit suites use, so a scenario asserts the same observable calls the
+ * corresponding unit test does.
+ *
+ * Construction verbs: `fake*` stands in for a named interface (a Probot app, a
+ * config resolver); `make*` composes a builder over options.
  */
 
 import { vi } from "vitest";
-import type { Probot } from "probot";
+import type { Context, Probot } from "probot";
 import { woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { ResolvedConfig } from "../../src/config/resolver.js";
-import type { ApplyContext } from "../../src/settings/apply.js";
 import type { ChangedFile } from "../../src/github/pulls.js";
-import type { MergeFeedbackDeps } from "../../src/settings/mergeFeedback.js";
+import type { MergeFeedbackResolver } from "../../src/settings/mergeFeedback.js";
 import { fakeLogger } from "../support/scenario.js";
-
-/** Re-exported so the settings-sync steps keep one import site. */
-export { fakeLogger };
 
 export const RULESETS_ROUTE = "GET /repos/{owner}/{repo}/rulesets";
 export const LOCAL_SOURCE = "acme/widgets:.github/woodhouse.yml";
 
-export const SETTINGS_FILE: ChangedFile = {
-  filename: ".github/woodhouse.yml",
-  status: "modified",
-};
+export const SETTINGS_FILE: ChangedFile = { filename: ".github/woodhouse.yml", status: "modified" };
 
 export interface Comment {
   id: number;
@@ -127,68 +124,112 @@ function makeGetContent(configFiles: Record<string, string>) {
   });
 }
 
-export interface AppOctokitOptions {
-  /** Delivery tag prefixed onto every recorded applier call. */
-  readonly label: string;
-  readonly calls: string[];
-  readonly gate: Gate;
-  /** The live repository state `repos.get` reports. */
-  readonly current?: { has_issues: boolean };
+/** The production client the recording fakes stand in for. */
+type OctokitApi = Context<"push">["octokit"];
+
+/** One stubbed method, including its vitest mock controls. */
+type Stub = ReturnType<typeof vi.fn>;
+
+/** A namespace's methods; every name must exist on the production client. */
+type Methods<Namespace extends keyof OctokitApi, Names extends keyof OctokitApi[Namespace]> = {
+  readonly [K in Names]: Stub;
+};
+
+/** A method directly on the production client, checked to still exist. */
+type ClientMethod<Name extends keyof OctokitApi> = Record<Name, Stub>[Name];
+
+/**
+ * The octokit surface the recording fake implements. Each namespace is keyed by
+ * the real Probot client, so a renamed or removed production method fails this
+ * file's build rather than surfacing as "x is not a function" at runtime.
+ */
+export interface RecordingOctokit {
+  readonly repos: Methods<
+    "repos",
+    "get" | "getContent" | "update" | "replaceAllTopics" | "updateBranchProtection"
+  >;
+  readonly issues: Methods<
+    "issues",
+    | "listLabelsForRepo"
+    | "createLabel"
+    | "updateLabel"
+    | "deleteLabel"
+    | "listComments"
+    | "createComment"
+    | "updateComment"
+    | "deleteComment"
+  >;
+  readonly pulls: Methods<"pulls", "listFiles">;
+  readonly paginate: ClientMethod<"paginate">;
+  readonly request: ClientMethod<"request">;
+}
+
+export interface OctokitOptions {
+  /** Delivery tag prefixed onto recorded applier calls, when supplied. */
+  readonly label?: string;
+  /** The call list to record into; a fresh list is created and returned when absent. */
+  readonly calls?: string[];
+  /** When supplied, `repos.get` claims the gate before returning. */
+  readonly gate?: Gate;
+  readonly current?: Record<string, unknown>;
   readonly configFiles?: Record<string, string>;
   readonly files?: readonly ChangedFile[];
   readonly comments?: readonly Comment[];
+  readonly existingRulesets?: readonly { id: number; name: string }[];
 }
 
 /**
- * Fake octokit for one app-level delivery. Applier calls are tagged with
- * `label` into the shared `calls` list, so the final sequence shows which
- * delivery performed each write and in what order. Comment calls are not
- * tagged, keeping the applier assertion binding.
+ * One recording octokit fake for every suite. Applier calls append to `calls`,
+ * tagged with `label` when supplied; comment calls are never recorded, so an
+ * applier assertion stays binding. `paginate` dispatches on the target the way
+ * octokit does.
  */
-export function makeAppOctokit(options: AppOctokitOptions) {
+export function makeOctokit(options: OctokitOptions = {}) {
   const {
     label,
-    calls,
     gate,
     current = { has_issues: false },
     configFiles = {},
     files = [SETTINGS_FILE],
     comments = [],
+    existingRulesets = [],
   } = options;
+  const calls = options.calls ?? [];
 
-  const push = (call: string) => calls.push(`${label}:${call}`);
-
-  const getContent = makeGetContent(configFiles);
+  const record = (call: string) => {
+    calls.push(label === undefined ? call : `${label}:${call}`);
+  };
 
   const get = vi.fn(async () => {
-    push("repos.get");
-    if (gate.claim()) await gate.promise;
+    record("repos.get");
+    if (gate?.claim()) await gate.promise;
     return { data: { ...current } };
   });
+  const getContent = makeGetContent(configFiles);
   const update = vi.fn(async () => {
-    push("repos.update");
+    record("repos.update");
     return { data: {} };
   });
   const replaceAllTopics = vi.fn(async () => {
-    push("repos.replaceAllTopics");
+    record("repos.replaceAllTopics");
     return { data: {} };
   });
   const updateBranchProtection = vi.fn(async () => {
-    push("repos.updateBranchProtection");
+    record("repos.updateBranchProtection");
     return { data: {} };
   });
 
   const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
   const createLabel = vi.fn(async () => {
-    push("issues.createLabel");
+    record("issues.createLabel");
     return { data: {} };
   });
   const updateLabel = vi.fn(async () => {
-    push("issues.updateLabel");
+    record("issues.updateLabel");
     return { data: {} };
   });
   const deleteLabel = vi.fn(async () => {
-    push("issues.deleteLabel");
+    record("issues.deleteLabel");
     return { data: {} };
   });
 
@@ -199,23 +240,25 @@ export function makeAppOctokit(options: AppOctokitOptions) {
   const updateComment = vi.fn(async (..._args: unknown[]) => ({ data: { id: 1 } }));
   const deleteComment = vi.fn(async () => ({ data: {} }));
 
+  // Pagination dispatches on the target: comments and files are methods,
+  // rulesets are a route string, and anything else is the labels listing.
   const paginate = vi.fn(async (target: unknown) => {
     if (target === listComments) return [...comments];
     if (target === listFiles) return [...files];
     if (target === RULESETS_ROUTE) {
-      push("rulesets.list");
-      return [];
+      record("rulesets.list");
+      return [...existingRulesets];
     }
-    push("labels.list");
+    record("labels.list");
     return [];
   });
 
   const request = vi.fn(async (route: string) => {
-    push(`request ${route}`);
+    record(`request ${route}`);
     return { data: {} };
   });
 
-  const octokit = {
+  const octokit: RecordingOctokit = {
     repos: { get, getContent, update, replaceAllTopics, updateBranchProtection },
     issues: {
       listLabelsForRepo,
@@ -230,97 +273,13 @@ export function makeAppOctokit(options: AppOctokitOptions) {
     pulls: { listFiles },
     paginate,
     request,
-  } as unknown as Record<string, unknown>;
-
-  return {
-    octokit,
-    get,
-    getContent,
-    update,
-    listFiles,
-    listComments,
-    createComment,
-    updateComment,
-    deleteComment,
-    paginate,
-    request,
   };
-}
-
-export interface ApplyOctokitOptions {
-  /** The live repository state `repos.get` reports. */
-  readonly current?: Record<string, unknown>;
-  /** What the rulesets route already contains. */
-  readonly existingRulesets?: readonly { id: number; name: string }[];
-}
-
-/**
- * Fake octokit covering every surface the four appliers touch, for the
- * syncSettings-level scenarios. Each call is tagged into `calls` in the order
- * it fired, exactly as `test/apply.test.ts` does.
- */
-export function makeApplyOctokit(options: ApplyOctokitOptions = {}) {
-  const calls: string[] = [];
-  const current = options.current ?? { has_issues: false };
-  const existingRulesets = options.existingRulesets ?? [];
-
-  const get = vi.fn(async () => {
-    calls.push("repos.get");
-    return { data: { ...current } };
-  });
-  const update = vi.fn(async () => {
-    calls.push("repos.update");
-    return { data: {} };
-  });
-  const replaceAllTopics = vi.fn(async () => {
-    calls.push("repos.replaceAllTopics");
-    return { data: {} };
-  });
-  const updateBranchProtection = vi.fn(async () => {
-    calls.push("repos.updateBranchProtection");
-    return { data: {} };
-  });
-
-  const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
-  const createLabel = vi.fn(async () => {
-    calls.push("issues.createLabel");
-    return { data: {} };
-  });
-  const updateLabel = vi.fn(async () => {
-    calls.push("issues.updateLabel");
-    return { data: {} };
-  });
-  const deleteLabel = vi.fn(async () => {
-    calls.push("issues.deleteLabel");
-    return { data: {} };
-  });
-
-  // Labels paginate a method; rulesets paginate a route string.
-  const paginate = vi.fn(async (target: unknown) => {
-    if (target === RULESETS_ROUTE) {
-      calls.push("rulesets.list");
-      return [...existingRulesets];
-    }
-    calls.push("labels.list");
-    return [];
-  });
-
-  const request = vi.fn(async (route: string) => {
-    calls.push(`request ${route}`);
-    return { data: {} };
-  });
-
-  const octokit = {
-    repos: { get, update, replaceAllTopics, updateBranchProtection },
-    issues: { listLabelsForRepo, createLabel, updateLabel, deleteLabel },
-    paginate,
-    request,
-  } as unknown as ApplyContext["octokit"];
 
   return {
     octokit,
     calls,
     get,
+    getContent,
     update,
     replaceAllTopics,
     updateBranchProtection,
@@ -328,6 +287,11 @@ export function makeApplyOctokit(options: ApplyOctokitOptions = {}) {
     createLabel,
     updateLabel,
     deleteLabel,
+    listFiles,
+    listComments,
+    createComment,
+    updateComment,
+    deleteComment,
     paginate,
     request,
   };
@@ -352,7 +316,7 @@ export function resolvedConfig(
  * appliers behave exactly as they would in production.
  */
 export function fakeResolver(
-  configInput: Record<string, unknown>,
+  configInput: Record<string, unknown> = {},
   overrides: Partial<ResolvedConfig> = {},
 ) {
   const calls: string[] = [];
@@ -366,7 +330,7 @@ export function fakeResolver(
     ...overrides,
   };
 
-  const resolver = {
+  const resolver: MergeFeedbackResolver = {
     isBaselineRepo: vi.fn((_repo: string) => false),
     invalidate: vi.fn((_owner: string, _repo: string) => {
       calls.push("invalidate");
@@ -383,121 +347,6 @@ export function fakeResolver(
   return { resolver, calls, config, resolved };
 }
 
-export interface FeedbackOctokitOptions {
-  readonly files?: readonly ChangedFile[];
-  readonly comments?: readonly Comment[];
-  readonly configFiles?: Record<string, string>;
-  readonly current?: Record<string, unknown>;
-  readonly existingRulesets?: readonly { id: number; name: string }[];
-}
-
-/**
- * Fake octokit covering the changed-file listing, the applier surface a sync
- * touches, and the issue-comment surface the outcome comment uses. Only
- * applier calls are recorded in `calls`, so the recorded sequence stays exactly
- * the writes the handler caused.
- */
-export function makeFeedbackOctokit(options: FeedbackOctokitOptions = {}) {
-  const {
-    files = [SETTINGS_FILE],
-    comments = [],
-    configFiles = {},
-    current = { has_issues: false },
-    existingRulesets = [],
-  } = options;
-
-  const calls: string[] = [];
-
-  const listFiles = vi.fn(async () => ({ data: [...files] }));
-  const getContent = makeGetContent(configFiles);
-
-  const get = vi.fn(async () => {
-    calls.push("repos.get");
-    return { data: { ...current } };
-  });
-  const update = vi.fn(async () => {
-    calls.push("repos.update");
-    return { data: {} };
-  });
-  const replaceAllTopics = vi.fn(async () => {
-    calls.push("repos.replaceAllTopics");
-    return { data: {} };
-  });
-  const updateBranchProtection = vi.fn(async () => {
-    calls.push("repos.updateBranchProtection");
-    return { data: {} };
-  });
-
-  const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
-  const createLabel = vi.fn(async () => {
-    calls.push("issues.createLabel");
-    return { data: {} };
-  });
-  const updateLabel = vi.fn(async () => {
-    calls.push("issues.updateLabel");
-    return { data: {} };
-  });
-  const deleteLabel = vi.fn(async () => {
-    calls.push("issues.deleteLabel");
-    return { data: {} };
-  });
-
-  // The comment surface. Its calls are deliberately not recorded in `calls`.
-  const listComments = vi.fn(async () => ({ data: [...comments] }));
-  const createComment = vi.fn(async (..._args: unknown[]) => ({ data: { id: 1 } }));
-  const updateComment = vi.fn(async (..._args: unknown[]) => ({ data: { id: 1 } }));
-  const deleteComment = vi.fn(async () => ({ data: {} }));
-
-  const paginate = vi.fn(async (target: unknown) => {
-    if (target === listComments) return [...comments];
-    if (target === listFiles) return [...files];
-    if (target === RULESETS_ROUTE) {
-      calls.push("rulesets.list");
-      return [...existingRulesets];
-    }
-    calls.push("labels.list");
-    return [];
-  });
-
-  const request = vi.fn(async (route: string) => {
-    calls.push(`request ${route}`);
-    return { data: {} };
-  });
-
-  const octokit = {
-    repos: { get, getContent, update, replaceAllTopics, updateBranchProtection },
-    issues: {
-      listLabelsForRepo,
-      createLabel,
-      updateLabel,
-      deleteLabel,
-      listComments,
-      createComment,
-      updateComment,
-      deleteComment,
-    },
-    pulls: { listFiles },
-    paginate,
-    request,
-  } as unknown as MergeFeedbackDeps["octokit"];
-
-  return {
-    octokit,
-    calls,
-    listFiles,
-    listComments,
-    createComment,
-    updateComment,
-    deleteComment,
-    paginate,
-    get,
-    getContent,
-    update,
-    updateBranchProtection,
-    request,
-  };
-}
-
 const OWNER = { login: "trusted-org" };
 
 export interface PushContextOptions {
@@ -507,7 +356,7 @@ export interface PushContextOptions {
 }
 
 /** A `push` delivery context for the fake Probot. */
-export function pushContext(octokit: Record<string, unknown>, options: PushContextOptions = {}) {
+export function pushContext(octokit: RecordingOctokit, options: PushContextOptions = {}) {
   const { ref = "refs/heads/main", changed = [".github/woodhouse.yml"], deleted = false } = options;
   return {
     name: "push",
@@ -524,7 +373,7 @@ export function pushContext(octokit: Record<string, unknown>, options: PushConte
 }
 
 /** A `pull_request.closed` (merged) delivery context for the fake Probot. */
-export function closedContext(octokit: Record<string, unknown>) {
+export function closedContext(octokit: RecordingOctokit) {
   return {
     name: "pull_request",
     id: "delivery-closed",

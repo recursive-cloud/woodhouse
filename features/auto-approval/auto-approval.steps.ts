@@ -50,18 +50,28 @@ function parseConfig(allowedActors: { owners?: string[]; bots?: string[] }): Aut
 }
 
 interface HarnessOptions {
+  /** The per-page changed-file listing; one unremarkable page by default. */
+  readonly filePages?: readonly FilePage[];
   /** The `auto_merge` object the live GET returns; null means nobody enabled it. */
   readonly autoMerge?: AutoMerge | null;
   /** Existing reviews, for the idempotency scenarios. */
   readonly reviews?: readonly unknown[];
+  readonly dryRun?: boolean;
 }
 
-function buildHarness(filePages: readonly FilePage[], options: HarnessOptions = {}) {
+function buildHarness(options: HarnessOptions = {}) {
+  const {
+    filePages = [UNREMARKABLE_FILES],
+    autoMerge = null,
+    reviews = [],
+    dryRun = false,
+  } = options;
+
   const listFiles = vi.fn(async (params: { page?: number }) => ({
     data: filePages[(params.page ?? 1) - 1] ?? [],
   }));
 
-  const listReviews = vi.fn(async () => ({ data: options.reviews ?? [] }));
+  const listReviews = vi.fn(async () => ({ data: reviews }));
 
   // Recorded separately from the mock so a scenario can read the review body
   // without poking at vi.fn internals.
@@ -72,7 +82,7 @@ function buildHarness(filePages: readonly FilePage[], options: HarnessOptions = 
   });
 
   // The live pull request GET: the only source of the auto-merge fact.
-  const get = vi.fn(async () => ({ data: { auto_merge: options.autoMerge ?? null } }));
+  const get = vi.fn(async () => ({ data: { auto_merge: autoMerge } }));
 
   // Mirrors octokit.paginate: call the route per page until a short page.
   const paginate = vi.fn(
@@ -96,7 +106,9 @@ function buildHarness(filePages: readonly FilePage[], options: HarnessOptions = 
     paginate,
   } as unknown as OctokitApi;
 
-  return { octokit, log: fakeLogger(), listFiles, listReviews, createReview, get, submitted };
+  const log = fakeLogger();
+  const deps: SilverPlatterDeps = { octokit, log, dryRun };
+  return { deps, octokit, log, listFiles, listReviews, createReview, get, submitted };
 }
 
 type Harness = ReturnType<typeof buildHarness>;
@@ -139,17 +151,17 @@ function requireConfig(w: World): AutoApprovalConfig {
 }
 
 function harnessFor(w: World): Harness {
-  return buildHarness(w.files, { autoMerge: w.autoMerge, reviews: w.reviews });
+  return buildHarness({
+    filePages: w.files,
+    autoMerge: w.autoMerge,
+    reviews: w.reviews,
+    dryRun: w.dryRun,
+  });
 }
 
-function cast(
-  h: Harness,
-  config: AutoApprovalConfig,
-  facts: Facts,
-  dryRun = false,
-): Promise<boolean> {
+function cast(h: Harness, config: AutoApprovalConfig, facts: Facts): Promise<boolean> {
   return serve(
-    { octokit: h.octokit, log: h.log, dryRun },
+    h.deps,
     "acme",
     "widgets",
     {
@@ -167,7 +179,7 @@ function cast(
 async function evaluate(w: World, facts: Facts): Promise<void> {
   const h = harnessFor(w);
   w.harness = h;
-  w.approved = await cast(h, requireConfig(w), facts, w.dryRun);
+  w.approved = await cast(h, requireConfig(w), facts);
 }
 
 function requireHarness(h: Harness | undefined): Harness {

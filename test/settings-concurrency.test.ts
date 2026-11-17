@@ -4,7 +4,7 @@ import { Allowlist } from "../src/security/allowlist.js";
 import {
   closedContext,
   fakeProbot,
-  makeAppOctokit,
+  makeOctokit,
   manualGate,
   OPEN_GATE,
   pushContext,
@@ -46,14 +46,12 @@ describe("merge push and merged pull request race", () => {
 
     const push = deliver(
       "push",
-      pushContext(
-        makeAppOctokit({ label: "push", calls, gate, configFiles: CONFIG_FILES }).octokit,
-      ),
+      pushContext(makeOctokit({ label: "push", calls, gate, configFiles: CONFIG_FILES }).octokit),
     );
     const closed = deliver(
       "pull_request.closed",
       closedContext(
-        makeAppOctokit({ label: "closed", calls, gate, configFiles: CONFIG_FILES }).octokit,
+        makeOctokit({ label: "closed", calls, gate, configFiles: CONFIG_FILES }).octokit,
       ),
     );
 
@@ -97,7 +95,7 @@ describe("push dispatch negative cases", () => {
     // default must not start a sync.
     await deliver(
       "push",
-      pushContext(makeAppOctokit({ label: "push", calls, gate: OPEN_GATE }).octokit, {
+      pushContext(makeOctokit({ label: "push", calls, gate: OPEN_GATE }).octokit, {
         ref: "refs/heads/main",
         changed: ["docs/woodhouse.yml"],
       }),

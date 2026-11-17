@@ -63,12 +63,16 @@ function base64(source: string): string {
   return Buffer.from(source, "utf8").toString("base64");
 }
 
+interface ValidationOctokitOptions {
+  readonly state: ScenarioState;
+}
+
 /**
  * Fake octokit covering only the surfaces validation depends on: pageable
  * changed-file and comment listings, per-path content fetches, and the check
  * and comment write routes. `paginate` mirrors octokit by calling the route once.
  */
-function fakeOctokit(state: ScenarioState) {
+function makeValidationOctokit({ state }: ValidationOctokitOptions) {
   const listFiles = vi.fn(async () => ({ data: state.files }));
 
   const getContent = vi.fn(async (params: { path: string }) => ({
@@ -112,13 +116,13 @@ function fakeOctokit(state: ScenarioState) {
   };
 }
 
-type Capture = ReturnType<typeof fakeOctokit> & {
+type Capture = ReturnType<typeof makeValidationOctokit> & {
   readonly log: Logger;
   readonly result: Outcome;
 };
 
 async function runValidation(state: ScenarioState): Promise<Capture> {
-  const fake = fakeOctokit(state);
+  const fake = makeValidationOctokit({ state });
   const log = fakeLogger();
   const deps: Deps = { octokit: fake.octokit, log, dryRun: state.dryRun };
   const result = await validatePullRequest(deps, OWNER, REPO, PR_NUMBER, HEAD_SHA);

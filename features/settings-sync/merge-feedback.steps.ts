@@ -18,14 +18,8 @@ import {
 } from "../../src/settings/mergeFeedback.js";
 import { SIGN_OFF } from "../../src/approval/wording.js";
 import type { ChangedFile } from "../../src/github/pulls.js";
-import {
-  type Comment,
-  SETTINGS_FILE,
-  fakeLogger,
-  fakeResolver,
-  httpError,
-  makeFeedbackOctokit,
-} from "./fakes.js";
+import { type Comment, SETTINGS_FILE, fakeResolver, httpError, makeOctokit } from "./fakes.js";
+import { fakeLogger } from "../support/scenario.js";
 
 const feature = await loadFeature("features/settings-sync/merge-feedback.feature");
 
@@ -65,11 +59,11 @@ const PR = { number: 7, merged: true, baseRef: "main" };
 
 /** Handler harness with a literal fake resolver. */
 function fakeHarness(options: HarnessOptions = {}) {
-  const octokit = makeFeedbackOctokit(octokitOptions(options));
+  const octokit = makeOctokit(octokitOptions(options));
   const log = fakeLogger();
   const fake = fakeResolver(options.configInput ?? ENABLED, options.resolution ?? {});
   const deps: MergeFeedbackDeps = {
-    octokit: octokit.octokit,
+    octokit: octokit.octokit as unknown as MergeFeedbackDeps["octokit"],
     resolver: fake.resolver,
     mutex: new KeyedMutex(),
     log,
@@ -88,11 +82,11 @@ function fakeHarness(options: HarnessOptions = {}) {
 
 /** Handler harness with the real `ConfigResolver` over a keyed Contents fake. */
 function realHarness(options: HarnessOptions = {}) {
-  const octokit = makeFeedbackOctokit(octokitOptions(options));
+  const octokit = makeOctokit(octokitOptions(options));
   const log = fakeLogger();
   const resolver = new ConfigResolver();
   const deps: MergeFeedbackDeps = {
-    octokit: octokit.octokit,
+    octokit: octokit.octokit as unknown as MergeFeedbackDeps["octokit"],
     resolver,
     mutex: new KeyedMutex(),
     log,
