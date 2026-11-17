@@ -1,5 +1,4 @@
 import { expect, vi } from "vitest";
-import type { Logger } from "pino";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { classifyActor, decide } from "../../src/approval/policy.js";
 import type { ApprovalRequest } from "../../src/approval/policy.js";
@@ -7,12 +6,11 @@ import { resetAppLoginCache, serve } from "../../src/approval/silverPlatter.js";
 import type { SilverPlatterDeps } from "../../src/approval/silverPlatter.js";
 import { autoApprovalSchema } from "../../src/config/schema.js";
 import type { AutoApprovalConfig } from "../../src/config/schema.js";
+import { fakeLogger, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/auto-approval/auto-approval.feature");
 
 type OctokitApi = SilverPlatterDeps["octokit"];
-type ScenarioVariables = Record<string, unknown>;
-
 /** Mirrors the module constant in silverPlatter.ts; the scenario pins the delay. */
 const GRACE_MS = 2_000;
 
@@ -46,22 +44,9 @@ interface ReviewParams {
   readonly body: string;
 }
 
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
-
 /** Parse the auto-approval config the feature describes, so defaults apply as in production. */
 function parseConfig(allowedActors: { owners?: string[]; bots?: string[] }): AutoApprovalConfig {
   return autoApprovalSchema.parse({ allowedActors });
-}
-
-function fakeLogger(): Logger {
-  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Logger;
 }
 
 interface HarnessOptions {

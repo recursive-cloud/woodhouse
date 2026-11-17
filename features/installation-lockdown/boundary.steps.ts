@@ -5,21 +5,11 @@ import type { AllowlistDecision } from "../../src/security/allowlist.js";
 import { resolveDefinitions } from "../../src/apps/registry.js";
 import type { AppDefinition, RegistryDefaults } from "../../src/apps/registry.js";
 import { ConfigurationError, parseAllowedTargets } from "../../src/lib/env.js";
+import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/installation-lockdown/boundary.feature");
 
 const PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\nfoo\n-----END RSA PRIVATE KEY-----";
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 /** Global defaults for a registry test; `undefined` means no global allowlist. */
 function registryDefaults(

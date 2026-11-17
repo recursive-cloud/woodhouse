@@ -7,13 +7,16 @@
  */
 
 import { vi } from "vitest";
-import type { Logger } from "pino";
 import type { Probot } from "probot";
 import { woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { ResolvedConfig } from "../../src/config/resolver.js";
 import type { ApplyContext } from "../../src/settings/apply.js";
 import type { ChangedFile } from "../../src/github/pulls.js";
 import type { MergeFeedbackDeps } from "../../src/settings/mergeFeedback.js";
+import { fakeLogger } from "../support/scenario.js";
+
+/** Re-exported so the settings-sync steps keep one import site. */
+export { fakeLogger };
 
 export const RULESETS_ROUTE = "GET /repos/{owner}/{repo}/rulesets";
 export const LOCAL_SOURCE = "acme/widgets:.github/woodhouse.yml";
@@ -26,18 +29,6 @@ export const SETTINGS_FILE: ChangedFile = {
 export interface Comment {
   id: number;
   body?: string;
-}
-
-/** A logger whose every method is a spy; `child` returns the same logger. */
-export function fakeLogger(): Logger {
-  const log: Record<string, unknown> = {
-    info: vi.fn(),
-    debug: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-  log.child = vi.fn(() => log);
-  return log as unknown as Logger;
 }
 
 /** An error shaped like an Octokit request failure. */

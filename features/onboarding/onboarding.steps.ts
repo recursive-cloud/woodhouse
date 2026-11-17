@@ -43,15 +43,12 @@ import {
   commentSettingsApplied,
   type MergeFeedbackDeps,
 } from "../../src/settings/mergeFeedback.js";
+import { fakeLogger } from "../support/scenario.js";
 
 const feature = await loadFeature("features/onboarding/onboarding.feature");
 
 /** The installation account every scenario is about. */
 const OWNER = "acme";
-
-function fakeLogger() {
-  return { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
-}
 
 /* -------------------------------------------------------------------------
  * The onboarding walk world (scenarios 1-12)

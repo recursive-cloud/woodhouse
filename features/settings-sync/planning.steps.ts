@@ -1,5 +1,4 @@
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
-import type { Logger } from "pino";
 import { expect } from "vitest";
 import { BASELINE_PATHS, LOCAL_PATHS, isSettingsPath } from "../../src/config/paths.js";
 import {
@@ -18,25 +17,15 @@ import { settingsSyncBlock, type SettingsSyncBlockReason } from "../../src/setti
 import { applyBranchProtection } from "../../src/settings/appliers/branch-protection.js";
 import type { ApplierContext, ApplierResult } from "../../src/settings/appliers/types.js";
 import { planRulesets, type ExistingRuleset, type RulesetPlan } from "../../src/settings/plan.js";
+import { fakeLogger, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/settings-sync/planning.feature");
-
-type ScenarioVariables = Record<string, unknown>;
 
 /** Keys the fake contents client serves the two layers from. */
 const BASELINE_FILE = ".github-private:woodhouse.yml";
 const LOCAL_FILE = "app:.github/woodhouse.yml";
 const BASELINE_REPO_LOCAL_FILE = ".github-private:.github/woodhouse.yml";
 const ORDINARY_REPO_ROOT_FILE = "app:woodhouse.yml";
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 /**
  * Build the YAML text a `<baseline>` or `<local>` cell names, or undefined when
@@ -208,15 +197,6 @@ function assertPlan(plan: RulesetPlan, phrase: string): void {
     default:
       throw new Error(`Unrecognised plan phrase: ${JSON.stringify(phrase)}`);
   }
-}
-
-function fakeLogger(): Logger {
-  return {
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-  } as unknown as Logger;
 }
 
 const notFound = Object.assign(new Error("Not Found"), { status: 404 });

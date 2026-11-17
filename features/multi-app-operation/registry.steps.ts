@@ -1,4 +1,4 @@
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +14,7 @@ import {
 } from "../../src/apps/registry.js";
 import { ConfigurationError } from "../../src/lib/env.js";
 import { handleHealth } from "../../src/health.js";
+import { fakeLogger } from "../support/scenario.js";
 
 const feature = await loadFeature("features/multi-app-operation/registry.feature");
 
@@ -25,22 +26,6 @@ function configFile(source: string): string {
   const path = join(dir, `${Math.random()}.cjs`);
   writeFileSync(path, source);
   return path;
-}
-
-function fakeLogger(): {
-  log: Logger;
-  info: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-  debug: ReturnType<typeof vi.fn>;
-} {
-  const info = vi.fn();
-  const warn = vi.fn();
-  const error = vi.fn();
-  const debug = vi.fn();
-  const log: Record<string, unknown> = { info, warn, error, debug };
-  log.child = vi.fn(() => log);
-  return { log: log as unknown as Logger, info, warn, error, debug };
 }
 
 const defaults: RegistryDefaults = {

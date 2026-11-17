@@ -27,6 +27,7 @@ import {
   resolvedConfig,
   settle,
 } from "./fakes.js";
+import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/settings-sync/apply.feature");
 
@@ -42,17 +43,6 @@ const FULL_CONFIG = {
 };
 
 const CONFIG_FILES = { "widgets:.github/woodhouse.yml": ENABLED_CONFIG };
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 function requireValue<T>(value: T | undefined, what: string): T {
   if (value === undefined) {

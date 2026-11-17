@@ -9,14 +9,13 @@ import {
   validatePullRequest,
 } from "../../src/settings/validate.js";
 import { SCHEMA_MODELINE } from "../../src/config/json-schema.js";
+import { fakeLogger, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/config/validation.feature");
 
 type Deps = Parameters<typeof validatePullRequest>[0];
 type Octokit = Deps["octokit"];
 type Outcome = Awaited<ReturnType<typeof validatePullRequest>>;
-type ScenarioVariables = Record<string, unknown>;
-
 const OWNER = "acme";
 const REPO = "widgets";
 const PR_NUMBER = 7;
@@ -52,15 +51,6 @@ interface ScenarioState {
 
 function newScenario(): ScenarioState {
   return { files: [], blobs: {}, comments: [], dryRun: false };
-}
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
 }
 
 /** Examples cells quote path-like values; strip the surrounding quotes. */
@@ -120,10 +110,6 @@ function fakeOctokit(state: ScenarioState) {
     updateComment,
     deleteComment,
   };
-}
-
-function fakeLogger(): Logger {
-  return { info: vi.fn(), warn: vi.fn() } as unknown as Logger;
 }
 
 type Capture = ReturnType<typeof fakeOctokit> & {

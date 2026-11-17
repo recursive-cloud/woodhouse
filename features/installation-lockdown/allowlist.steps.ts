@@ -2,19 +2,9 @@ import { expect } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { Allowlist, resolveOwner } from "../../src/security/allowlist.js";
 import type { AllowlistDecision, OwnerResolution } from "../../src/security/allowlist.js";
+import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/installation-lockdown/allowlist.feature");
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 /** Map a placeholder cell such as "no owner" to the absent value the domain uses. */
 function expected(cell: string, absent: string): string | undefined {
