@@ -95,6 +95,49 @@ describe("evaluate — strictChecks presence", () => {
     expect(result.counts.missing).toBe(1);
     expect(result.summary).toContain("security-scan");
   });
+
+  it("holds a strict requirement unsatisfied when only a different-case run exists", () => {
+    // Check names match by exact name: a case difference is a different check,
+    // so it cannot satisfy the requirement.
+    const differentCase = evaluate(
+      [done("Security-Scan", "success")],
+      cfg({ strictChecks: ["security-scan"] }),
+    );
+    expect(differentCase.outcome).toBe("pending");
+    expect(differentCase.counts.missing).toBe(1);
+
+    const sameCase = evaluate(
+      [done("Security-Scan", "success")],
+      cfg({ strictChecks: ["Security-Scan"] }),
+    );
+    expect(sameCase.outcome).toBe("success");
+  });
+
+  it("reports a failed strict run missing when a different-case duplicate superseded it", () => {
+    // dedupeLatest groups same-name runs case-insensitively, so the survivor of
+    // this group is "build". Exact matching means that survivor is not the
+    // strict "Build": the earlier failure is collapsed away rather than
+    // masked, and the requirement is reported missing instead of satisfied.
+    // Missing holds the verdict at pending; it must never count as success.
+    const result = evaluate(
+      [
+        withMeta("Build", { conclusion: "failure", id: 100, startedAt: "2024-01-01T00:00:00Z" }),
+        withMeta("build", { conclusion: "success", id: 200, startedAt: "2024-06-01T00:00:00Z" }),
+      ],
+      cfg({ strictChecks: ["Build"] }),
+    );
+    expect(result.outcome).toBe("pending");
+    expect(result.counts.failed).toBe(0);
+    expect(result.counts.missing).toBe(1);
+  });
+});
+
+describe("evaluate — ignoredChecks", () => {
+  it("does not ignore a failing run whose name differs only in case", () => {
+    const result = evaluate([done("Coverage", "failure")], cfg({ ignoredChecks: ["coverage"] }));
+    expect(result.outcome).toBe("failure");
+    expect(result.counts.failed).toBe(1);
+  });
 });
 
 describe("evaluate — self-reference", () => {

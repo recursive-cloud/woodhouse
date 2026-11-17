@@ -9,3 +9,5 @@ Format: status line, then Context (the forces at the time), Decision, and Conseq
 [0008. Release Process](./0008-release-process.md) records the release process: release-please, least-privilege jobs, the App-minted token, image re-tagging and the manifest pins.
 
 [0009. Settings Sync Opts In by Config File Presence](./0009-settings-sync-opt-in-by-file.md) records why a repository's own `.github/woodhouse.yml` is the settings-sync opt-in, with `settings.enabled` as the kill switch and the baseline root file never managing the baseline repository itself.
+
+[0010. Check-Name Matching Is Case-Sensitive](./0010-case-sensitive-check-name-matching.md) records why `strictChecks` and `ignoredChecks` match check runs by exact name, so a case difference cannot satisfy or waive a requirement.

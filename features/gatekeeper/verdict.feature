@@ -40,7 +40,8 @@ Feature: White-glove verdict
       | "build"         | only "build" skipped          | reports failure |
       | "build"         | only "build" neutral          | reports failure |
       | "build"         | only "build" passing          | passes          |
-      | "security-scan" | only "Security-Scan" passing  | passes          |
+      | "security-scan" | only "Security-Scan" passing  | stays pending   |
+      | "Security-Scan" | only "Security-Scan" passing  | passes          |
 
   @REC-21
   Scenario Outline: Strictness beats the ignore list

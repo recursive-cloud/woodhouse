@@ -42,7 +42,7 @@ export const gatekeeperSchema = z
       .default([])
       .meta({
         description:
-          "Checks that must report `success` explicitly: unlike ordinary checks they may not be skipped or neutral, and their absence holds the white-glove check pending rather than letting it pass.",
+          "Checks, matched by exact name, that must report `success` explicitly: unlike ordinary checks they may not be skipped or neutral, and their absence holds the white-glove check pending rather than letting it pass.",
         examples: [["build", "test"]],
       }),
 
