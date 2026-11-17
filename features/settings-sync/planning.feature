@@ -102,6 +102,13 @@ Feature: Settings sync planning
     Then the validation fails naming the duplicate
 
   @REC-16
+  Scenario: Ruleset names that differ validate together
+    Given a configuration listing rulesets named main and release
+    When the configuration is validated
+    Then the validation passes
+    And both rulesets survive validation
+
+  @REC-16
   Scenario Outline: The ruleset plan converges by re-declaration and prunes only on opt-in
     Given existing rulesets <existing>
     And configured rulesets <configured>

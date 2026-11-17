@@ -624,6 +624,33 @@ describeFeature(
       });
     });
 
+    Scenario(`Ruleset names that differ validate together`, ({ Given, When, Then, And }) => {
+      let input: unknown;
+      let validation: ReturnType<typeof parseConfig> | undefined;
+
+      Given(`a configuration listing rulesets named main and release`, () => {
+        input = {
+          rulesets: [
+            { name: "main", target: "branch", enforcement: "active", rules: [] },
+            { name: "release", target: "branch", enforcement: "active", rules: [] },
+          ],
+        };
+      });
+      When(`the configuration is validated`, () => {
+        validation = parseConfig(input);
+      });
+      Then(`the validation passes`, () => {
+        expect(requireValidation(validation).ok).toBe(true);
+      });
+      And(`both rulesets survive validation`, () => {
+        const result = requireValidation(validation);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.config.rulesets).toHaveLength(2);
+        expect(result.config.rulesets.map((ruleset) => ruleset.name)).toEqual(["main", "release"]);
+      });
+    });
+
     ScenarioOutline(
       `The ruleset plan converges by re-declaration and prunes only on opt-in`,
       ({ Given, When, Then, And }, variables) => {
