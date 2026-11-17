@@ -10,7 +10,7 @@
 
 import type { Context } from "probot";
 import type { Logger } from "pino";
-import type { WoodhouseConfig } from "../config/schema.js";
+import type { ResolvedConfig } from "../config/resolver.js";
 import { APPLIERS } from "./appliers/index.js";
 import type { ChangeRecord, Failure } from "./appliers/types.js";
 import { describeForbidden, messageOf, statusOf } from "./forbidden.js";
@@ -27,17 +27,49 @@ export interface ApplyContext {
 }
 
 /* -------------------------------------------------------------------------
+ * Gate
+ * ---------------------------------------------------------------------- */
+
+export type SettingsSyncBlockReason = "no-local-file" | "settings-disabled" | "invalid-config";
+
+/**
+ * Why settings sync must not run for a resolved configuration, or null to run.
+ *
+ * The repository's own `.github/woodhouse.yml` (or `.yaml`) is the opt-in
+ * signal, in every repository, the baseline repository included: without one
+ * the repository is never synced, no matter what the cascade says. A root
+ * baseline file is not a local file. `settings.enabled` is a kill switch that
+ * defaults on; an explicit `false` anywhere in the cascade silences the
+ * repository, and a repository-level `true` overrides a baseline `false`
+ * because raw layers are merged before validation. Invalid configuration fails
+ * closed exactly as it did when the switch defaulted off: the resolver hands
+ * back fallback defaults alongside its issues, and those must never drive a
+ * sync.
+ */
+export function settingsSyncBlock(resolved: ResolvedConfig): SettingsSyncBlockReason | null {
+  if (resolved.localSource === undefined) return "no-local-file";
+  if (!resolved.config.settings.enabled) return "settings-disabled";
+  if (resolved.issues.length > 0) return "invalid-config";
+  return null;
+}
+
+/* -------------------------------------------------------------------------
  * Orchestration
  * ---------------------------------------------------------------------- */
 
 export async function syncSettings(
   ctx: ApplyContext,
-  config: WoodhouseConfig,
+  resolved: ResolvedConfig,
 ): Promise<ApplySummary> {
-  if (!config.settings.enabled) {
-    ctx.log.debug("Settings sync not enabled for this repository");
+  const block = settingsSyncBlock(resolved);
+  if (block !== null) {
+    ctx.log.debug({ reason: block }, "Settings sync skipped");
     return { changes: [], failures: [], dryRun: ctx.dryRun };
   }
+
+  ctx.log.debug({ sources: resolved.sources }, "Running settings sync");
+
+  const config = resolved.config;
 
   const changes: ChangeRecord[] = [];
   const failures: Failure[] = [];
