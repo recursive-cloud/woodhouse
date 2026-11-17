@@ -1,11 +1,8 @@
 import { expect, vi } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import type { Logger } from "pino";
-import {
-  reconcile,
-  type ReconcileDeps,
-  type ReconcileResult,
-} from "../../src/gatekeeper/handler.js";
+import { seedAndSchedule, type FirstPass as AppFirstPass, type GraceDeps } from "../../src/app.js";
+import type { ReconcileDeps } from "../../src/gatekeeper/handler.js";
 import { WHITE_GLOVE_CHECK_NAME } from "../../src/gatekeeper/constants.js";
 import { woodhouseConfigSchema } from "../../src/config/schema.js";
 import { Scheduler } from "../../src/lib/scheduler.js";
@@ -96,13 +93,6 @@ function requireHarness(harness: Harness | undefined): Harness {
   return harness;
 }
 
-function requireResult(result: ReconcileResult | undefined): ReconcileResult {
-  if (result === undefined) {
-    throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
-  }
-  return result;
-}
-
 /**
  * Let pending promise chains settle.
  *
@@ -116,39 +106,40 @@ async function flushMicrotasks(): Promise<void> {
   }
 }
 
-interface FirstPass {
-  readonly result: ReconcileResult;
-  readonly graceMs: number;
+/** The production first pass, pinned to the instant the scenario scheduled it. */
+interface FirstPass extends AppFirstPass {
   readonly scheduledAt: number;
 }
 
-/**
- * The first half of `app.ts` `seedAndSchedule`: reconcile with
- * `emptyIsPending`, then schedule a second, unconstrained pass once the grace
- * period expires if the commit is still waiting for checks to start.
- */
-async function seedAndSchedule(
-  harness: Harness,
-  scheduler: Scheduler,
-  onRecheck: (result: ReconcileResult | undefined) => void,
-): Promise<FirstPass> {
-  const result = await reconcile(harness.deps, OWNER, REPO, SHA, { emptyIsPending: true });
-  const required = requireResult(result);
+/** The harness dependencies plus the scheduler the extracted grace path needs. */
+function graceDeps(harness: Harness, scheduler: Scheduler): GraceDeps {
+  return { ...harness.deps, scheduler };
+}
 
-  if (!required.evaluation.awaitingStart) {
+/**
+ * Run the production grace path: reconcile with `emptyIsPending`, then schedule
+ * a second, unconstrained pass once the grace period expires if the commit is
+ * still waiting for checks to start.
+ */
+async function runFirstPass(harness: Harness, scheduler: Scheduler): Promise<FirstPass> {
+  // Recorded before the call so the scheduler `runAt` can be pinned against
+  // it; fake timers keep `Date.now()` stable across the awaited reconcile.
+  const scheduledAt = Date.now();
+  const pass = await seedAndSchedule(graceDeps(harness, scheduler), OWNER, REPO, SHA);
+
+  if (pass === undefined) {
+    throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
+  }
+  if (!pass.result.evaluation.awaitingStart) {
     throw new Error("The scenario expects a commit carrying nothing but the white-glove check.");
   }
 
-  const graceMs = required.gatekeeper.gracePeriodSeconds * 1000;
-  const scheduledAt = Date.now();
-
-  // app.ts also returns early when graceMs is 0; not mirrored here because no
-  // scenario configures a zero grace period (the schema default is 30).
-  scheduler.schedule(SCHEDULER_KEY, graceMs, async () => {
-    onRecheck(await reconcile(harness.deps, OWNER, REPO, SHA));
-  });
-
-  return { result: required, graceMs, scheduledAt };
+  return {
+    result: pass.result,
+    graceMs: pass.graceMs,
+    scheduledAt,
+    scheduled: pass.scheduled,
+  };
 }
 
 describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, AfterEachScenario }) => {
@@ -168,19 +159,15 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
       let harness: Harness | undefined;
       let scheduler: Scheduler | undefined;
       let first: FirstPass | undefined;
-      let recheckRan = false;
 
       Given(`a pull request opened on a head commit with <runs>`, () => {
         harness = buildHarness(parseRuns(readCell(variables, "runs")));
         scheduler = new Scheduler();
-        recheckRan = false;
       });
       When(`the first pass runs`, async () => {
         const built = requireHarness(harness);
         if (scheduler === undefined) throw new Error("The scheduler has not been built yet.");
-        first = await seedAndSchedule(built, scheduler, () => {
-          recheckRan = true;
-        });
+        first = await runFirstPass(built, scheduler);
       });
       Then(`the white-glove check is pending`, () => {
         if (first === undefined) throw new Error("The first pass has not run yet.");
@@ -189,41 +176,46 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
       And(`a re-check is scheduled after the grace period`, async () => {
         if (first === undefined) throw new Error("The first pass has not run yet.");
         if (scheduler === undefined) throw new Error("The scheduler has not been built yet.");
+        const built = requireHarness(harness);
 
         // The schema default, asserted rather than assumed.
         expect(first.graceMs).toBe(30_000);
+
+        // The first pass reported that the commit left it no choice but to
+        // schedule a re-check.
+        expect(first.scheduled).toBe(true);
 
         const pending = scheduler.pending();
         expect(pending).toHaveLength(1);
         expect(pending[0]!.key).toBe(SCHEDULER_KEY);
         expect(pending[0]!.runAt).toBe(first.scheduledAt + first.graceMs);
 
+        // The first pass reconciled once; nothing more until the timer fires.
+        expect(built.paginate).toHaveBeenCalledTimes(1);
+
         // One millisecond short the re-check must still be waiting.
         await vi.advanceTimersByTimeAsync(first.graceMs - 1);
         expect(scheduler.pending()).toHaveLength(1);
-        expect(recheckRan).toBe(false);
+        expect(built.paginate).toHaveBeenCalledTimes(1);
 
-        // The last millisecond fires it.
+        // The last millisecond fires it, and the re-check re-reads the commit.
         await vi.advanceTimersByTimeAsync(1);
         await flushMicrotasks();
         expect(scheduler.pending()).toHaveLength(0);
-        expect(recheckRan).toBe(true);
+        expect(built.paginate).toHaveBeenCalledTimes(2);
       });
     },
   );
 
   Scenario(`No CI at all`, ({ Given, When, Then }) => {
+    let harness: Harness | undefined;
     let scheduler: Scheduler | undefined;
     let first: FirstPass | undefined;
-    let recheckResult: ReconcileResult | undefined;
 
     Given(`a pull request opened on a head commit with no checks at all`, async () => {
-      const harness = buildHarness(parseRuns("no checks at all"));
+      harness = buildHarness(parseRuns("no checks at all"));
       scheduler = new Scheduler();
-      recheckResult = undefined;
-      first = await seedAndSchedule(harness, scheduler, (result) => {
-        recheckResult = result;
-      });
+      first = await runFirstPass(harness, scheduler);
       expect(scheduler.pending()).toHaveLength(1);
     });
     When(`the grace period elapses with still no check runs`, async () => {
@@ -232,10 +224,21 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
       await flushMicrotasks();
     });
     Then(`the white-glove check passes`, () => {
-      if (recheckResult === undefined) {
-        throw new Error("The scheduled re-check has not completed yet.");
-      }
-      expect(recheckResult.evaluation.outcome).toBe("success");
+      const built = requireHarness(harness);
+      if (first === undefined) throw new Error("The first pass has not run yet.");
+
+      // The re-check saw no checks and concluded success, so it wrote a
+      // completed run. The first pass had created a pending one.
+      expect(built.paginate).toHaveBeenCalledTimes(2);
+      expect(built.create).toHaveBeenCalledTimes(2);
+      expect(built.create.mock.calls[1]?.[0]).toEqual(
+        expect.objectContaining({
+          name: WHITE_GLOVE_CHECK_NAME,
+          head_sha: SHA,
+          status: "completed",
+          conclusion: "success",
+        }),
+      );
     });
   });
 });

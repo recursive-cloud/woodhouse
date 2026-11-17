@@ -62,10 +62,14 @@ const twoAppEnv = {
   ORG_B_PRIVATE_KEY: PEM,
 } as NodeJS.ProcessEnv;
 
+/** The registry plus the definitions it was built from. */
+interface TwoAppRegistry {
+  readonly registry: AppRegistry;
+  readonly definitions: Record<string, AppDefinition>;
+}
+
 /** Startup as `server.ts` performs it: load the file, then build the registry. */
-async function createTwoAppRegistry(
-  log: Logger,
-): Promise<{ registry: AppRegistry; definitions: Record<string, AppDefinition> }> {
+async function createTwoAppRegistry(log: Logger): Promise<TwoAppRegistry> {
   const definitions = loadAppDefinitions(configFile(twoAppConfig), twoAppEnv);
   const registry = await AppRegistry.create(definitions, defaults, log);
   return { registry, definitions };

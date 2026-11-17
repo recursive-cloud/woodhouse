@@ -15,7 +15,7 @@ import type { Context, Probot } from "probot";
 import { woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { ResolvedConfig } from "../../src/config/resolver.js";
 import type { ChangedFile } from "../../src/github/pulls.js";
-import type { MergeFeedbackResolver } from "../../src/settings/mergeFeedback.js";
+import type { MergeFeedbackDeps, MergeFeedbackResolver } from "../../src/settings/mergeFeedback.js";
 import { fakeLogger } from "../support/scenario.js";
 
 export const RULESETS_ROUTE = "GET /repos/{owner}/{repo}/rulesets";
@@ -162,6 +162,16 @@ export interface RecordingOctokit {
   readonly pulls: Methods<"pulls", "listFiles">;
   readonly paginate: ClientMethod<"paginate">;
   readonly request: ClientMethod<"request">;
+}
+
+/**
+ * The one place a recording fake is widened to the merge-feedback handler's
+ * client type. `RecordingOctokit` is the structural surface every fake
+ * implements; Probot's client type is the full API, so the unavoidable cast
+ * lives here rather than at each call site.
+ */
+export function asMergeFeedbackOctokit(octokit: RecordingOctokit): MergeFeedbackDeps["octokit"] {
+  return octokit as unknown as MergeFeedbackDeps["octokit"];
 }
 
 export interface OctokitOptions {

@@ -2,6 +2,11 @@ import { expect, vi } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import type { Logger } from "pino";
 import {
+  handleCheckRunCompleted,
+  handleCheckSuiteCompleted,
+  seedAndSchedule,
+} from "../../src/app.js";
+import {
   reconcile,
   type ReconcileDeps,
   type ReconcileResult,
@@ -9,6 +14,7 @@ import {
 import type { Outcome } from "../../src/gatekeeper/evaluate.js";
 import { WHITE_GLOVE_CHECK_NAME } from "../../src/gatekeeper/constants.js";
 import { woodhouseConfigSchema } from "../../src/config/schema.js";
+import { Scheduler } from "../../src/lib/scheduler.js";
 import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/gatekeeper/reconcile.feature");
@@ -326,18 +332,25 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
 
   Scenario(`A pull request event seeds the check on the head commit`, ({ Given, When, Then }) => {
     let harness: Harness | undefined;
+    let scheduler: Scheduler | undefined;
 
     Given(`the head commit has no white-glove run and no child checks`, () => {
       harness = buildHarness({ whiteGloveRuns: [], childChecks: [] });
+      scheduler = new Scheduler();
     });
     When(`the white-glove check is seeded for a pull request event`, async () => {
       const built = requireHarness(harness);
-      const result = await reconcile(built.deps, OWNER, REPO, SHA, { emptyIsPending: true });
+      if (scheduler === undefined) throw new Error("The scheduler has not been built yet.");
+      const first = await seedAndSchedule({ ...built.deps, scheduler }, OWNER, REPO, SHA);
+      if (first === undefined) {
+        throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
+      }
       // The first pass sees an empty commit, so it must hold the check pending.
-      expect(requireResult(result).evaluation.outcome).toBe("pending");
+      expect(first.result.evaluation.outcome).toBe("pending");
     });
     Then(`a new white-glove run is created on the head commit as pending`, () => {
       const built = requireHarness(harness);
+      scheduler?.cancelAll();
       expect(built.update).not.toHaveBeenCalled();
       expect(built.create).toHaveBeenCalledTimes(1);
       expect(built.create).toHaveBeenCalledWith(
@@ -366,7 +379,11 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       });
       When(`the white-glove check is reconciled for a completed check run event`, async () => {
         harness = buildHarness({ whiteGloveRuns, childChecks });
-        result = await reconcile(harness.deps, OWNER, REPO, SHA);
+        // A foreign check run completed; reconciling our own would loop.
+        result = await handleCheckRunCompleted(harness.deps, OWNER, REPO, {
+          name: "build",
+          head_sha: SHA,
+        });
       });
       Then(`the fresh verdict is re-derived from every check on the head commit`, () => {
         const evaluation = requireResult(result).evaluation;
@@ -399,11 +416,9 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       And(`the commit carries a failing build check`, () => {
         childChecks = parseChildChecks("a failing build check");
       });
-      // The check_suite.completed listener calls reconcile exactly like the
-      // check_run.completed one: no options either way.
       When(`the white-glove check is reconciled for a completed check suite event`, async () => {
         harness = buildHarness({ whiteGloveRuns, childChecks });
-        result = await reconcile(harness.deps, OWNER, REPO, SHA);
+        result = await handleCheckSuiteCompleted(harness.deps, OWNER, REPO, SHA);
       });
       Then(`the fresh verdict is re-derived from every check on the head commit`, () => {
         const evaluation = requireResult(result).evaluation;
@@ -426,6 +441,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     let whiteGloveRuns: RawCheckRun[] = [];
     let childChecks: RawCheckRun[] = [];
     let harness: Harness | undefined;
+    let scheduler: Scheduler | undefined;
 
     Given(`the head commit carries a white-glove run completed and failing`, () => {
       whiteGloveRuns = parseWhiteGloveRuns("a white-glove run completed and failing");
@@ -435,10 +451,18 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     });
     When(`the white-glove check is re-requested`, async () => {
       harness = buildHarness({ whiteGloveRuns, childChecks });
-      const result = await reconcile(harness.deps, OWNER, REPO, SHA, { emptyIsPending: true });
-      expect(requireResult(result).evaluation.outcome).toBe("failure");
+      scheduler = new Scheduler();
+      const first = await seedAndSchedule({ ...harness.deps, scheduler }, OWNER, REPO, SHA);
+      if (first === undefined) {
+        throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
+      }
+      expect(first.result.evaluation.outcome).toBe("failure");
+      // The commit already has checks, so the pass has nothing to wait for and
+      // leaves no re-check behind.
+      expect(first.scheduled).toBe(false);
     });
     Then(`the white-glove run with id 302 is updated in place as failed`, () => {
+      scheduler?.cancelAll();
       expectUpdatedAsFailed(requireHarness(harness), 302);
     });
   });

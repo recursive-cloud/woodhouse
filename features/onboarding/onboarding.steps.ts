@@ -5,30 +5,20 @@
  * stateless, so almost every assertion here is about which GitHub calls happened
  * and in what order — recorded by a fake octokit rather than mocked per line.
  *
- * Three fake worlds live in this file because the three capabilities it spans
- * have different octokit surfaces:
- *
- *  - the onboarding walk (scenarios 1-12 and 15), a recording fake modelled on the one
- *    `test/onboarding-handler.test.ts` used;
- *  - the merge-feedback handler (scenario 13), a fake applier surface plus the
- *    issue-comment surface, with a literal resolver whose config has a local
- *    layer (the merged onboarding file is the opt-in);
- *  - the white-glove check handler (scenario 14), a checks fake plus recording
- *    stubs for the settings-applier surface, so "no settings are written" is a
- *    positive assertion rather than an absence of stubs.
+ * The three fake worlds the suite spans — the onboarding walk (scenarios 1-12
+ * and 15), the merge-feedback handler (scenario 13) and the white-glove check
+ * handler (scenario 14) — live in `onboarding-world.ts`, so this file holds the
+ * step definitions and the assertions over them.
  */
 
-import { expect, vi } from "vitest";
-import type { Logger } from "pino";
+import { expect } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import yaml from "js-yaml";
 import { SCHEMA_MODELINE } from "../../src/config/json-schema.js";
-import { parseConfig, woodhouseConfigSchema } from "../../src/config/schema.js";
+import { parseConfig } from "../../src/config/schema.js";
 import { WHITE_GLOVE_CHECK_NAME } from "../../src/gatekeeper/constants.js";
-import { reconcile, type ReconcileDeps } from "../../src/gatekeeper/handler.js";
-import type { ChangedFile } from "../../src/github/pulls.js";
-import { KeyedMutex } from "../../src/lib/mutex.js";
-import { handleOnboarding, type OnboardingDeps } from "../../src/onboarding/handler.js";
+import { reconcile } from "../../src/gatekeeper/handler.js";
+import { handleOnboarding } from "../../src/onboarding/handler.js";
 import {
   ONBOARDING_BRANCH,
   ONBOARDING_FILE_PATH,
@@ -40,357 +30,25 @@ import {
 import {
   SETTINGS_APPLIED_MARKER,
   commentSettingsApplied,
-  type MergeFeedbackDeps,
 } from "../../src/settings/mergeFeedback.js";
-import { fakeResolver, makeOctokit } from "../settings-sync/fakes.js";
-import { fakeLogger } from "../support/scenario.js";
+import {
+  HEAD_SHA,
+  added,
+  buildChecksWorld,
+  buildMergeWorld,
+  buildOnboarding,
+  created,
+  requireWorld,
+  type ChecksWorld,
+  type CommentParams,
+  type MergeWorld,
+  type OnboardingWorld,
+} from "./onboarding-world.js";
 
 const feature = await loadFeature("features/onboarding/onboarding.feature");
 
 /** The installation account every scenario is about. */
 const OWNER = "acme";
-
-/* -------------------------------------------------------------------------
- * The onboarding walk world (scenarios 1-12)
- * ---------------------------------------------------------------------- */
-
-interface FakeConfig {
-  /** Settings paths that exist: an exact path, or `repo:path`, for any repository. */
-  presentPaths?: readonly string[];
-  /** Return an open onboarding pull request from `pulls.list`. */
-  openOnboardingPr?: boolean;
-  /** Repositories whose `repos.get` has no default branch (empty repository). */
-  emptyRepos?: readonly string[];
-  /** A repository whose onboarding branch already exists (`git.getRef` succeeds). */
-  branchExistsRepos?: readonly string[];
-  /** `pulls.create` rejects with a 403 for this repository, after the probes. */
-  failCreateForRepo?: string;
-  /** A read probe (`repos.getContent`) rejects with a 403 for this repository. */
-  forbiddenReadForRepo?: string;
-  /** Repositories `apps.listReposAccessibleToInstallation` reports, page by page. */
-  accessibleRepos?: ReadonlyArray<{ readonly name?: unknown } | null>;
-  /** Enumeration rejects (the installation endpoint refuses). */
-  enumerationFails?: boolean;
-  /** Repositories whose open-offer probe (`pulls.list`) refuses with a 500. */
-  probeFailsFor?: readonly string[];
-}
-
-/**
- * Recording fake octokit.
- *
- * Every method the walk could reach pushes a line onto `calls` in invocation
- * order — reads included — so "cheap-first", "skipped silently" and "no writes"
- * are literal assertions over the whole surface rather than per-mock checks.
- */
-function fakeOnboardingOctokit(config: FakeConfig = {}) {
-  const calls: string[] = [];
-
-  const present = (repo: string, path: string): boolean =>
-    (config.presentPaths ?? []).some((entry) => entry === path || entry === `${repo}:${path}`);
-
-  const getContent = vi.fn(async ({ repo, path }: { repo: string; path: string }) => {
-    calls.push(`repos.getContent ${repo}:${path}`);
-    if (config.forbiddenReadForRepo === repo) {
-      throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
-    }
-    if (present(repo, path)) return { data: { type: "file", content: "c2V0dGluZ3M6IHt9" } };
-    throw Object.assign(new Error("Not Found"), { status: 404 });
-  });
-
-  const get = vi.fn(async ({ repo }: { repo: string }) => {
-    calls.push(`repos.get ${repo}`);
-    const empty = (config.emptyRepos ?? []).includes(repo);
-    return { data: { default_branch: empty ? "" : "main" } };
-  });
-
-  const getRef = vi.fn(async ({ repo, ref }: { repo: string; ref: string }) => {
-    calls.push(`git.getRef ${repo}:${ref}`);
-    if (ref.includes(ONBOARDING_BRANCH)) {
-      if ((config.branchExistsRepos ?? []).includes(repo)) {
-        return { data: { object: { sha: "existing-onboarding-sha" } } };
-      }
-      throw Object.assign(new Error("Not Found"), { status: 404 });
-    }
-    return { data: { object: { sha: "base-sha" } } };
-  });
-
-  const list = vi.fn(async ({ repo }: { repo: string }) => {
-    calls.push(`pulls.list ${repo}`);
-    if ((config.probeFailsFor ?? []).includes(repo)) {
-      throw Object.assign(new Error("boom"), { status: 500 });
-    }
-    if (!config.openOnboardingPr) return { data: [] };
-    return { data: [{ number: 9, labels: [{ name: ONBOARDING_LABEL }] }] };
-  });
-
-  const createRef = vi.fn(async () => {
-    calls.push("git.createRef");
-    return { data: {} };
-  });
-
-  const createOrUpdateFileContents = vi.fn(async () => {
-    calls.push("repos.createOrUpdateFileContents");
-    return { data: {} };
-  });
-
-  const create = vi.fn(async ({ repo }: { repo: string }) => {
-    calls.push(`pulls.create ${repo}`);
-    if (config.failCreateForRepo === repo) {
-      throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
-    }
-    return { data: { number: 42 } };
-  });
-
-  const addLabels = vi.fn(async ({ repo }: { repo: string }) => {
-    calls.push(`issues.addLabels ${repo}`);
-    return { data: [] };
-  });
-
-  const listReposAccessibleToInstallation = vi.fn(
-    async (params: { per_page?: number; page?: number } = {}) => {
-      const perPage = params.per_page ?? 30;
-      const page = params.page ?? 1;
-      calls.push(`apps.listReposAccessibleToInstallation page=${page} per_page=${perPage}`);
-      if (config.enumerationFails) {
-        throw Object.assign(new Error("Resource not accessible by integration"), { status: 403 });
-      }
-      const all = config.accessibleRepos ?? [];
-      return {
-        data: {
-          total_count: all.length,
-          repositories: all.slice((page - 1) * perPage, page * perPage),
-        },
-      };
-    },
-  );
-
-  /** Mirrors `octokit.paginate` for the installation endpoint, page by page. */
-  const paginate = vi.fn(
-    async (
-      route: (params: Record<string, unknown>) => Promise<{ data: unknown }>,
-      params: Record<string, unknown> = {},
-    ) => {
-      const perPage = typeof params.per_page === "number" ? params.per_page : 30;
-      const items: unknown[] = [];
-      for (let page = 1; ; page += 1) {
-        const { data } = await route({ ...params, page });
-        const batch = Array.isArray(data)
-          ? data
-          : ((data as { repositories?: unknown[] }).repositories ?? []);
-        items.push(...batch);
-        if (batch.length < perPage) break;
-      }
-      return items;
-    },
-  );
-
-  const octokit = {
-    repos: { getContent, get, createOrUpdateFileContents },
-    git: { getRef, createRef },
-    pulls: { list, create },
-    issues: { addLabels },
-    apps: { listReposAccessibleToInstallation },
-    paginate,
-  } as unknown as OnboardingDeps["octokit"];
-
-  return {
-    octokit,
-    calls,
-    getContent,
-    get,
-    getRef,
-    list,
-    createRef,
-    createOrUpdateFileContents,
-    create,
-    addLabels,
-    listReposAccessibleToInstallation,
-    paginate,
-  };
-}
-
-function buildOnboarding(config: FakeConfig = {}, dryRun = false) {
-  const fake = fakeOnboardingOctokit(config);
-  const log = fakeLogger();
-  const deps: OnboardingDeps = {
-    octokit: fake.octokit,
-    log: log as unknown as Logger,
-    dryRun,
-  };
-
-  return { ...fake, log, deps };
-}
-
-type OnboardingWorld = ReturnType<typeof buildOnboarding>;
-
-function requireWorld(world: OnboardingWorld | undefined): OnboardingWorld {
-  if (world === undefined) {
-    throw new Error("The world has not been built yet; the When step must run first.");
-  }
-  return world;
-}
-
-/** `installation` `created` payload carrying the freshly installed repositories. */
-const created = (...names: string[]) => ({
-  action: "created",
-  installation: { repositories: names.map((name) => ({ name })) },
-});
-
-/** `installation_repositories` `added` payload. */
-const added = (...names: string[]) => ({
-  action: "added",
-  repositories_added: names.map((name) => ({ name })),
-});
-
-/* -------------------------------------------------------------------------
- * The merge-feedback world (scenario 13)
- * ---------------------------------------------------------------------- */
-
-const RULESETS_ROUTE = "GET /repos/{owner}/{repo}/rulesets";
-
-const ONBOARDING_CHANGED_FILE: ChangedFile = {
-  filename: ".github/woodhouse.yml",
-  status: "added",
-};
-
-interface CommentParams {
-  owner: string;
-  repo: string;
-  issue_number: number;
-  body: string;
-}
-
-/**
- * The merge-feedback world reuses the shared recording octokit and resolver
- * fakes. The resolution carries a local layer (the merged onboarding file is
- * the opt-in), and `pruneRulesets` makes the rulesets applier read GitHub's
- * list, which is how the scenario observes that the sync ran past the
- * repository applier.
- */
-function buildMergeWorld() {
-  const octokit = makeOctokit({ files: [ONBOARDING_CHANGED_FILE] });
-  const log = fakeLogger();
-  const { resolver } = fakeResolver({
-    settings: { enabled: true, pruneRulesets: true },
-    repository: { has_issues: true },
-  });
-
-  const deps: MergeFeedbackDeps = {
-    octokit: octokit.octokit as unknown as MergeFeedbackDeps["octokit"],
-    resolver,
-    mutex: new KeyedMutex(),
-    log,
-    dryRun: false,
-  };
-
-  return { ...octokit, log, resolver, deps };
-}
-
-type MergeWorld = ReturnType<typeof buildMergeWorld>;
-
-/* -------------------------------------------------------------------------
- * The white-glove world (scenario 14)
- * ---------------------------------------------------------------------- */
-
-const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
-
-/**
- * Fake octokit for `reconcile`, plus recording stubs for the settings-applier
- * surface. A repository with no settings file is never synced, so every applier
- * stub must stay untouched — recorded here so the absence is positive.
- */
-function fakeChecksOctokit() {
-  const applierCalls: string[] = [];
-  const runs: readonly unknown[] = [];
-
-  const listForRef = vi.fn(async () => ({ data: { check_runs: runs } }));
-  const create = vi.fn(async () => ({ data: {} }));
-  const update = vi.fn(async () => ({ data: {} }));
-
-  const paginate = vi.fn(async (target: unknown) => {
-    if (target === listForRef) return runs;
-    if (target === RULESETS_ROUTE) {
-      applierCalls.push("rulesets.list");
-      return [];
-    }
-    applierCalls.push("labels.list");
-    return [];
-  });
-
-  const reposGet = vi.fn(async () => {
-    applierCalls.push("repos.get");
-    return { data: { has_issues: true } };
-  });
-  const reposUpdate = vi.fn(async () => {
-    applierCalls.push("repos.update");
-    return { data: {} };
-  });
-  const replaceAllTopics = vi.fn(async () => {
-    applierCalls.push("repos.replaceAllTopics");
-    return { data: {} };
-  });
-  const updateBranchProtection = vi.fn(async () => {
-    applierCalls.push("repos.updateBranchProtection");
-    return { data: {} };
-  });
-  const createLabel = vi.fn(async () => {
-    applierCalls.push("issues.createLabel");
-    return { data: {} };
-  });
-  const request = vi.fn(async (route: string) => {
-    applierCalls.push(`request ${route}`);
-    return { data: {} };
-  });
-
-  const octokit = {
-    paginate,
-    checks: { listForRef, create, update },
-    repos: {
-      get: reposGet,
-      update: reposUpdate,
-      replaceAllTopics,
-      updateBranchProtection,
-    },
-    issues: { createLabel },
-    request,
-  } as unknown as ReconcileDeps["octokit"];
-
-  return {
-    octokit,
-    applierCalls,
-    listForRef,
-    create,
-    update,
-    reposGet,
-    reposUpdate,
-    replaceAllTopics,
-    updateBranchProtection,
-    createLabel,
-    request,
-  };
-}
-
-function buildChecksWorld() {
-  const fake = fakeChecksOctokit();
-  const log = fakeLogger();
-  const config = woodhouseConfigSchema.parse({ gatekeeper: { enabled: true } });
-  const resolver = {
-    // No local layer: the un-onboarded repository, whose settings sync must
-    // stay silent while the white-glove check still runs.
-    resolve: vi.fn(async () => ({ config, sources: [], issues: [] })),
-  } as unknown as ReconcileDeps["resolver"];
-
-  const deps: ReconcileDeps = {
-    octokit: fake.octokit,
-    resolver,
-    log: log as unknown as Logger,
-    dryRun: false,
-  };
-
-  return { ...fake, log, deps };
-}
-
-type ChecksWorld = ReturnType<typeof buildChecksWorld>;
 
 /* -------------------------------------------------------------------------
  * Scenarios

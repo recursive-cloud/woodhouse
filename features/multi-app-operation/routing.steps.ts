@@ -34,8 +34,13 @@ function fakeProbot(): {
   return { probot, verifyAndReceive, on };
 }
 
+type HeaderOverrides = Record<string, string | null>;
+
+/** No header overrides: every default header stays. Read-only, so one instance is safe. */
+const NO_OVERRIDES: HeaderOverrides = {};
+
 /** The headers GitHub sends with an App delivery, overridable per scenario. */
-function headers(overrides: Record<string, string | null> = {}): Record<string, string> {
+function headers(overrides: HeaderOverrides = NO_OVERRIDES): Record<string, string> {
   const values: Record<string, string> = {
     "x-github-delivery": "delivery-1",
     "x-github-event": "push",
