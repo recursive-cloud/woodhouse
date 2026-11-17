@@ -100,15 +100,16 @@ function isComplete(run: CheckRunLike): boolean {
 }
 
 /**
- * Glob-free exact matching, case-insensitive.
+ * Glob-free exact matching after trimming.
  *
- * Check names are chosen by the user in their own workflows, so exact matching
- * is predictable. Case-insensitivity avoids a class of frustrating "why is my
- * required check never found" bugs.
+ * Check names are chosen by the operator in their own workflows, and the config
+ * schema documents both lists as matching "by exact name". Case-insensitive
+ * matching silently waived a strict requirement whenever the run's case differed
+ * from the configured entry, so the comparison is exact.
  */
 function nameMatches(name: string, list: readonly string[]): boolean {
-  const lowered = name.toLowerCase();
-  return list.some((entry) => entry.trim().toLowerCase() === lowered);
+  const trimmed = name.trim();
+  return list.some((entry) => entry.trim() === trimmed);
 }
 
 /** True when `candidate` is a later (more recent) run than `holder`. */
@@ -268,9 +269,14 @@ export function evaluate(
   // A strict check that never reported at all must hold us at pending. This is
   // the case most naive implementations miss: they only look at checks that
   // exist, so a workflow that failed to trigger reads as "nothing wrong".
-  const present = new Set(runs.map((r) => r.name.toLowerCase()));
+  // Presence is judged from `deduped`, matching what the loop evaluates: a
+  // same-name group (dedupe groups case-insensitively) is represented only by
+  // its surviving latest run, and that run's exact name is what must match. A
+  // mixed-case group whose survivor is not the strict entry therefore counts as
+  // missing, even if an earlier run carried the exact name.
+  const present = new Set(deduped.map((r) => r.name.trim()));
   for (const required of strict) {
-    if (!present.has(required.trim().toLowerCase())) {
+    if (!present.has(required.trim())) {
       anyPending = true;
       checks.push({
         name: required,
