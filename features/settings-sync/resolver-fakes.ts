@@ -11,20 +11,9 @@ import { vi } from "vitest";
 import { woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { ResolvedConfig } from "../../src/config/resolver.js";
 import type { MergeFeedbackResolver } from "../../src/settings/mergeFeedback.js";
+import { recorder, recorded } from "../support/recorded.js";
 
 const LOCAL_SOURCE = "acme/widgets:.github/woodhouse.yml";
-
-/** A `vi.fn` that records its name first, then runs `impl`. */
-function recorded<Args extends unknown[], Result>(
-  calls: string[],
-  name: string,
-  impl: (...args: Args) => Result,
-) {
-  return vi.fn((...args: Args) => {
-    calls.push(name);
-    return impl(...args);
-  });
-}
 
 const noop = () => undefined;
 
@@ -51,6 +40,7 @@ export function fakeResolver(
   overrides?: Partial<ResolvedConfig>,
 ) {
   const calls: string[] = [];
+  const record = recorder(calls);
   const config = woodhouseConfigSchema.parse(configInput);
 
   const resolved: ResolvedConfig = {
@@ -63,9 +53,9 @@ export function fakeResolver(
 
   const resolver: MergeFeedbackResolver = {
     isBaselineRepo: vi.fn((_repo: string) => false),
-    invalidate: recorded(calls, "invalidate", noop),
-    invalidateOwner: recorded(calls, "invalidateOwner", noop),
-    resolve: recorded(calls, "resolve", async () => resolved),
+    invalidate: recorded(record, "invalidate", noop),
+    invalidateOwner: recorded(record, "invalidateOwner", noop),
+    resolve: recorded(record, "resolve", async () => resolved),
   };
 
   return { resolver, calls, config, resolved };

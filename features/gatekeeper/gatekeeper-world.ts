@@ -63,7 +63,8 @@ export function gatekeeperDeps(
  * `paginate` sees every run on the ref. `checks.listForRef` filters by name in
  * reality, but here it returns the white-glove runs exactly as supplied, so a
  * foreign-named run in a scenario's cell reaches the handler's response and
- * exercises its fail-closed name re-assertion.
+ * exercises its fail-closed name re-assertion. No grace-suite scenario relies on
+ * that filtering either: its cells supply an empty set or only white-glove runs.
  */
 export function buildGatekeeperHarness(options: GatekeeperHarnessOptions) {
   const { whiteGloveRuns, childChecks = [], enabled = true } = options;

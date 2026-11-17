@@ -12,6 +12,7 @@ import type { Context } from "probot";
 import type { ChangedFile } from "../../src/github/pulls.js";
 import type { MergeFeedbackDeps } from "../../src/settings/mergeFeedback.js";
 import type { Gate } from "./concurrency.js";
+import { recorder, recorded } from "../support/recorded.js";
 
 export const RULESETS_ROUTE = "GET /repos/{owner}/{repo}/rulesets";
 
@@ -27,33 +28,8 @@ export function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
 }
 
-/** The call log a fake applier writes through. */
-type CallLog = (call: string) => void;
-
-/** The call-log writer: `label:call` when a label is supplied, `call` otherwise. */
-function recorder(calls: string[], label?: string): CallLog {
-  return (call) => {
-    calls.push(label === undefined ? call : `${label}:${call}`);
-  };
-}
-
 /** An empty REST payload the appliers never read past. */
 const emptyPayload = async () => ({ data: {} });
-
-/**
- * A `vi.fn` that records its call name, then delegates to `impl`. The name may
- * be derived from the call's arguments, for route-shaped calls.
- */
-function recorded<Args extends unknown[], Result>(
-  record: CallLog,
-  name: string | ((...args: Args) => string),
-  impl: (...args: Args) => Result,
-) {
-  return vi.fn((...args: Args) => {
-    record(typeof name === "function" ? name(...args) : name);
-    return impl(...args);
-  });
-}
 
 /**
  * Serves the config cascade to a real `ConfigResolver`. Keyed `repo:path`,
