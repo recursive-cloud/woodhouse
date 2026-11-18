@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/recursive-cloud/woodhouse/compare/v1.0.0...v1.1.0) (2026-11-18)
+
+
+### Features
+
+* **settings:** opt settings sync in by config file presence ([#48](https://github.com/recursive-cloud/woodhouse/issues/48)) ([557f3ec](https://github.com/recursive-cloud/woodhouse/commit/557f3ec6c93d1a08e293296ca69d870bf35180d6))
+
 ## [1.0.0](https://github.com/recursive-cloud/woodhouse/compare/v0.1.0...v1.0.0) (2026-11-08)
 
 
