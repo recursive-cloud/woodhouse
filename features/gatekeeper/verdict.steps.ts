@@ -8,19 +8,9 @@ import {
 } from "../../src/gatekeeper/evaluate.js";
 import { gatekeeperSchema, type GatekeeperConfig } from "../../src/config/schema.js";
 import { WHITE_GLOVE_CHECK_NAME } from "../../src/gatekeeper/constants.js";
+import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/gatekeeper/verdict.feature");
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 /**
  * Name a check from a phrase. The feature spells our own check by its literal

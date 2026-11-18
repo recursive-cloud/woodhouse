@@ -1,199 +1,29 @@
 import { expect, vi } from "vitest";
-import type { Logger } from "pino";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { classifyActor, decide } from "../../src/approval/policy.js";
 import type { ApprovalRequest } from "../../src/approval/policy.js";
-import { resetAppLoginCache, serve } from "../../src/approval/silverPlatter.js";
-import type { SilverPlatterDeps } from "../../src/approval/silverPlatter.js";
-import { autoApprovalSchema } from "../../src/config/schema.js";
+import { resetAppLoginCache } from "../../src/approval/silverPlatter.js";
 import type { AutoApprovalConfig } from "../../src/config/schema.js";
+import {
+  ENABLED_BY_SELF,
+  GRACE_MS,
+  RENOVATE,
+  cast,
+  evaluate,
+  harnessFor,
+  parseConfig,
+  requireAutoApprovalHarness,
+  requireConfig,
+  withAllowedBot,
+  world,
+  type Harness,
+} from "./auto-approval-world.js";
+import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/auto-approval/auto-approval.feature");
 
-type OctokitApi = SilverPlatterDeps["octokit"];
-type ScenarioVariables = Record<string, unknown>;
-
-/** Mirrors the module constant in silverPlatter.ts; the scenario pins the delay. */
-const GRACE_MS = 2_000;
-
-const RENOVATE = "renovate[bot]";
-
-/** The bot enabled auto-merge on its own pull request. */
-const ENABLED_BY_SELF: AutoMerge = { enabled_by: { login: RENOVATE } };
-
-/** Unremarkable changed files: none may match the default protected paths. */
-const UNREMARKABLE_FILES: FilePage = [
-  { filename: "src/index.ts", status: "modified" },
-  { filename: "README.md", status: "modified" },
-];
-
-interface AutoMerge {
-  readonly enabled_by: { readonly login: string };
-}
-
-interface FilePageEntry {
-  readonly filename: string;
-  readonly status: string;
-}
-type FilePage = readonly FilePageEntry[];
-
-interface ReviewParams {
-  readonly owner: string;
-  readonly repo: string;
-  readonly pull_number: number;
-  readonly event: string;
-  readonly commit_id: string;
-  readonly body: string;
-}
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
-
-/** Parse the auto-approval config the feature describes, so defaults apply as in production. */
-function parseConfig(allowedActors: { owners?: string[]; bots?: string[] }): AutoApprovalConfig {
-  return autoApprovalSchema.parse({ allowedActors });
-}
-
-function fakeLogger(): Logger {
-  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Logger;
-}
-
-interface HarnessOptions {
-  /** The `auto_merge` object the live GET returns; null means nobody enabled it. */
-  readonly autoMerge?: AutoMerge | null;
-  /** Existing reviews, for the idempotency scenarios. */
-  readonly reviews?: readonly unknown[];
-}
-
-function buildHarness(filePages: readonly FilePage[], options: HarnessOptions = {}) {
-  const listFiles = vi.fn(async (params: { page?: number }) => ({
-    data: filePages[(params.page ?? 1) - 1] ?? [],
-  }));
-
-  const listReviews = vi.fn(async () => ({ data: options.reviews ?? [] }));
-
-  // Recorded separately from the mock so a scenario can read the review body
-  // without poking at vi.fn internals.
-  const submitted: ReviewParams[] = [];
-  const createReview = vi.fn(async (params: ReviewParams) => {
-    submitted.push(params);
-    return { data: {} };
-  });
-
-  // The live pull request GET: the only source of the auto-merge fact.
-  const get = vi.fn(async () => ({ data: { auto_merge: options.autoMerge ?? null } }));
-
-  // Mirrors octokit.paginate: call the route per page until a short page.
-  const paginate = vi.fn(
-    async (
-      route: (params: Record<string, unknown>) => Promise<{ data: unknown[] }>,
-      params: Record<string, unknown>,
-    ) => {
-      const out: unknown[] = [];
-      for (let page = 1; ; page += 1) {
-        const { data } = await route({ ...params, page });
-        out.push(...data);
-        if (data.length < ((params.per_page as number | undefined) ?? 100)) break;
-      }
-      return out;
-    },
-  );
-
-  const octokit = {
-    pulls: { listFiles, listReviews, createReview, get },
-    apps: { getAuthenticated: async () => ({ data: { slug: "woodhouse" } }) },
-    paginate,
-  } as unknown as OctokitApi;
-
-  return { octokit, log: fakeLogger(), listFiles, listReviews, createReview, get, submitted };
-}
-
-type Harness = ReturnType<typeof buildHarness>;
-
-interface Facts {
-  readonly author: string;
-  readonly action: string;
-  readonly headSha?: string;
-  readonly draft?: boolean;
-}
-
-/** Everything a serve() scenario accumulates before the evaluation runs. */
-interface World {
-  config: AutoApprovalConfig | undefined;
-  autoMerge: AutoMerge | null;
-  files: readonly FilePage[];
-  reviews: readonly unknown[];
-  dryRun: boolean;
-  harness: Harness | undefined;
-  approved: boolean | undefined;
-}
-
-function world(): World {
-  return {
-    config: undefined,
-    autoMerge: null,
-    files: [UNREMARKABLE_FILES],
-    reviews: [],
-    dryRun: false,
-    harness: undefined,
-    approved: undefined,
-  };
-}
-
-function requireConfig(w: World): AutoApprovalConfig {
-  if (w.config === undefined) {
-    throw new Error("The auto-approval configuration has not been built yet.");
-  }
-  return w.config;
-}
-
-function harnessFor(w: World): Harness {
-  return buildHarness(w.files, { autoMerge: w.autoMerge, reviews: w.reviews });
-}
-
-function cast(
-  h: Harness,
-  config: AutoApprovalConfig,
-  facts: Facts,
-  dryRun = false,
-): Promise<boolean> {
-  return serve(
-    { octokit: h.octokit, log: h.log, dryRun },
-    "acme",
-    "widgets",
-    {
-      number: 7,
-      author: facts.author,
-      draft: facts.draft ?? false,
-      state: "open",
-      headSha: facts.headSha ?? "abc123",
-      action: facts.action,
-    },
-    config,
-  );
-}
-
-async function evaluate(w: World, facts: Facts): Promise<void> {
-  const h = harnessFor(w);
-  w.harness = h;
-  w.approved = await cast(h, requireConfig(w), facts, w.dryRun);
-}
-
-function requireHarness(h: Harness | undefined): Harness {
-  if (h === undefined) {
-    throw new Error("The pull request has not been evaluated yet.");
-  }
-  return h;
-}
-
 function expectApproval(h: Harness | undefined): void {
-  const evaluated = requireHarness(h);
+  const evaluated = requireAutoApprovalHarness(h);
   expect(evaluated.createReview).toHaveBeenCalledOnce();
   expect(evaluated.createReview).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -208,11 +38,11 @@ function expectApproval(h: Harness | undefined): void {
 
 function expectNoReview(h: Harness | undefined, approved: boolean | undefined): void {
   expect(approved).toBe(false);
-  expect(requireHarness(h).createReview).not.toHaveBeenCalled();
+  expect(requireAutoApprovalHarness(h).createReview).not.toHaveBeenCalled();
 }
 
 function submittedBody(h: Harness | undefined): string {
-  const review = requireHarness(h).submitted[0];
+  const review = requireAutoApprovalHarness(h).submitted[0];
   if (review === undefined) {
     throw new Error("No review was submitted.");
   }
@@ -285,10 +115,7 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
       if (config === undefined) {
         throw new Error("The auto-approval configuration has not been built yet.");
       }
-      config = autoApprovalSchema.parse({
-        ...config,
-        allowedActors: { ...config.allowedActors, bots: [RENOVATE] },
-      });
+      config = withAllowedBot(config, RENOVATE);
     });
     When(`a pull request is opened by "<author>"`, () => {
       request = {
@@ -409,7 +236,7 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
     });
     And(`that evaluation submits an approval review`, () => {
       expect(w.approved).toBe(true);
-      const h = requireHarness(w.harness);
+      const h = requireAutoApprovalHarness(w.harness);
       expect(h.createReview).toHaveBeenCalledOnce();
       expect(h.createReview).toHaveBeenCalledWith(
         expect.objectContaining({ event: "APPROVE", commit_id: "abc123" }),
@@ -463,7 +290,7 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
       await evaluate(w, { author: "my-user", action: "synchronize", headSha: "abc123" });
     });
     Then(`Woodhouse submits an approval review pinned to the new commit`, () => {
-      const h = requireHarness(w.harness);
+      const h = requireAutoApprovalHarness(w.harness);
       expect(h.createReview).toHaveBeenCalledOnce();
       expect(h.createReview).toHaveBeenCalledWith(
         expect.objectContaining({ event: "APPROVE", commit_id: "abc123" }),
@@ -522,7 +349,7 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
       await evaluate(w, { author: "my-user", action: "opened" });
     });
     Then(`the approval decision is logged`, () => {
-      expect(requireHarness(w.harness).log.info).toHaveBeenCalledWith(
+      expect(requireAutoApprovalHarness(w.harness).log.info).toHaveBeenCalledWith(
         expect.stringContaining("DRY_RUN: would approve pull request"),
       );
     });

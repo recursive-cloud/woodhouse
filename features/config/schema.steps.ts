@@ -11,6 +11,7 @@ import yaml from "js-yaml";
 import Ajv from "ajv/dist/2020.js";
 import { SCHEMA_FILE } from "../../src/config/json-schema.js";
 import { parseConfig } from "../../src/config/schema.js";
+import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/config/schema.feature");
 
@@ -20,17 +21,6 @@ const document = JSON.parse(COMMITTED_SCHEMA) as Record<string, unknown>;
 
 const ajv = new Ajv({ strict: false, allErrors: true });
 const validate = ajv.compile(JSON.parse(COMMITTED_SCHEMA));
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 /** Walk `properties` down a path in the committed schema JSON. */
 function schemaProperty(...path: string[]): Record<string, unknown> {

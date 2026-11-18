@@ -1,40 +1,27 @@
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
-import type { Logger } from "pino";
 import {
-  reconcile,
-  type ReconcileDeps,
-  type ReconcileResult,
-} from "../../src/gatekeeper/handler.js";
+  handleCheckRunCompleted,
+  handleCheckSuiteCompleted,
+  seedAndSchedule,
+} from "../../src/app.js";
+import { reconcile, type ReconcileResult } from "../../src/gatekeeper/handler.js";
 import type { Outcome } from "../../src/gatekeeper/evaluate.js";
 import { WHITE_GLOVE_CHECK_NAME } from "../../src/gatekeeper/constants.js";
-import { woodhouseConfigSchema } from "../../src/config/schema.js";
+import { Scheduler } from "../../src/lib/scheduler.js";
+import {
+  buildGatekeeperHarness,
+  requireGatekeeperHarness,
+  type GatekeeperHarness,
+  type RawCheckRun,
+} from "./gatekeeper-world.js";
+import { readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/gatekeeper/reconcile.feature");
 
 const OWNER = "acme";
 const REPO = "widgets";
 const SHA = "0123456789abcdef0123456789abcdef01234567";
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
-
-/** The subset of a raw Checks API run the handler reads. */
-interface RawCheckRun {
-  readonly name: string;
-  readonly status: string;
-  readonly conclusion: string | null;
-  readonly id: number;
-  readonly started_at?: string;
-}
 
 /**
  * Build the head commit's white-glove runs from a `<white-glove runs>` cell.
@@ -196,58 +183,6 @@ function expectedOutcome(checks: readonly RawCheckRun[]): Outcome {
   return "success";
 }
 
-/**
- * Fake octokit covering only the checks surface the handler touches.
- *
- * `paginate` sees every run on the ref. `checks.listForRef` filters by name in
- * reality, but here it returns the white-glove cell's runs unfiltered, so the
- * foreign-named run in that cell reaches the handler's response and exercises
- * its fail-closed name re-assertion.
- */
-function buildHarness(options: {
-  readonly whiteGloveRuns: readonly RawCheckRun[];
-  readonly childChecks?: readonly RawCheckRun[];
-  readonly enabled?: boolean;
-}) {
-  const { whiteGloveRuns, childChecks = [], enabled = true } = options;
-  const allRuns = [...whiteGloveRuns, ...childChecks];
-
-  const paginate = vi.fn(async () => allRuns);
-  const listForRef = vi.fn(async () => ({ data: { check_runs: whiteGloveRuns } }));
-  const create = vi.fn(async () => ({ data: {} }));
-  const update = vi.fn(async () => ({ data: {} }));
-
-  const octokit = {
-    paginate,
-    checks: { listForRef, create, update },
-  } as unknown as ReconcileDeps["octokit"];
-
-  const config = woodhouseConfigSchema.parse({ gatekeeper: { enabled } });
-  const resolver = {
-    resolve: vi.fn(async () => ({ config, sources: [], issues: [] })),
-  } as unknown as ReconcileDeps["resolver"];
-
-  const log = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
-
-  const deps: ReconcileDeps = {
-    octokit,
-    resolver,
-    log: log as unknown as Logger,
-    dryRun: false,
-  };
-
-  return { deps, config, paginate, listForRef, create, update, log };
-}
-
-type Harness = ReturnType<typeof buildHarness>;
-
-function requireHarness(harness: Harness | undefined): Harness {
-  if (harness === undefined) {
-    throw new Error("The fake GitHub client has not been built yet.");
-  }
-  return harness;
-}
-
 function requireResult(result: ReconcileResult | undefined): ReconcileResult {
   if (result === undefined) {
     throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
@@ -263,7 +198,11 @@ function expectedState(outcome: Outcome): Record<string, unknown> {
 }
 
 /** Pin the write path named by a `<decision>` cell, including the status body. */
-function expectDecisionWrite(harness: Harness, decision: Decision, outcome: Outcome): void {
+function expectDecisionWrite(
+  harness: GatekeeperHarness,
+  decision: Decision,
+  outcome: Outcome,
+): void {
   const state = expectedState(outcome);
 
   if (decision.kind === "create") {
@@ -289,7 +228,7 @@ function expectDecisionWrite(harness: Harness, decision: Decision, outcome: Outc
 }
 
 /** Pin an in-place update that concludes failure. */
-function expectUpdatedAsFailed(harness: Harness, id: number): void {
+function expectUpdatedAsFailed(harness: GatekeeperHarness, id: number): void {
   expect(harness.create).not.toHaveBeenCalled();
   expect(harness.update).toHaveBeenCalledTimes(1);
   const body = harness.update.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -310,7 +249,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     ({ Given, When, Then, And }, variables) => {
       let whiteGloveRuns: RawCheckRun[] = [];
       let childChecks: RawCheckRun[] = [];
-      let harness: Harness | undefined;
+      let harness: GatekeeperHarness | undefined;
       let result: ReconcileResult | undefined;
 
       Given(`the head commit carries <white-glove runs>`, () => {
@@ -320,13 +259,13 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
         childChecks = parseChildChecks(readCell(variables, "child checks"));
       });
       When(`the white-glove check is reconciled`, async () => {
-        harness = buildHarness({ whiteGloveRuns, childChecks });
+        harness = buildGatekeeperHarness({ whiteGloveRuns, childChecks });
         result = await reconcile(harness.deps, OWNER, REPO, SHA);
         requireResult(result);
       });
       Then(`<decision>`, () => {
         expectDecisionWrite(
-          requireHarness(harness),
+          requireGatekeeperHarness(harness),
           parseDecision(readCell(variables, "decision")),
           expectedOutcome(childChecks),
         );
@@ -335,19 +274,26 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
   );
 
   Scenario(`A pull request event seeds the check on the head commit`, ({ Given, When, Then }) => {
-    let harness: Harness | undefined;
+    let harness: GatekeeperHarness | undefined;
+    let scheduler: Scheduler | undefined;
 
     Given(`the head commit has no white-glove run and no child checks`, () => {
-      harness = buildHarness({ whiteGloveRuns: [], childChecks: [] });
+      harness = buildGatekeeperHarness({ whiteGloveRuns: [], childChecks: [] });
+      scheduler = new Scheduler();
     });
     When(`the white-glove check is seeded for a pull request event`, async () => {
-      const built = requireHarness(harness);
-      const result = await reconcile(built.deps, OWNER, REPO, SHA, { emptyIsPending: true });
+      const built = requireGatekeeperHarness(harness);
+      if (scheduler === undefined) throw new Error("The scheduler has not been built yet.");
+      const first = await seedAndSchedule({ ...built.deps, scheduler }, OWNER, REPO, SHA);
+      if (first === undefined) {
+        throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
+      }
       // The first pass sees an empty commit, so it must hold the check pending.
-      expect(requireResult(result).evaluation.outcome).toBe("pending");
+      expect(first.result.evaluation.outcome).toBe("pending");
     });
     Then(`a new white-glove run is created on the head commit as pending`, () => {
-      const built = requireHarness(harness);
+      const built = requireGatekeeperHarness(harness);
+      scheduler?.cancelAll();
       expect(built.update).not.toHaveBeenCalled();
       expect(built.create).toHaveBeenCalledTimes(1);
       expect(built.create).toHaveBeenCalledWith(
@@ -365,7 +311,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     ({ Given, When, Then, And }) => {
       let whiteGloveRuns: RawCheckRun[] = [];
       let childChecks: RawCheckRun[] = [];
-      let harness: Harness | undefined;
+      let harness: GatekeeperHarness | undefined;
       let result: ReconcileResult | undefined;
 
       Given(`the head commit carries a white-glove run completed and failing`, () => {
@@ -375,8 +321,12 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
         childChecks = parseChildChecks("a failing build check");
       });
       When(`the white-glove check is reconciled for a completed check run event`, async () => {
-        harness = buildHarness({ whiteGloveRuns, childChecks });
-        result = await reconcile(harness.deps, OWNER, REPO, SHA);
+        harness = buildGatekeeperHarness({ whiteGloveRuns, childChecks });
+        // A foreign check run completed; reconciling our own would loop.
+        result = await handleCheckRunCompleted(harness.deps, OWNER, REPO, {
+          name: "build",
+          head_sha: SHA,
+        });
       });
       Then(`the fresh verdict is re-derived from every check on the head commit`, () => {
         const evaluation = requireResult(result).evaluation;
@@ -390,7 +340,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
         });
       });
       And(`the white-glove run with id 302 is updated in place as failed`, () => {
-        expectUpdatedAsFailed(requireHarness(harness), 302);
+        expectUpdatedAsFailed(requireGatekeeperHarness(harness), 302);
       });
     },
   );
@@ -400,7 +350,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     ({ Given, When, Then, And }) => {
       let whiteGloveRuns: RawCheckRun[] = [];
       let childChecks: RawCheckRun[] = [];
-      let harness: Harness | undefined;
+      let harness: GatekeeperHarness | undefined;
       let result: ReconcileResult | undefined;
 
       Given(`the head commit carries a white-glove run completed and failing`, () => {
@@ -409,11 +359,9 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       And(`the commit carries a failing build check`, () => {
         childChecks = parseChildChecks("a failing build check");
       });
-      // The check_suite.completed listener calls reconcile exactly like the
-      // check_run.completed one: no options either way.
       When(`the white-glove check is reconciled for a completed check suite event`, async () => {
-        harness = buildHarness({ whiteGloveRuns, childChecks });
-        result = await reconcile(harness.deps, OWNER, REPO, SHA);
+        harness = buildGatekeeperHarness({ whiteGloveRuns, childChecks });
+        result = await handleCheckSuiteCompleted(harness.deps, OWNER, REPO, SHA);
       });
       Then(`the fresh verdict is re-derived from every check on the head commit`, () => {
         const evaluation = requireResult(result).evaluation;
@@ -427,7 +375,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
         });
       });
       And(`the white-glove run with id 302 is updated in place as failed`, () => {
-        expectUpdatedAsFailed(requireHarness(harness), 302);
+        expectUpdatedAsFailed(requireGatekeeperHarness(harness), 302);
       });
     },
   );
@@ -435,7 +383,8 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
   Scenario(`A re-request re-derives the verdict fresh`, ({ Given, When, Then, And }) => {
     let whiteGloveRuns: RawCheckRun[] = [];
     let childChecks: RawCheckRun[] = [];
-    let harness: Harness | undefined;
+    let harness: GatekeeperHarness | undefined;
+    let scheduler: Scheduler | undefined;
 
     Given(`the head commit carries a white-glove run completed and failing`, () => {
       whiteGloveRuns = parseWhiteGloveRuns("a white-glove run completed and failing");
@@ -444,32 +393,40 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       childChecks = parseChildChecks("a failing build check");
     });
     When(`the white-glove check is re-requested`, async () => {
-      harness = buildHarness({ whiteGloveRuns, childChecks });
-      const result = await reconcile(harness.deps, OWNER, REPO, SHA, { emptyIsPending: true });
-      expect(requireResult(result).evaluation.outcome).toBe("failure");
+      harness = buildGatekeeperHarness({ whiteGloveRuns, childChecks });
+      scheduler = new Scheduler();
+      const first = await seedAndSchedule({ ...harness.deps, scheduler }, OWNER, REPO, SHA);
+      if (first === undefined) {
+        throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
+      }
+      expect(first.result.evaluation.outcome).toBe("failure");
+      // The commit already has checks, so the pass has nothing to wait for and
+      // leaves no re-check behind.
+      expect(first.scheduled).toBe(false);
     });
     Then(`the white-glove run with id 302 is updated in place as failed`, () => {
-      expectUpdatedAsFailed(requireHarness(harness), 302);
+      scheduler?.cancelAll();
+      expectUpdatedAsFailed(requireGatekeeperHarness(harness), 302);
     });
   });
 
   Scenario(`The gatekeeper is disabled`, ({ Given, When, Then, And }) => {
     let enabled = true;
-    let harness: Harness | undefined;
+    let harness: GatekeeperHarness | undefined;
     let result: ReconcileResult | undefined;
 
     Given(`gatekeeper.enabled is false`, () => {
       enabled = false;
     });
     And(`the head commit has no white-glove run and no child checks`, () => {
-      harness = buildHarness({ whiteGloveRuns: [], childChecks: [], enabled });
+      harness = buildGatekeeperHarness({ whiteGloveRuns: [], childChecks: [], enabled });
     });
     When(`the white-glove check is reconciled`, async () => {
-      const built = requireHarness(harness);
+      const built = requireGatekeeperHarness(harness);
       result = await reconcile(built.deps, OWNER, REPO, SHA);
     });
     Then(`no white-glove run is created or updated`, () => {
-      const built = requireHarness(harness);
+      const built = requireGatekeeperHarness(harness);
       expect(result).toBeUndefined();
       expect(built.create).not.toHaveBeenCalled();
       expect(built.update).not.toHaveBeenCalled();

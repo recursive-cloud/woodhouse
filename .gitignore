@@ -16,3 +16,7 @@ hk.local.pkl
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# desloppify local state
+.desloppify/
+scorecard.png

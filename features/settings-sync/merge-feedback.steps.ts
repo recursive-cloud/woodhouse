@@ -21,11 +21,12 @@ import type { ChangedFile } from "../../src/github/pulls.js";
 import {
   type Comment,
   SETTINGS_FILE,
-  fakeLogger,
-  fakeResolver,
+  asMergeFeedbackOctokit,
   httpError,
-  makeFeedbackOctokit,
-} from "./fakes.js";
+  makeOctokit,
+} from "./octokit-fakes.js";
+import { fakeResolver } from "./resolver-fakes.js";
+import { fakeLogger } from "../support/scenario.js";
 
 const feature = await loadFeature("features/settings-sync/merge-feedback.feature");
 
@@ -41,6 +42,9 @@ interface HarnessOptions {
   readonly existingRulesets?: readonly { id: number; name: string }[];
   readonly dryRun?: boolean;
 }
+
+/** No harness options: every field at its default. Read-only, so one instance is safe. */
+const NO_OPTIONS: HarnessOptions = {};
 
 function requireValue<T>(value: T | undefined, what: string): T {
   if (value === undefined) {
@@ -64,12 +68,12 @@ const SCOPE = { owner: "acme", repo: "widgets", defaultBranch: "main" } as const
 const PR = { number: 7, merged: true, baseRef: "main" };
 
 /** Handler harness with a literal fake resolver. */
-function fakeHarness(options: HarnessOptions = {}) {
-  const octokit = makeFeedbackOctokit(octokitOptions(options));
+function fakeHarness(options: HarnessOptions = NO_OPTIONS) {
+  const octokit = makeOctokit(octokitOptions(options));
   const log = fakeLogger();
   const fake = fakeResolver(options.configInput ?? ENABLED, options.resolution ?? {});
   const deps: MergeFeedbackDeps = {
-    octokit: octokit.octokit,
+    octokit: asMergeFeedbackOctokit(octokit.octokit),
     resolver: fake.resolver,
     mutex: new KeyedMutex(),
     log,
@@ -87,12 +91,12 @@ function fakeHarness(options: HarnessOptions = {}) {
 }
 
 /** Handler harness with the real `ConfigResolver` over a keyed Contents fake. */
-function realHarness(options: HarnessOptions = {}) {
-  const octokit = makeFeedbackOctokit(octokitOptions(options));
+function realHarness(options: HarnessOptions = NO_OPTIONS) {
+  const octokit = makeOctokit(octokitOptions(options));
   const log = fakeLogger();
   const resolver = new ConfigResolver();
   const deps: MergeFeedbackDeps = {
-    octokit: octokit.octokit,
+    octokit: asMergeFeedbackOctokit(octokit.octokit),
     resolver,
     mutex: new KeyedMutex(),
     log,

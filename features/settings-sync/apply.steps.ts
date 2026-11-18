@@ -14,19 +14,11 @@ import { createApp } from "../../src/app.js";
 import { Allowlist } from "../../src/security/allowlist.js";
 import { type ApplyContext, syncSettings } from "../../src/settings/apply.js";
 import type { ResolvedConfig } from "../../src/config/resolver.js";
-import {
-  type Gate,
-  OPEN_GATE,
-  closedContext,
-  fakeLogger,
-  fakeProbot,
-  makeAppOctokit,
-  makeApplyOctokit,
-  manualGate,
-  pushContext,
-  resolvedConfig,
-  settle,
-} from "./fakes.js";
+import { type Gate, OPEN_GATE, manualGate, settle } from "./concurrency.js";
+import { makeOctokit } from "./octokit-fakes.js";
+import { closedContext, fakeProbot, pushContext } from "./probot-fakes.js";
+import { resolvedConfig } from "./resolver-fakes.js";
+import { fakeLogger, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/settings-sync/apply.feature");
 
@@ -42,17 +34,6 @@ const FULL_CONFIG = {
 };
 
 const CONFIG_FILES = { "widgets:.github/woodhouse.yml": ENABLED_CONFIG };
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 function requireValue<T>(value: T | undefined, what: string): T {
   if (value === undefined) {
@@ -74,7 +55,7 @@ function appHarness() {
 
 /** The apply context every syncSettings-level scenario uses. */
 function applyContext(
-  octokit: ReturnType<typeof makeApplyOctokit>["octokit"],
+  octokit: ReturnType<typeof makeOctokit>["octokit"],
   log: Logger,
 ): ApplyContext {
   return {
@@ -91,13 +72,13 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     `A settings change landing on the default branch is synced`,
     ({ Given, When, Then, And }) => {
       let calls: string[] = [];
-      let octokit: ReturnType<typeof makeAppOctokit> | undefined;
+      let octokit: ReturnType<typeof makeOctokit> | undefined;
       let handled: Promise<void> | undefined;
 
       Given(`a default-branch push that modifies ".github/woodhouse.yml"`, () => {
         const harness = appHarness();
         calls = harness.calls;
-        octokit = makeAppOctokit({
+        octokit = makeOctokit({
           label: "push",
           calls,
           gate: OPEN_GATE,
@@ -136,7 +117,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     Given(`a push to another branch that modifies ".github/woodhouse.yml"`, () => {
       const harness = appHarness();
       calls = harness.calls;
-      const octokit = makeAppOctokit({
+      const octokit = makeOctokit({
         label: "push",
         calls,
         gate: OPEN_GATE,
@@ -166,7 +147,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     Given(`a default-branch push that deletes ".github/woodhouse.yml"`, () => {
       const harness = appHarness();
       calls = harness.calls;
-      const octokit = makeAppOctokit({
+      const octokit = makeOctokit({
         label: "push",
         calls,
         gate: OPEN_GATE,
@@ -194,13 +175,13 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     `A push touching a file merely named like the settings file is only a re-check`,
     ({ Given, When, Then, And }) => {
       let calls: string[] = [];
-      let octokit: ReturnType<typeof makeAppOctokit> | undefined;
+      let octokit: ReturnType<typeof makeOctokit> | undefined;
       let handled: Promise<void> | undefined;
 
       Given(`a default-branch push that touches only "docs/woodhouse.yml"`, () => {
         const harness = appHarness();
         calls = harness.calls;
-        octokit = makeAppOctokit({
+        octokit = makeOctokit({
           label: "push",
           calls,
           gate: OPEN_GATE,
@@ -239,7 +220,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
     `A resolution that fails the gate is never synced`,
     ({ Given, When, Then, And }, variables) => {
       let resolved: ResolvedConfig | undefined;
-      let built: ReturnType<typeof makeApplyOctokit> | undefined;
+      let built: ReturnType<typeof makeOctokit> | undefined;
       let log: Logger | undefined;
       let ctx: ApplyContext | undefined;
       let summary: Awaited<ReturnType<typeof syncSettings>> | undefined;
@@ -264,7 +245,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
             throw new Error(`Unrecognised resolution condition: ${JSON.stringify(condition)}`);
         }
 
-        built = makeApplyOctokit();
+        built = makeOctokit();
         log = fakeLogger();
         ctx = applyContext(built.octokit, log);
         expect(resolved).toBeDefined();
@@ -293,13 +274,13 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
   );
 
   Scenario(`A local settings file opts the repository in`, ({ Given, When, Then, And }) => {
-    let built: ReturnType<typeof makeApplyOctokit> | undefined;
+    let built: ReturnType<typeof makeOctokit> | undefined;
     let ctx: ApplyContext | undefined;
     let resolved: ResolvedConfig | undefined;
     let summary: Awaited<ReturnType<typeof syncSettings>> | undefined;
 
     Given(`a resolved configuration from a local settings file`, () => {
-      built = makeApplyOctokit({ current: { has_issues: false } });
+      built = makeOctokit({ current: { has_issues: false } });
       const log = fakeLogger();
       resolved = resolvedConfig(FULL_CONFIG);
       ctx = applyContext(built.octokit, log);
@@ -335,13 +316,13 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
   });
 
   Scenario(`Rulesets converge by re-declaration`, ({ Given, When, Then, And }) => {
-    let built: ReturnType<typeof makeApplyOctokit> | undefined;
+    let built: ReturnType<typeof makeOctokit> | undefined;
     let ctx: ApplyContext | undefined;
     let resolved: ResolvedConfig | undefined;
     let summary: Awaited<ReturnType<typeof syncSettings>> | undefined;
 
     Given(`a repository whose rulesets already match the configured rulesets`, () => {
-      built = makeApplyOctokit({ existingRulesets: [{ id: 42, name: "main" }] });
+      built = makeOctokit({ existingRulesets: [{ id: 42, name: "main" }] });
       const log = fakeLogger();
       resolved = resolvedConfig({ settings: { enabled: true }, rulesets: [{ name: "main" }] });
       ctx = applyContext(built.octokit, log);
@@ -370,13 +351,13 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
   });
 
   Scenario(`Branch protection converges by re-declaration`, ({ Given, When, Then, And }) => {
-    let built: ReturnType<typeof makeApplyOctokit> | undefined;
+    let built: ReturnType<typeof makeOctokit> | undefined;
     let ctx: ApplyContext | undefined;
     let resolved: ResolvedConfig | undefined;
     let summary: Awaited<ReturnType<typeof syncSettings>> | undefined;
 
     Given(`branch protection configured for branches whose protection already matches`, () => {
-      built = makeApplyOctokit();
+      built = makeOctokit();
       const log = fakeLogger();
       resolved = resolvedConfig({ branchProtection: { main: {} } });
       ctx = applyContext(built.octokit, log);
@@ -414,7 +395,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
   Scenario(
     `A removed branchProtection block stops the re-assertion`,
     ({ Given, When, Then, And }) => {
-      let built: ReturnType<typeof makeApplyOctokit> | undefined;
+      let built: ReturnType<typeof makeOctokit> | undefined;
       let ctx: ApplyContext | undefined;
       let resolved: ResolvedConfig | undefined;
       let summary: Awaited<ReturnType<typeof syncSettings>> | undefined;
@@ -422,7 +403,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       Given(
         `a configuration that no longer lists a branchProtection block whose protection was previously applied`,
         () => {
-          built = makeApplyOctokit();
+          built = makeOctokit();
           const log = fakeLogger();
           resolved = resolvedConfig({ settings: { enabled: true } });
           ctx = applyContext(built.octokit, log);
@@ -466,13 +447,13 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
           })(app);
 
           gate = manualGate();
-          const pushOctokit = makeAppOctokit({
+          const pushOctokit = makeOctokit({
             label: "push",
             calls,
             gate,
             configFiles: CONFIG_FILES,
           });
-          const closedOctokit = makeAppOctokit({
+          const closedOctokit = makeOctokit({
             label: "closed",
             calls,
             gate,

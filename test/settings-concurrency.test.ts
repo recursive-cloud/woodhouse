@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { Allowlist } from "../src/security/allowlist.js";
-import {
-  closedContext,
-  fakeProbot,
-  makeAppOctokit,
-  manualGate,
-  OPEN_GATE,
-  pushContext,
-  settle,
-} from "../features/settings-sync/fakes.js";
+import { makeOctokit } from "../features/settings-sync/octokit-fakes.js";
+import { OPEN_GATE, manualGate, settle } from "../features/settings-sync/concurrency.js";
+import { closedContext, fakeProbot, pushContext } from "../features/settings-sync/probot-fakes.js";
 
 /**
  * App-level concurrency characterisation.
@@ -46,14 +40,12 @@ describe("merge push and merged pull request race", () => {
 
     const push = deliver(
       "push",
-      pushContext(
-        makeAppOctokit({ label: "push", calls, gate, configFiles: CONFIG_FILES }).octokit,
-      ),
+      pushContext(makeOctokit({ label: "push", calls, gate, configFiles: CONFIG_FILES }).octokit),
     );
     const closed = deliver(
       "pull_request.closed",
       closedContext(
-        makeAppOctokit({ label: "closed", calls, gate, configFiles: CONFIG_FILES }).octokit,
+        makeOctokit({ label: "closed", calls, gate, configFiles: CONFIG_FILES }).octokit,
       ),
     );
 
@@ -97,7 +89,7 @@ describe("push dispatch negative cases", () => {
     // default must not start a sync.
     await deliver(
       "push",
-      pushContext(makeAppOctokit({ label: "push", calls, gate: OPEN_GATE }).octokit, {
+      pushContext(makeOctokit({ label: "push", calls, gate: OPEN_GATE }).octokit, {
         ref: "refs/heads/main",
         changed: ["docs/woodhouse.yml"],
       }),

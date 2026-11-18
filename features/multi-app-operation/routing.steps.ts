@@ -1,27 +1,16 @@
 import { expect, vi } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import type { Request, Response } from "express";
-import type { Logger } from "pino";
 import type { Probot } from "probot";
 import type { AppRegistry, RegisteredApp } from "../../src/apps/registry.js";
 import { Allowlist } from "../../src/security/allowlist.js";
 import { GuardedApp } from "../../src/security/guard.js";
 import { handleWebhook, TARGET_ID_HEADER, TARGET_TYPE_HEADER } from "../../src/webhook-route.js";
+import { fakeLogger, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/multi-app-operation/routing.feature");
 
 const APP_ID = 111;
-
-type ScenarioVariables = Record<string, unknown>;
-
-/** Read one Examples cell. A missing cell is a malformed scenario, not a value to guess. */
-function readCell(variables: ScenarioVariables, key: string): string {
-  const value = variables[key];
-  if (typeof value !== "string") {
-    throw new Error(`Scenario outline row is missing a string "${key}" cell.`);
-  }
-  return value;
-}
 
 /** Map a placeholder cell such as "absent" to the undefined header the route sees. */
 function readOptionalCell(cell: string, absent = "absent"): string | undefined {
@@ -31,22 +20,6 @@ function readOptionalCell(cell: string, absent = "absent"): string | undefined {
     throw new Error(`Unrecognised cell value: ${JSON.stringify(cell)}`);
   }
   return quoted[1];
-}
-
-function fakeLogger(): {
-  log: Logger;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-  info: ReturnType<typeof vi.fn>;
-  debug: ReturnType<typeof vi.fn>;
-} {
-  const warn = vi.fn();
-  const error = vi.fn();
-  const info = vi.fn();
-  const debug = vi.fn();
-  const log: Record<string, unknown> = { warn, error, info, debug };
-  log.child = vi.fn(() => log);
-  return { log: log as unknown as Logger, warn, error, info, debug };
 }
 
 /** Minimal Probot stand-in: just the surface `handleWebhook` and GuardedApp use. */
@@ -61,8 +34,13 @@ function fakeProbot(): {
   return { probot, verifyAndReceive, on };
 }
 
+type HeaderOverrides = Record<string, string | null>;
+
+/** No header overrides: every default header stays. Read-only, so one instance is safe. */
+const NO_OVERRIDES: HeaderOverrides = {};
+
 /** The headers GitHub sends with an App delivery, overridable per scenario. */
-function headers(overrides: Record<string, string | null> = {}): Record<string, string> {
+function headers(overrides: HeaderOverrides = NO_OVERRIDES): Record<string, string> {
   const values: Record<string, string> = {
     "x-github-delivery": "delivery-1",
     "x-github-event": "push",

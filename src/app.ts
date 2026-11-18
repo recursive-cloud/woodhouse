@@ -13,7 +13,12 @@ import type { Allowlist } from "./security/allowlist.js";
 import { GuardedApp } from "./security/guard.js";
 import { ConfigResolver, invalidateTouchedConfig } from "./config/resolver.js";
 import { isSettingsPath } from "./config/paths.js";
-import { isSelfCheck, reconcile } from "./gatekeeper/handler.js";
+import {
+  isSelfCheck,
+  reconcile,
+  type ReconcileDeps,
+  type ReconcileResult,
+} from "./gatekeeper/handler.js";
 import { syncSettings } from "./settings/apply.js";
 import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
@@ -29,6 +34,100 @@ export interface AppOptions {
   readonly baselineRepo: string;
   /** Evaluate and log, but never write to GitHub. */
   readonly dryRun: boolean;
+}
+
+/** Reconciliation dependencies plus the scheduler the grace path needs. */
+export interface GraceDeps extends ReconcileDeps {
+  readonly scheduler: Scheduler;
+}
+
+/** What the first pass saw and whether it scheduled a re-check. */
+export interface FirstPass {
+  readonly result: ReconcileResult;
+  readonly graceMs: number;
+  /** False when the commit is not waiting on checks, or the grace period is zero. */
+  readonly scheduled: boolean;
+}
+
+/**
+ * Seed the check on a commit, then look again once CI has had a chance to
+ * register.
+ *
+ * The first pass runs with `emptyIsPending`, because at this moment GitHub has
+ * almost certainly not created the Actions check runs yet and concluding "no
+ * checks, therefore success" would put a green required check on a commit
+ * nothing has tested. The scheduled second pass has no such constraint, so a
+ * commit that genuinely has no CI settles on success rather than blocking
+ * forever.
+ */
+export async function seedAndSchedule(
+  deps: GraceDeps,
+  owner: string,
+  repo: string,
+  sha: string,
+): Promise<FirstPass | undefined> {
+  const result = await reconcile(deps, owner, repo, sha, { emptyIsPending: true });
+  if (result === undefined) return undefined;
+
+  const graceMs = result.gatekeeper.gracePeriodSeconds * 1000;
+  if (!result.evaluation.awaitingStart) return { result, graceMs, scheduled: false };
+  if (graceMs === 0) return { result, graceMs, scheduled: false };
+
+  deps.log.debug(
+    { sha, graceSeconds: result.gatekeeper.gracePeriodSeconds },
+    "No checks yet; holding pending for the grace period",
+  );
+
+  deps.scheduler.schedule(
+    `${owner}/${repo}@${sha}`,
+    graceMs,
+    async () => {
+      await reconcile(deps, owner, repo, sha);
+    },
+    (error) => deps.log.error({ err: error, sha }, "Grace period recheck failed"),
+  );
+
+  return { result, graceMs, scheduled: true };
+}
+
+/** The fields of a completed check run the gatekeeper reacts to. */
+export interface CompletedCheckRun {
+  readonly name: string;
+  readonly head_sha: string;
+}
+
+/**
+ * React to a check run completing on a commit.
+ *
+ * A check run has just completed, so the commit demonstrably has checks: there
+ * is no empty-set ambiguity to guard against here.
+ */
+export async function handleCheckRunCompleted(
+  deps: ReconcileDeps,
+  owner: string,
+  repo: string,
+  checkRun: CompletedCheckRun,
+): Promise<ReconcileResult | undefined> {
+  // Reacting to our own completion would loop forever.
+  if (isSelfCheck(checkRun.name)) return undefined;
+
+  return reconcile(deps, owner, repo, checkRun.head_sha);
+}
+
+/**
+ * React to a check suite completing on a commit.
+ *
+ * A suite can complete having produced no check runs at all - for example when
+ * every workflow was filtered out by `paths`. Without this the grace period
+ * would be the only thing resolving that case.
+ */
+export async function handleCheckSuiteCompleted(
+  deps: ReconcileDeps,
+  owner: string,
+  repo: string,
+  sha: string,
+): Promise<ReconcileResult | undefined> {
+  return reconcile(deps, owner, repo, sha);
 }
 
 export function createApp(options: AppOptions) {
@@ -130,18 +229,11 @@ export function createApp(options: AppOptions) {
     guarded.on("check_run.completed", "white-glove:check_run", async (context, scope) => {
       if (scope.repo === undefined) return;
 
-      // Reacting to our own completion would loop forever.
-      if (isSelfCheck(context.payload.check_run.name)) return;
-
-      const sha = context.payload.check_run.head_sha;
-
-      // A check run has just completed, so the commit demonstrably has
-      // checks: there is no empty-set ambiguity to guard against here.
-      await reconcile(
+      await handleCheckRunCompleted(
         { octokit: context.octokit, ...deps(scope.log) },
         scope.owner,
         scope.repo,
-        sha,
+        context.payload.check_run,
       );
     });
 
@@ -151,58 +243,13 @@ export function createApp(options: AppOptions) {
     guarded.on("check_suite.completed", "white-glove:check_suite", async (context, scope) => {
       if (scope.repo === undefined) return;
 
-      await reconcile(
+      await handleCheckSuiteCompleted(
         { octokit: context.octokit, ...deps(scope.log) },
         scope.owner,
         scope.repo,
         context.payload.check_suite.head_sha,
       );
     });
-
-    /**
-     * Seed the check on a pull request, then look again once CI has had a
-     * chance to register.
-     *
-     * The first pass runs with `emptyIsPending`, because at this moment GitHub
-     * has almost certainly not created the Actions check runs yet and
-     * concluding "no checks, therefore success" would put a green required
-     * check on a commit nothing has tested. The scheduled second pass has no
-     * such constraint, so a commit that genuinely has no CI settles on success
-     * rather than blocking forever.
-     */
-    const seedAndSchedule = async (
-      octokit: Parameters<typeof reconcile>[0]["octokit"],
-      scope: { owner: string; repo: string; log: ReturnType<typeof deps>["log"] },
-      sha: string,
-    ) => {
-      const result = await reconcile(
-        { octokit, ...deps(scope.log) },
-        scope.owner,
-        scope.repo,
-        sha,
-        { emptyIsPending: true },
-      );
-
-      if (result === undefined) return;
-      if (!result.evaluation.awaitingStart) return;
-
-      const graceMs = result.gatekeeper.gracePeriodSeconds * 1000;
-      if (graceMs === 0) return;
-
-      scope.log.debug(
-        { sha, graceSeconds: result.gatekeeper.gracePeriodSeconds },
-        "No checks yet; holding pending for the grace period",
-      );
-
-      scheduler.schedule(
-        `${scope.owner}/${scope.repo}@${sha}`,
-        graceMs,
-        async () => {
-          await reconcile({ octokit, ...deps(scope.log) }, scope.owner, scope.repo, sha);
-        },
-        (error) => scope.log.error({ err: error, sha }, "Grace period recheck failed"),
-      );
-    };
 
     guarded.on(
       ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
@@ -211,8 +258,9 @@ export function createApp(options: AppOptions) {
         if (scope.repo === undefined) return;
 
         await seedAndSchedule(
-          context.octokit,
-          { owner: scope.owner, repo: scope.repo, log: scope.log },
+          { octokit: context.octokit, ...deps(scope.log), scheduler },
+          scope.owner,
+          scope.repo,
           context.payload.pull_request.head.sha,
         );
       },
@@ -231,8 +279,9 @@ export function createApp(options: AppOptions) {
             : context.payload.check_suite.head_sha;
 
         await seedAndSchedule(
-          context.octokit,
-          { owner: scope.owner, repo: scope.repo, log: scope.log },
+          { octokit: context.octokit, ...deps(scope.log), scheduler },
+          scope.owner,
+          scope.repo,
           sha,
         );
       },
