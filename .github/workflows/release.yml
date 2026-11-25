@@ -52,7 +52,7 @@ jobs:
       # exchange happens here, in this job: the minted credential never
       # leaves it.
       - id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -66,7 +66,7 @@ jobs:
       # workflows. The `id` is what lets the job's `outputs` block read this
       # step's results.
       - id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         with:
           token: ${{ steps.app-token.outputs.token }}
 
@@ -106,14 +106,14 @@ jobs:
           echo "major=v${MAJOR}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # ci.yml's push build for the same merge may still be running: release-
       # please cuts the release in seconds while the image job queues behind
