@@ -1,6 +1,23 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:best-practices"],
+  "timezone": "Australia/Brisbane",
+  "schedule": ["* 0-3 * * 1"],
+  "ignorePaths": ["k8s/kustomization.yaml"],
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "platformAutomerge": true
+    },
+    {
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "automerge": true,
+      "platformAutomerge": true
+    },
+    {
+      "matchUpdateTypes": ["minor", "major", "digest", "pin", "rollback"],
+      "reviewers": ["gunzy83"]
+    }
   ]
 }
