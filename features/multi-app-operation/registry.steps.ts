@@ -89,6 +89,13 @@ describeFeature(feature, ({ Scenario }) => {
       return registry;
     };
 
+    const registered = (label: string): boolean =>
+      info.mock.calls.some(
+        ([fields, message]) =>
+          message === "Registered GitHub App" &&
+          (fields as { app?: unknown } | undefined)?.app === label,
+      );
+
     Given(
       `a definition file configuring Apps "111" as "org-a-app" and "222" as "org-b-app"`,
       () => {
@@ -111,12 +118,6 @@ describeFeature(feature, ({ Scenario }) => {
     });
     And(`the startup log lists the labels "org-a-app" and "org-b-app"`, () => {
       requireRegistry();
-      const registered = (label: string): boolean =>
-        info.mock.calls.some(
-          ([fields, message]) =>
-            message === "Registered GitHub App" &&
-            (fields as { app?: unknown } | undefined)?.app === label,
-        );
       expect(registered("org-a-app")).toBe(true);
       expect(registered("org-b-app")).toBe(true);
     });
