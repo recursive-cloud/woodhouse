@@ -10,7 +10,7 @@ no Linear access or worktree workflow is expected.
 The maintainer's agents plan in the Linear project woodhouse (P-REC-2), implement in their own worktrees, and deliver pull requests against main. Decisions that must outlive a session are recorded in `docs/adr/`; those ADRs supplement the executable specs, and `docs/adr/README.md` explains the convention.
 
 ## Commands
-- toolchain: `mise install` (Node 22, hk, pkl) then `mise run install` — `npm ci` and the git hooks
+- toolchain: `mise install` (Node 24, hk, pkl) then `mise run install` — `npm ci` and the git hooks
 - test: `npm test` (single file: `npx vitest run test/policy.test.ts`; hermetic unit tests — no env, network or docker)
 - bdd: Gherkin scenarios under features/ run as part of npm test (vitest-cucumber); run one scenario file with `npx vitest run features/<capability>/<name>.steps.ts`
 - lint (report only): `mise run lint` (= `hk check`: oxlint + oxfmt) · fix: `mise run fix` · `npm run lint` alone is oxlint only — misses formatting
