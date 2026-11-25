@@ -1,9 +1,9 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1
 
 # -----------------------------------------------------------------------------
 # Stage 1 — install the full dependency tree (including dev) for the build.
 # -----------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS deps
+FROM node:24-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # -----------------------------------------------------------------------------
 # Stage 2 — compile TypeScript.
 # -----------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS build
+FROM node:24-bookworm-slim AS build
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ RUN npm run build
 # Resolved in a separate stage rather than by pruning stage 1, so no dev
 # package is ever present in a layer that reaches the final image.
 # -----------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS prod-deps
+FROM node:24-bookworm-slim AS prod-deps
 
 WORKDIR /app
 
@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # HEALTHCHECK instruction is possible (there is no curl to run) — Kubernetes
 # probes handle that instead, which is where it belongs for this deployment.
 # -----------------------------------------------------------------------------
-FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runtime
+FROM gcr.io/distroless/nodejs24-debian13:nonroot AS runtime
 
 WORKDIR /app
 

@@ -4,7 +4,7 @@
 # or lint difference is never down to a different runtime.
 
 [tools]
-node = "22"
+node = "24"
 hk = "latest"
 # hk evaluates hk.pkl; pkl is its config language.
 pkl = "latest"
@@ -35,6 +35,10 @@ run = "npm run build"
 description = "Regenerate the JSON Schema from the zod definitions"
 run = "npm run schema:generate"
 
+[tasks.schema-check]
+description = "Fail if the committed JSON Schema is stale"
+run = "npm run schema:check"
+
 [tasks.ci]
 description = "Everything CI runs, in the same order"
-depends = ["lint", "typecheck", "test", "build"]
+depends = ["lint", "typecheck", "test", "build", "schema-check"]
