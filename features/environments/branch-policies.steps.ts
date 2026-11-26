@@ -3,8 +3,8 @@
  *
  * Every scenario drives the real `syncSettings` orchestrator against the
  * recording octokit fake, so the cascade gate and the environments applier
- * behave exactly as they do in production. The branch-policy support does not
- * exist yet: these scenarios are the specification it must satisfy.
+ * behave exactly as they do in production. These scenarios pin the behaviour
+ * of the environments applier's branch-policy convergence.
  */
 
 import { expect, type TaskContext } from "vitest";
@@ -207,6 +207,12 @@ describeFeature(feature, ({ Scenario }) => {
             },
           }),
         );
+        // Pins that the mode flip is re-declared before the patterns are created.
+        const flip = w.built.calls.indexOf("repos.createOrUpdateEnvironment");
+        const firstCreate = w.built.calls.indexOf("repos.createDeploymentBranchPolicy");
+        expect(flip).toBeGreaterThanOrEqual(0);
+        expect(firstCreate).toBeGreaterThanOrEqual(0);
+        expect(flip).toBeLessThan(firstCreate);
       });
       And(`the declared patterns are present on the environment`, () => {
         expect(w.built.createDeploymentBranchPolicy).toHaveBeenCalledWith(

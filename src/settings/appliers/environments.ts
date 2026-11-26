@@ -93,6 +93,8 @@ async function convergeBranchPolicies(
 
     await withContext(`${environmentName}: ${pattern}`, () =>
       performWrite(ctx, `create branch policy ${environmentName}: ${pattern}`, () =>
+        // A 303 already-exists response resolves normally (octokit only throws
+        // at status >= 400) and is recorded as a create; no failure path for it.
         ctx.octokit.repos.createDeploymentBranchPolicy({
           owner: ctx.owner,
           repo: ctx.repo,
