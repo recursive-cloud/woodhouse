@@ -275,8 +275,48 @@ export const environmentSchema = z
       .describe(
         "Allow repository admins to deploy without meeting the protection rules. GitHub does not document this field on the REST reference, but it is accepted and functional. Omitted from the write when unset.",
       ),
+    deployment_branch_policy: z
+      .enum(["protected", "custom"])
+      .optional()
+      .describe(
+        'Branch-policy mode for this environment: "protected" allows only protected branches to deploy, "custom" allows the patterns in `branch_policies`. The config carries the plain mode string; the applier maps it to the REST API\'s mutually exclusive `deployment_branch_policy` object (`protected_branches` / `custom_branch_policies`) when writing the environment. Unset is sent as null, allowing all branches.',
+      ),
+    branch_policies: z
+      .array(z.string().trim().min(1))
+      .optional()
+      .describe(
+        'Branch-name patterns allowed to deploy when `deployment_branch_policy` is "custom". Patterns converge: created when missing on the environment, deleted when absent from this list. Requires `deployment_branch_policy: "custom"`. Patterns differing only in case are rejected as duplicates at authoring time.',
+      ),
   })
-  .strict();
+  .strict()
+  .superRefine((environment, ctx) => {
+    const policies = environment.branch_policies;
+    if (policies === undefined) return;
+
+    if (environment.deployment_branch_policy !== "custom") {
+      ctx.addIssue({
+        code: "custom",
+        message: 'branch_policies requires deployment_branch_policy "custom"',
+        path: ["branch_policies"],
+      });
+    }
+
+    // Case-insensitive pattern-collision check (see the `branch_policies` description).
+    const seen = new Map<string, string>();
+    policies.forEach((policy, index) => {
+      const key = policy.toLowerCase();
+      const first = seen.get(key);
+      if (first !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: `duplicate branch policy pattern "${policy}" (already used by "${first}")`,
+          path: ["branch_policies", index],
+        });
+      } else {
+        seen.set(key, policy);
+      }
+    });
+  });
 
 export const labelSchema = z
   .object({
@@ -445,7 +485,7 @@ export const woodhouseConfigSchema = z
       .default({})
       .meta({
         description:
-          "Deployment environments keyed by name, each name at most 255 characters; names differing only in case are rejected as duplicates at authoring time. Every configured environment is re-declared wholesale (PUT) on each sync, and reported as applied even when it already matches. Unset fields are sent as the API defaults (`wait_timer` 0, `prevent_self_review` false, `reviewers` null), so a bare entry declares an environment with no wait timer and no required reviewers; `deployment_branch_policy` is sent as null, allowing all branches. `reviewers: null` clears an inherited list. Matching is by exact declared name, so a case-variant environment already on the repository is left untouched. Environments are never deleted: removing an entry only stops the re-assertion. An entry whose value is explicit `null` removes that environment from the merged configuration and nothing is written for it — the convention a local file uses to clear an environment it inherited from the baseline.",
+          "Deployment environments keyed by name, each name at most 255 characters; names differing only in case are rejected as duplicates at authoring time. Every configured environment is re-declared wholesale (PUT) on each sync, and reported as applied even when it already matches. Unset fields are sent as the API defaults (`wait_timer` 0, `prevent_self_review` false, `reviewers` null), so a bare entry declares an environment with no wait timer and no required reviewers; an unset `deployment_branch_policy` is sent as null, allowing all branches. When the mode is set, the environment is re-declared with the mode mapped to the API's mutually exclusive `deployment_branch_policy` object, and in custom mode its branch-policy patterns converge to `branch_policies`: created when missing on the environment, deleted when absent from the list. That pattern deletion is deliberate and never touches the environment itself. `reviewers: null` clears an inherited list. Matching is by exact declared name, so a case-variant environment already on the repository is left untouched. Environments are never deleted: removing an entry only stops the re-assertion. An entry whose value is explicit `null` removes that environment from the merged configuration and nothing is written for it — the convention a local file uses to clear an environment it inherited from the baseline.",
       }),
     labels: z
       .array(labelSchema)

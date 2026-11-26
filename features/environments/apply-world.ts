@@ -14,7 +14,7 @@ import { mergeLayers } from "../../src/config/merge.js";
 import type { ResolvedConfig } from "../../src/config/resolver.js";
 import { defaultConfig, parseConfig } from "../../src/config/schema.js";
 import { type ApplyContext, syncSettings } from "../../src/settings/apply.js";
-import { makeOctokit } from "../settings-sync/octokit-fakes.js";
+import { type OctokitOptions, makeOctokit } from "../settings-sync/octokit-fakes.js";
 import { type FakeLogger, fakeLogger } from "../support/scenario.js";
 
 export { resolvedConfig } from "../settings-sync/resolver-fakes.js";
@@ -80,8 +80,11 @@ export interface EnvironmentsWorld {
 }
 
 /** Build one scenario's octokit fake, logger and apply context. */
-export function world(options?: { readonly dryRun?: boolean }): EnvironmentsWorld {
-  const built = makeOctokit();
+export function world(options?: {
+  readonly dryRun?: boolean;
+  readonly branchPolicies?: OctokitOptions["branchPolicies"];
+}): EnvironmentsWorld {
+  const built = makeOctokit({ branchPolicies: options?.branchPolicies });
   const log = fakeLogger();
   return {
     built,

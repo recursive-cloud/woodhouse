@@ -13,3 +13,5 @@ Format: status line, then Context (the forces at the time), Decision, and Conseq
 [0010. Check-Name Matching Is Case-Sensitive](./0010-case-sensitive-check-name-matching.md) records why `strictChecks` and `ignoredChecks` match check runs by exact name, so a case difference cannot satisfy or waive a requirement.
 
 [0011. Repository Environments Are Never Deleted; They Converge by Full Re-Declaration](./0011-repository-environments-never-deleted.md) records why deployment environments are re-declared wholesale on every sync and never deleted, extending ADR 0006's posture to environment protection rules.
+
+[0012. Deployment Branch Policies Under a Configured Environment Are Converged](./0012-deployment-branch-policies-are-converged.md) records that a configured environment's branch-policy patterns converge fully — created when missing, deleted when absent — amending 0011's never-deleted posture for patterns only, and that the config carries a plain mode string the applier maps to the API's mutually exclusive object.
