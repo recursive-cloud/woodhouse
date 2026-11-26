@@ -37,7 +37,7 @@ import type { ApplierContext, ApplierResult, ChangeRecord, Failure } from "./typ
  * classification still sees the HTTP status.
  */
 function contextualError(error: unknown, prefix: string): Error {
-  const labelled = new Error(`${prefix}: ${messageOf(error)}`);
+  const labelled = new Error(`${prefix}: ${messageOf(error)}`, { cause: error });
   const status = statusOf(error);
   if (status !== undefined) Object.assign(labelled, { status });
   return labelled;
