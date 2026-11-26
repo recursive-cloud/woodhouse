@@ -232,6 +232,52 @@ export const branchProtectionSchema = z
   })
   .strict();
 
+/**
+ * Deployment environment settings, keyed by environment name in
+ * `woodhouseConfigSchema`.
+ */
+export const environmentSchema = z
+  .object({
+    wait_timer: z
+      .number()
+      .int()
+      .min(0)
+      .max(43200)
+      .optional()
+      .describe(
+        "Minutes a deployment waits before it can proceed (0-43200). Sent as 0 when unset.",
+      ),
+    prevent_self_review: z
+      .boolean()
+      .optional()
+      .describe(
+        "Block the user who triggered a deployment from approving it. Sent as false when unset.",
+      ),
+    reviewers: z
+      .array(
+        z
+          .object({
+            type: z.enum(["User", "Team"]).describe("Whether `id` names a user or a team."),
+            id: z.number().int().describe("Numeric ID of the user or team."),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(6)
+      .nullable()
+      .optional()
+      .describe(
+        "Required reviewers, at most 6. A present list needs at least one entry; null clears an inherited list. Sent as null when unset.",
+      ),
+    can_admins_bypass: z
+      .boolean()
+      .optional()
+      .describe(
+        "Allow repository admins to deploy without meeting the protection rules. GitHub does not document this field on the REST reference, but it is accepted and functional. Omitted from the write when unset.",
+      ),
+  })
+  .strict();
+
 export const labelSchema = z
   .object({
     name: z.string().trim().min(1).describe("Label name."),
@@ -377,6 +423,30 @@ export const woodhouseConfigSchema = z
       .describe(
         "Classic branch protection keyed by branch name; every configured branch is re-declared wholesale and idempotently (PUT) on each sync, and reported as applied even when the protection already matches. Fields left unset are omitted from the write (GitHub keeps them as-is), except the three API-required fields (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`), which are sent as explicit `null` when unset; a branch that does not exist is skipped, not an error. Removing a branch block ends the re-assertion and does not delete the protection behind it — a deliberate choice, not an API limit: a prune would be mechanically possible but silently deleting protection Woodhouse did not create is unacceptable; off-board via the assisted Convert to ruleset flow (README.md, Moving off branch protection?).",
       ),
+    environments: z
+      .record(z.string().max(255), environmentSchema)
+      // Case-insensitive name-collision check (see the `environments` description).
+      .superRefine((environments, ctx) => {
+        const seen = new Map<string, string>();
+        for (const name of Object.keys(environments)) {
+          const key = name.toLowerCase();
+          const first = seen.get(key);
+          if (first !== undefined) {
+            ctx.addIssue({
+              code: "custom",
+              message: `duplicate environment name "${name}" (already used by "${first}")`,
+              path: [name],
+            });
+          } else {
+            seen.set(key, name);
+          }
+        }
+      })
+      .default({})
+      .meta({
+        description:
+          "Deployment environments keyed by name, each name at most 255 characters; names differing only in case are rejected as duplicates at authoring time. Every configured environment is re-declared wholesale (PUT) on each sync, and reported as applied even when it already matches. Unset fields are sent as the API defaults (`wait_timer` 0, `prevent_self_review` false, `reviewers` null), so a bare entry declares an environment with no wait timer and no required reviewers; `deployment_branch_policy` is sent as null, allowing all branches. `reviewers: null` clears an inherited list. Matching is by exact declared name, so a case-variant environment already on the repository is left untouched. Environments are never deleted: removing an entry only stops the re-assertion.",
+      }),
     labels: z
       .array(labelSchema)
       .default([])
@@ -436,6 +506,8 @@ export type AutoApprovalConfig = WoodhouseConfig["autoApproval"];
 export type SettingsConfig = WoodhouseConfig["settings"];
 export type RepositoryConfig = WoodhouseConfig["repository"];
 export type BranchProtectionConfig = z.infer<typeof branchProtectionSchema>;
+export type EnvironmentConfig = z.infer<typeof environmentSchema>;
+export type EnvironmentsConfig = WoodhouseConfig["environments"];
 export type LabelConfig = z.infer<typeof labelSchema>;
 export type RulesetConfig = z.infer<typeof rulesetSchema>;
 
