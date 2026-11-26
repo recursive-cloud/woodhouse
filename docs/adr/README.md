@@ -11,3 +11,5 @@ Format: status line, then Context (the forces at the time), Decision, and Conseq
 [0009. Settings Sync Opts In by Config File Presence](./0009-settings-sync-opt-in-by-file.md) records why a repository's own `.github/woodhouse.yml` is the settings-sync opt-in, with `settings.enabled` as the kill switch and the baseline root file never managing the baseline repository itself.
 
 [0010. Check-Name Matching Is Case-Sensitive](./0010-case-sensitive-check-name-matching.md) records why `strictChecks` and `ignoredChecks` match check runs by exact name, so a case difference cannot satisfy or waive a requirement.
+
+[0011. Repository Environments Are Never Deleted](./0011-repository-environments-never-deleted.md) extends ADR 0006's posture to environments: full re-declaration on every sync, and removing a config entry only stops the re-assertion.

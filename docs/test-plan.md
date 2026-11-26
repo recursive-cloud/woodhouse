@@ -277,6 +277,7 @@ letting it write.
 | 5.18 | Disabled on merge | Merge a PR setting `settings.enabled: false` | No sync, no comment; log only |
 | 5.19 | Merge push already applied | With `DRY_RUN=false`, merge a settings PR | Comment says the settings are in effect and nothing further needed changing |
 | 5.20 | Baseline merge | Merge a PR changing `.github-private`'s root `woodhouse.yml` | Without `.github/woodhouse.yml` in `.github-private`: no sync and no comment (gate `no-local-file`). With its own `.github/woodhouse.yml`: the comment states the baseline was synced directly and other repositories adopt the change at their next event |
+| 5.21 | Environments reset hand-set drift | Add `environments.production: {wait_timer: 10}`, sync, then hand-set reviewers on the `production` environment in the GitHub UI | The next sync clears the hand-set reviewers: the PUT sends the full declared state (GitHub documents neither replace nor merge semantics for this endpoint), so the environment converges to exactly what is configured |
 
 ## Phase 6 — end to end
 

@@ -26,7 +26,7 @@ Probot instance directly, so a new listener cannot accidentally skip the check.
 **Cascading settings sync.** On a push to the default branch, Woodhouse merges
 `woodhouse.yml` from your owner-level `.github-private` repository with
 `.github/woodhouse.yml` from the repository itself, and reconciles repository
-options, topics, labels, branch protection and rulesets. Settings are diffed
+options, topics, labels, branch protection, rulesets and environments. Settings are diffed
 before writing, so an unchanged repository costs no write calls. Merging a pull
 request that changes a settings file into the default branch triggers the same
 sync, and Woodhouse comments on that pull request with the outcome: what was
@@ -84,12 +84,12 @@ requests. Set `BASELINE_REPO` to override the location.
 Both the baseline repo and the repositories being managed must be included in
 the App installation, or Woodhouse cannot read them.
 
-> **Private repositories on the Free plan** can use neither `branchProtection`
-> nor `rulesets` — both require the repository to be public, or a paid plan
-> (Pro, Team or Enterprise) if it is private. Everything else (repository
-> options, topics, labels, the white-glove check and auto-approval) works
-> regardless. Woodhouse says so explicitly when the API refuses, rather than
-> logging a bare 403.
+> **Private repositories on the Free plan** can use neither `branchProtection`,
+> `rulesets` nor `environments` — all three require the repository to be
+> public, or a paid plan (Pro, Team or Enterprise) if it is private. Everything
+> else (repository options, topics, labels, the white-glove check and
+> auto-approval) works regardless. Woodhouse says so explicitly when the API
+> refuses, rather than logging a bare 403.
 
 **Moving off branch protection?** GitHub ships an *assisted* converter rather
 than an automatic one: under repository Settings → Branches, each branch
@@ -99,6 +99,19 @@ rule at a time, so a repository can migrate at its own pace. Woodhouse manages
 both surfaces but deliberately ships no migration code of its own — see
 GitHub's [Converting branch protections to
 rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/converting-branch-protections-to-rulesets).
+
+**Environments.** The `environments` section declares deployment environments
+by name, and every configured environment is re-declared with its full
+protection state on each sync: `wait_timer` (minutes, 0-43200),
+`prevent_self_review`, `reviewers` (one to six `{type: User | Team, id}`
+entries — a `reviewers: null` clears an inherited list) and
+`can_admins_bypass`, which GitHub does not document but accepts. Every field is
+optional, so a bare entry declares an environment with no wait timer and no
+required reviewers — the shape for an environment enforcing OIDC claims only.
+Unset fields are written as the API defaults, so hand-tuned drift converges
+back to the declared state. Environments are never deleted: removing an entry
+stops the re-assertion, and a name that differs only in case from an existing
+environment is left untouched because matching is by exact declared name.
 
 Unknown keys are rejected. A misspelled `allowedActor` that silently did
 nothing would be a security problem, not a cosmetic one — so pull requests that
@@ -134,7 +147,7 @@ Create an App at `https://github.com/settings/apps/new` with:
 
 | Scope | Access | Needed for |
 | --- | --- | --- |
-| Administration | Read & write | repository settings, branch protection, rulesets |
+| Administration | Read & write | repository settings, branch protection, rulesets, environments |
 | Checks | Read & write | the white-glove and config checks |
 | Contents | Read & write | reading `woodhouse.yml`; also required for approvals to satisfy branch protection and for auto-merge |
 | Issues | Read & write | label sync |

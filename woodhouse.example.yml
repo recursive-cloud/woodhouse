@@ -90,6 +90,32 @@ branchProtection:
   # Branches that do not exist are skipped silently, so a shared baseline can
   # name both `main` and `master` without erroring on repos that have one.
 
+# Deployment environments, keyed by environment name. Every configured
+# environment is re-declared with its full protection state on each sync, so
+# hand-tuned settings drift back to this baseline. Environments are never
+# deleted: removing an entry here only stops the re-assertion.
+environments:
+  production:
+    # Minutes a deployment waits before it can proceed (0-43200). Sent as 0
+    # when unset.
+    wait_timer: 10
+    # Block the user who triggered a deployment from approving it.
+    prevent_self_review: true
+    # Required reviewers, one to six entries. `null` clears an inherited list.
+    reviewers:
+      - type: User
+        id: 1
+    # GitHub does not document this field, but it is accepted: admins may
+    # deploy without meeting the protection rules. Omitted from the write
+    # when unset.
+    # can_admins_bypass: false
+
+  # A bare entry declares an environment with no wait timer and no required
+  # reviewers — the shape for an environment enforcing OIDC claims only.
+  # Like branch protection, environments need the repository public or a paid
+  # plan when it is private.
+  # staging: {}
+
 gatekeeper:
   enabled: true
 
