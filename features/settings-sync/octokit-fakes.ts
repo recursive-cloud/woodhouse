@@ -133,60 +133,83 @@ export interface OctokitOptions {
   readonly branchPolicies?: readonly BranchPolicy[];
 }
 
-/**
- * The deployment branch-policy surface, backed by a per-environment map so a
- * create, delete and list see the same state a live environment would.
- */
-function makeBranchPolicySurface(record: CallLog, seeded: readonly BranchPolicy[]) {
+/** The state a fake deployment environment's branch policies live in. */
+interface BranchPolicyState {
+  readonly byEnvironment: Map<string, BranchPolicy[]>;
+  readonly nextId: { value: number };
+}
+
+/** Build the branch-policy state from the policies already on the environment. */
+function seedBranchPolicyState(seeded: readonly BranchPolicy[]): BranchPolicyState {
   const byEnvironment = new Map<string, BranchPolicy[]>();
   for (const policy of seeded) {
     const entries = byEnvironment.get(policy.environment) ?? [];
     entries.push({ ...policy });
     byEnvironment.set(policy.environment, entries);
   }
-  let nextId = seeded.reduce((max, policy) => Math.max(max, policy.id), 0) + 1;
+  const nextId = { value: seeded.reduce((max, policy) => Math.max(max, policy.id), 0) + 1 };
+  return { byEnvironment, nextId };
+}
 
-  const listDeploymentBranchPolicies = recorded(
-    record,
-    "repos.listDeploymentBranchPolicies",
-    async ({ environment_name }: { environment_name: string }) => {
-      const branch_policies = [...(byEnvironment.get(environment_name) ?? [])];
-      return { data: { total_count: branch_policies.length, branch_policies } };
-    },
-  );
-  const createDeploymentBranchPolicy = recorded(
-    record,
-    "repos.createDeploymentBranchPolicy",
-    async ({ environment_name, name }: { environment_name: string; name: string }) => {
-      const entry: BranchPolicy = { id: nextId++, name, environment: environment_name };
-      const entries = byEnvironment.get(environment_name) ?? [];
-      entries.push(entry);
-      byEnvironment.set(environment_name, entries);
-      return { data: entry };
-    },
-  );
-  const deleteDeploymentBranchPolicy = recorded(
-    record,
-    "repos.deleteDeploymentBranchPolicy",
-    async ({ branch_policy_id }: { branch_policy_id: number }) => {
-      for (const entries of byEnvironment.values()) {
-        const index = entries.findIndex((entry) => entry.id === branch_policy_id);
-        if (index !== -1) {
-          entries.splice(index, 1);
-          break;
-        }
-      }
-      return emptyPayload();
-    },
-  );
-  const branchPolicyStore = (): readonly BranchPolicy[] =>
-    [...byEnvironment.values()].flat().map((policy) => Object.assign({}, policy));
+/** The listing response for one environment's policies. */
+function listBranchPolicies(state: BranchPolicyState, environmentName: string) {
+  const branch_policies = [...(state.byEnvironment.get(environmentName) ?? [])];
+  return { data: { total_count: branch_policies.length, branch_policies } };
+}
+
+/** Add one policy to an environment and return the created entry. */
+function createBranchPolicy(state: BranchPolicyState, environmentName: string, name: string) {
+  const entry: BranchPolicy = { id: state.nextId.value++, name, environment: environmentName };
+  const entries = state.byEnvironment.get(environmentName) ?? [];
+  entries.push(entry);
+  state.byEnvironment.set(environmentName, entries);
+  return { data: entry };
+}
+
+/** Remove the policy with `policyId` from whichever environment holds it. */
+function deleteBranchPolicy(state: BranchPolicyState, policyId: number) {
+  for (const entries of state.byEnvironment.values()) {
+    const index = entries.findIndex((entry) => entry.id === policyId);
+    if (index !== -1) {
+      entries.splice(index, 1);
+      break;
+    }
+  }
+  return emptyPayload();
+}
+
+/** A copy of every branch policy the fake currently holds. */
+function readBranchPolicies(state: BranchPolicyState): readonly BranchPolicy[] {
+  return [...state.byEnvironment.values()].flat().map((policy) => Object.assign({}, policy));
+}
+
+/**
+ * The deployment branch-policy surface, backed by a per-environment map so a
+ * create, delete and list see the same state a live environment would.
+ */
+function makeBranchPolicySurface(record: CallLog, seeded: readonly BranchPolicy[]) {
+  const state = seedBranchPolicyState(seeded);
 
   return {
-    listDeploymentBranchPolicies,
-    createDeploymentBranchPolicy,
-    deleteDeploymentBranchPolicy,
-    branchPolicyStore,
+    listDeploymentBranchPolicies: recorded(
+      record,
+      "repos.listDeploymentBranchPolicies",
+      ({ environment_name }: { environment_name: string }) =>
+        listBranchPolicies(state, environment_name),
+    ),
+    createDeploymentBranchPolicy: recorded(
+      record,
+      "repos.createDeploymentBranchPolicy",
+      ({ environment_name, name }: { environment_name: string; name: string }) =>
+        createBranchPolicy(state, environment_name, name),
+    ),
+    deleteDeploymentBranchPolicy: recorded(
+      record,
+      "repos.deleteDeploymentBranchPolicy",
+      ({ branch_policy_id }: { branch_policy_id: number }) =>
+        deleteBranchPolicy(state, branch_policy_id),
+    ),
+    branchPolicyStore: (): readonly BranchPolicy[] => readBranchPolicies(state),
   };
 }
 

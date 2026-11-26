@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config/schema.js";
+import { environmentSchema, environmentsSchema } from "../src/config/schema-environments.js";
 
 /** Parse one environment entry under the given name. */
 function withEnvironment(name: string, environment: unknown) {
@@ -113,5 +114,23 @@ describe("environments config", () => {
 
   it("still rejects an unknown top-level key", () => {
     expect(parseConfig({ environment: {} }).ok).toBe(false);
+  });
+});
+
+describe("environments schema", () => {
+  it("parses a bare entry without inventing a wait timer or reviewers", () => {
+    expect(environmentSchema.parse({})).toEqual({});
+  });
+
+  it("keeps an explicit null entry as clearing that environment", () => {
+    expect(environmentsSchema.parse({ staging: null })).toEqual({ staging: null });
+  });
+
+  it("rejects branch_policies without custom mode", () => {
+    expect(environmentSchema.safeParse({ branch_policies: ["main"] }).success).toBe(false);
+  });
+
+  it("rejects environment names that differ only in case", () => {
+    expect(environmentsSchema.safeParse({ Prod: {}, prod: {} }).success).toBe(false);
   });
 });

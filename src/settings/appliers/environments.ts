@@ -205,20 +205,6 @@ async function declareEnvironment(
   return { area: "environments", action: "update", target: name };
 }
 
-/**
- * Converge one environment's branch-policy patterns. Only custom mode has a
- * pattern list; branch_policies is rejected at authoring time under any other
- * mode, so there is nothing to converge.
- */
-async function applyBranchPolicies(
-  ctx: ApplierContext,
-  name: string,
-  environment: EnvironmentConfig,
-): Promise<ChangeRecord[]> {
-  if (environment.deployment_branch_policy !== "custom") return [];
-  return convergeBranchPolicies(ctx, name, environment.branch_policies ?? []);
-}
-
 /** One environment's failure, split for the log and the reported summary. */
 interface ClassifiedFailure {
   readonly status: number | undefined;
@@ -261,7 +247,13 @@ export async function applyEnvironments(
 
     try {
       changes.push(await declareEnvironment(ctx, name, environment));
-      changes.push(...(await applyBranchPolicies(ctx, name, environment)));
+      // Only custom mode has a pattern list; branch_policies is rejected at
+      // authoring time under any other mode, so there is nothing to converge.
+      if (environment.deployment_branch_policy === "custom") {
+        changes.push(
+          ...(await convergeBranchPolicies(ctx, name, environment.branch_policies ?? [])),
+        );
+      }
     } catch (error) {
       const { status, message, detail } = classifyFailure(error);
 
