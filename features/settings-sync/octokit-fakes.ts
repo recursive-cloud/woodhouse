@@ -23,6 +23,13 @@ export interface Comment {
   body?: string;
 }
 
+/** One deployment branch policy as the fake stores it. */
+export interface BranchPolicy {
+  readonly id: number;
+  readonly name: string;
+  readonly environment: string;
+}
+
 /** An error shaped like an Octokit request failure. */
 export function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
@@ -80,6 +87,9 @@ export interface RecordingOctokit {
     | "updateBranchProtection"
     | "createOrUpdateEnvironment"
     | "getAllEnvironments"
+    | "listDeploymentBranchPolicies"
+    | "createDeploymentBranchPolicy"
+    | "deleteDeploymentBranchPolicy"
   >;
   readonly issues: Methods<
     "issues",
@@ -119,6 +129,8 @@ export interface OctokitOptions {
   readonly files?: readonly ChangedFile[];
   readonly comments?: readonly Comment[];
   readonly existingRulesets?: readonly { id: number; name: string }[];
+  /** Deployment branch policies already present on the environment. */
+  readonly branchPolicies?: readonly BranchPolicy[];
 }
 
 /**
@@ -136,6 +148,7 @@ export function makeOctokit(options?: OctokitOptions) {
     files = [SETTINGS_FILE],
     comments = [],
     existingRulesets = [],
+    branchPolicies: seededBranchPolicies = [],
     calls: providedCalls,
   } = options ?? {};
   const calls = providedCalls ?? [];
@@ -155,6 +168,51 @@ export function makeOctokit(options?: OctokitOptions) {
     emptyPayload,
   );
   const getAllEnvironments = recorded(record, "repos.getAllEnvironments", emptyPayload);
+
+  const branchPoliciesByEnvironment = new Map<string, BranchPolicy[]>();
+  for (const policy of seededBranchPolicies) {
+    const entries = branchPoliciesByEnvironment.get(policy.environment) ?? [];
+    entries.push({ ...policy });
+    branchPoliciesByEnvironment.set(policy.environment, entries);
+  }
+  let nextBranchPolicyId =
+    seededBranchPolicies.reduce((max, policy) => Math.max(max, policy.id), 0) + 1;
+
+  const listDeploymentBranchPolicies = recorded(
+    record,
+    "repos.listDeploymentBranchPolicies",
+    async ({ environment_name }: { environment_name: string }) => {
+      const branch_policies = [...(branchPoliciesByEnvironment.get(environment_name) ?? [])];
+      return { data: { total_count: branch_policies.length, branch_policies } };
+    },
+  );
+  const createDeploymentBranchPolicy = recorded(
+    record,
+    "repos.createDeploymentBranchPolicy",
+    async ({ environment_name, name }: { environment_name: string; name: string }) => {
+      const entry: BranchPolicy = { id: nextBranchPolicyId++, name, environment: environment_name };
+      const entries = branchPoliciesByEnvironment.get(environment_name) ?? [];
+      entries.push(entry);
+      branchPoliciesByEnvironment.set(environment_name, entries);
+      return { data: entry };
+    },
+  );
+  const deleteDeploymentBranchPolicy = recorded(
+    record,
+    "repos.deleteDeploymentBranchPolicy",
+    async ({ branch_policy_id }: { branch_policy_id: number }) => {
+      for (const entries of branchPoliciesByEnvironment.values()) {
+        const index = entries.findIndex((entry) => entry.id === branch_policy_id);
+        if (index !== -1) {
+          entries.splice(index, 1);
+          break;
+        }
+      }
+      return emptyPayload();
+    },
+  );
+  const branchPolicyStore = (): readonly BranchPolicy[] =>
+    [...branchPoliciesByEnvironment.values()].flat().map((policy) => Object.assign({}, policy));
 
   const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
   const createLabel = recorded(record, "issues.createLabel", emptyPayload);
@@ -192,6 +250,9 @@ export function makeOctokit(options?: OctokitOptions) {
       updateBranchProtection,
       createOrUpdateEnvironment,
       getAllEnvironments,
+      listDeploymentBranchPolicies,
+      createDeploymentBranchPolicy,
+      deleteDeploymentBranchPolicy,
     },
     issues: {
       listLabelsForRepo,
@@ -218,6 +279,10 @@ export function makeOctokit(options?: OctokitOptions) {
     updateBranchProtection,
     createOrUpdateEnvironment,
     getAllEnvironments,
+    listDeploymentBranchPolicies,
+    createDeploymentBranchPolicy,
+    deleteDeploymentBranchPolicy,
+    branchPolicyStore,
     listLabelsForRepo,
     createLabel,
     updateLabel,
