@@ -73,7 +73,13 @@ type ClientMethod<Name extends keyof OctokitApi> = Record<Name, Stub>[Name];
 export interface RecordingOctokit {
   readonly repos: Methods<
     "repos",
-    "get" | "getContent" | "update" | "replaceAllTopics" | "updateBranchProtection"
+    | "get"
+    | "getContent"
+    | "update"
+    | "replaceAllTopics"
+    | "updateBranchProtection"
+    | "createOrUpdateEnvironment"
+    | "getAllEnvironments"
   >;
   readonly issues: Methods<
     "issues",
@@ -143,6 +149,12 @@ export function makeOctokit(options?: OctokitOptions) {
   const update = recorded(record, "repos.update", emptyPayload);
   const replaceAllTopics = recorded(record, "repos.replaceAllTopics", emptyPayload);
   const updateBranchProtection = recorded(record, "repos.updateBranchProtection", emptyPayload);
+  const createOrUpdateEnvironment = recorded(
+    record,
+    "repos.createOrUpdateEnvironment",
+    emptyPayload,
+  );
+  const getAllEnvironments = recorded(record, "repos.getAllEnvironments", emptyPayload);
 
   const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
   const createLabel = recorded(record, "issues.createLabel", emptyPayload);
@@ -172,7 +184,15 @@ export function makeOctokit(options?: OctokitOptions) {
   const request = recorded(record, (route: string) => `request ${route}`, emptyPayload);
 
   const octokit: RecordingOctokit = {
-    repos: { get, getContent, update, replaceAllTopics, updateBranchProtection },
+    repos: {
+      get,
+      getContent,
+      update,
+      replaceAllTopics,
+      updateBranchProtection,
+      createOrUpdateEnvironment,
+      getAllEnvironments,
+    },
     issues: {
       listLabelsForRepo,
       createLabel,
@@ -196,6 +216,8 @@ export function makeOctokit(options?: OctokitOptions) {
     update,
     replaceAllTopics,
     updateBranchProtection,
+    createOrUpdateEnvironment,
+    getAllEnvironments,
     listLabelsForRepo,
     createLabel,
     updateLabel,
