@@ -26,8 +26,8 @@ interface FakeOctokitOptions {
  * listing returns the configured seed; individual tests override the create
  * and delete results when they need a failure or an already-exists response.
  */
-function fakeOctokit(options: FakeOctokitOptions = {}) {
-  const branchPolicies = options.branchPolicies ?? [];
+function fakeOctokit(options?: FakeOctokitOptions) {
+  const branchPolicies = options?.branchPolicies ?? [];
 
   const createOrUpdateEnvironment = vi.fn(async () => ({ data: {} }));
   const listDeploymentBranchPolicies = vi.fn(async () => ({
@@ -77,9 +77,9 @@ function fakeLogger() {
 }
 
 function build(
-  configInput: Record<string, unknown> = {},
+  configInput?: Record<string, unknown>,
   dryRun = false,
-  options: FakeOctokitOptions = {},
+  options?: FakeOctokitOptions,
 ) {
   const fake = fakeOctokit(options);
   const log = fakeLogger();
@@ -91,7 +91,7 @@ function build(
     dryRun,
   } as unknown as ApplierContext;
 
-  return { ...fake, log, ctx, config: woodhouseConfigSchema.parse(configInput) };
+  return { ...fake, log, ctx, config: woodhouseConfigSchema.parse(configInput ?? {}) };
 }
 
 /** An error shaped like an Octokit request failure. */

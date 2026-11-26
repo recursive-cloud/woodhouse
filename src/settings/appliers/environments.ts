@@ -19,7 +19,8 @@
  * failure must not leave the rest of the declared set unapplied.
  */
 
-import type { WoodhouseConfig } from "../../config/schema.js";
+import type { Endpoints } from "@octokit/types";
+import type { EnvironmentConfig, WoodhouseConfig } from "../../config/schema.js";
 import { performWrite } from "../../lib/dry-run.js";
 import {
   describeForbidden,
@@ -143,6 +144,107 @@ async function convergeBranchPolicies(
   return changes;
 }
 
+/**
+ * The REST API's `deployment_branch_policy` object for a configured mode. The
+ * config carries a plain mode string; the API takes two mutually exclusive
+ * booleans. Unset stays null, which allows every branch to deploy.
+ */
+function deploymentBranchPolicyPayload(
+  mode: EnvironmentConfig["deployment_branch_policy"],
+): { protected_branches: boolean; custom_branch_policies: boolean } | null {
+  if (mode === undefined) return null;
+  return {
+    protected_branches: mode === "protected",
+    custom_branch_policies: mode === "custom",
+  };
+}
+
+/**
+ * The body of `createOrUpdateEnvironment`, taken from the octokit endpoint
+ * definition so a mistyped field is a compile error even though the body is
+ * spread into the call. Octokit's generated types omit `can_admins_bypass`
+ * (GitHub accepts it undocumented), so it is added explicitly.
+ */
+type EnvironmentWriteBody = Omit<
+  Endpoints["PUT /repos/{owner}/{repo}/environments/{environment_name}"]["parameters"],
+  "owner" | "repo" | "environment_name"
+> & { can_admins_bypass?: boolean };
+
+/**
+ * The full desired state sent when declaring one environment. The PUT replaces
+ * the environment, so every optional field is sent explicitly rather than left
+ * to GitHub; `can_admins_bypass` is omitted when unset.
+ */
+function environmentWriteBody(environment: EnvironmentConfig): EnvironmentWriteBody {
+  return {
+    wait_timer: environment.wait_timer ?? 0,
+    prevent_self_review: environment.prevent_self_review ?? false,
+    deployment_branch_policy: deploymentBranchPolicyPayload(environment.deployment_branch_policy),
+    reviewers: environment.reviewers ?? null,
+    ...(environment.can_admins_bypass !== undefined
+      ? { can_admins_bypass: environment.can_admins_bypass }
+      : {}),
+  };
+}
+
+/** Declare one environment with its complete desired state. */
+async function declareEnvironment(
+  ctx: ApplierContext,
+  name: string,
+  environment: EnvironmentConfig,
+): Promise<ChangeRecord> {
+  await performWrite(ctx, `declare environment ${name}`, () =>
+    ctx.octokit.repos.createOrUpdateEnvironment({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      environment_name: name,
+      ...environmentWriteBody(environment),
+    }),
+  );
+
+  return { area: "environments", action: "update", target: name };
+}
+
+/**
+ * Converge one environment's branch-policy patterns. Only custom mode has a
+ * pattern list; branch_policies is rejected at authoring time under any other
+ * mode, so there is nothing to converge.
+ */
+async function applyBranchPolicies(
+  ctx: ApplierContext,
+  name: string,
+  environment: EnvironmentConfig,
+): Promise<ChangeRecord[]> {
+  if (environment.deployment_branch_policy !== "custom") return [];
+  return convergeBranchPolicies(ctx, name, environment.branch_policies ?? []);
+}
+
+/** One environment's failure, split for the log and the reported summary. */
+interface ClassifiedFailure {
+  readonly status: number | undefined;
+  readonly message: string;
+  readonly detail: string;
+}
+
+/**
+ * Classify a per-environment failure. GitHub hides the endpoint on plans
+ * without environments (404), and some plan-restricted writes return a 422
+ * naming the billing plan; both are the plan limit rather than a validation or
+ * missing-environment error.
+ */
+function classifyFailure(error: unknown): ClassifiedFailure {
+  const status = statusOf(error);
+  const message = messageOf(error);
+
+  if (status === 403) {
+    return { status, message, detail: describeForbidden("environments", message) };
+  }
+  if (status === 404 || (status === 422 && looksLikePlanLimit(message))) {
+    return { status, message, detail: planLimitDetail("environments") };
+  }
+  return { status, message, detail: message };
+}
+
 export async function applyEnvironments(
   ctx: ApplierContext,
   config: WoodhouseConfig,
@@ -158,55 +260,10 @@ export async function applyEnvironments(
     if (environment === null) continue;
 
     try {
-      // The config carries a plain mode string; the REST API takes two
-      // mutually exclusive booleans. Unset stays null, which allows every
-      // branch to deploy.
-      const deploymentBranchPolicy =
-        environment.deployment_branch_policy === undefined
-          ? null
-          : {
-              protected_branches: environment.deployment_branch_policy === "protected",
-              custom_branch_policies: environment.deployment_branch_policy === "custom",
-            };
-
-      await performWrite(ctx, `declare environment ${name}`, () =>
-        ctx.octokit.repos.createOrUpdateEnvironment({
-          owner: ctx.owner,
-          repo: ctx.repo,
-          environment_name: name,
-          // Full desired state: the PUT replaces the environment, so every
-          // optional field is sent explicitly rather than left to GitHub.
-          wait_timer: environment.wait_timer ?? 0,
-          prevent_self_review: environment.prevent_self_review ?? false,
-          deployment_branch_policy: deploymentBranchPolicy,
-          reviewers: environment.reviewers ?? null,
-          ...(environment.can_admins_bypass !== undefined
-            ? { can_admins_bypass: environment.can_admins_bypass }
-            : {}),
-        }),
-      );
-      changes.push({ area: "environments", action: "update", target: name });
-
-      // Only custom mode has a pattern list; branch_policies is rejected at
-      // authoring time under any other mode, so there is nothing to converge.
-      if (environment.deployment_branch_policy === "custom") {
-        changes.push(
-          ...(await convergeBranchPolicies(ctx, name, environment.branch_policies ?? [])),
-        );
-      }
+      changes.push(await declareEnvironment(ctx, name, environment));
+      changes.push(...(await applyBranchPolicies(ctx, name, environment)));
     } catch (error) {
-      const status = statusOf(error);
-      const message = messageOf(error);
-      // GitHub hides the endpoint on plans without environments (404), and some
-      // plan-restricted writes return a 422 naming the billing plan; both are
-      // the plan limit rather than a validation or missing-environment error.
-      const planLimited = status === 404 || (status === 422 && looksLikePlanLimit(message));
-      const detail =
-        status === 403
-          ? describeForbidden("environments", message)
-          : planLimited
-            ? planLimitDetail("environments")
-            : message;
+      const { status, message, detail } = classifyFailure(error);
 
       ctx.log.error({ applier: "environments", environment: name, status, err: message }, detail);
       failures.push({ area: "environments", message: detail });
