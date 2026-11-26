@@ -18,4 +18,4 @@ Environments are never deleted. Removing an entry from config only stops the re-
 
 - Syncs stay idempotent and simple, at the cost of writes that are sometimes unnecessary.
 - Nobody loses an environment, and its deployment history, to an off-boarding decision Woodhouse made alone.
-- This posture may later be amended for deployment branch policies. REC-35's convergence work may need to read or compare state before writing; if that amendment comes, it amends this ADR.
+- Amended by ADR 0012: branch policies under a configured environment converge fully, including deletion. Environments themselves are still never deleted.
