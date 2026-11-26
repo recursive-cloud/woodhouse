@@ -226,10 +226,10 @@ describe("applyRulesets", () => {
     // the raw GitHub message.
     const detail =
       "Cannot apply rulesets: Upgrade to GitHub Pro or make this repository " +
-      "public to enable this feature. Both branch protection and rulesets " +
-      "require the repository to be public, or a paid plan (Pro, Team or " +
-      "Enterprise) if it is private. On the Free plan a private repository can " +
-      "use neither.";
+      "public to enable this feature. Branch protection, rulesets and " +
+      "environments require the repository to be public, or a paid plan (Pro, " +
+      "Team or Enterprise) if it is private. On the Free plan a private " +
+      "repository can use none of them.";
 
     expect(result).toEqual({
       changes: [{ area: "ruleset", action: "create", target: "first" }],
@@ -251,8 +251,8 @@ describe("applyRulesets", () => {
 
     const detail =
       "Forbidden applying rulesets: Forbidden Check the App has " +
-      "`administration: write`. Note also that branch protection and rulesets " +
-      "are unavailable on private repositories on the Free plan.";
+      "`administration: write`. Note also that branch protection, rulesets and " +
+      "environments are unavailable on private repositories on the Free plan.";
 
     expect(request).not.toHaveBeenCalled();
     expect(result).toEqual({

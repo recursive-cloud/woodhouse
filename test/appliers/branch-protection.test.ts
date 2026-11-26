@@ -123,10 +123,10 @@ describe("applyBranchProtection", () => {
     // the classified explanation, not the raw GitHub message.
     const detail =
       "Cannot apply branch-protection: Upgrade to GitHub Pro or make this " +
-      "repository public to enable this feature. Both branch protection and " +
-      "rulesets require the repository to be public, or a paid plan (Pro, Team " +
-      "or Enterprise) if it is private. On the Free plan a private repository " +
-      "can use neither.";
+      "repository public to enable this feature. Branch protection, rulesets " +
+      "and environments require the repository to be public, or a paid plan " +
+      "(Pro, Team or Enterprise) if it is private. On the Free plan a private " +
+      "repository can use none of them.";
 
     expect(result).toEqual({
       changes: [{ area: "branch-protection", action: "update", target: "main" }],
