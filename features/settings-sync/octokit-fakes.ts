@@ -227,17 +227,28 @@ export function makeOctokit(options?: OctokitOptions) {
   const deleteComment = vi.fn(async () => ({ data: {} }));
 
   // Pagination dispatches on the target: comments and files are methods,
-  // rulesets are a route string, and anything else is the labels listing.
-  const paginate = vi.fn(async (target: unknown) => {
-    if (target === listComments) return [...comments];
-    if (target === listFiles) return [...files];
-    if (target === RULESETS_ROUTE) {
-      record("rulesets.list");
-      return [...existingRulesets];
-    }
-    record("labels.list");
-    return [];
-  });
+  // rulesets are a route string, deployment branch policies are a method whose
+  // response wraps the array, and anything else is the labels listing. The
+  // branch-policy branch calls the recorded method so call assertions still
+  // bind, then normalises the wrapped response the way octokit's paginator does
+  // before applying the map.
+  const paginate = vi.fn(
+    async (target: unknown, params?: unknown, map?: (response: { data: unknown }) => unknown) => {
+      if (target === listComments) return [...comments];
+      if (target === listFiles) return [...files];
+      if (target === RULESETS_ROUTE) {
+        record("rulesets.list");
+        return [...existingRulesets];
+      }
+      if (target === listDeploymentBranchPolicies) {
+        const response = await listDeploymentBranchPolicies(params as { environment_name: string });
+        const data = response.data.branch_policies;
+        return map ? map({ ...response, data }) : data;
+      }
+      record("labels.list");
+      return [];
+    },
+  );
 
   const request = recorded(record, (route: string) => `request ${route}`, emptyPayload);
 

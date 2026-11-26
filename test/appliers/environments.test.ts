@@ -36,6 +36,22 @@ function fakeOctokit(options: FakeOctokitOptions = {}) {
   const createDeploymentBranchPolicy = vi.fn(async () => ({ data: {} }));
   const deleteDeploymentBranchPolicy = vi.fn(async () => ({ data: {} }));
 
+  // Mirrors `octokit.paginate` for this endpoint: it calls the request with the
+  // parameters, normalises the wrapped `branch_policies` response to its array
+  // (as the real paginator does), and applies the optional map over that.
+  const paginate = vi.fn(
+    async (
+      fn: (params: unknown) => Promise<{ data: unknown }>,
+      params: unknown,
+      map?: (response: { data: unknown }) => unknown,
+    ) => {
+      const response = await fn(params);
+      const wrapped = response.data as { branch_policies: unknown };
+      const data = wrapped.branch_policies;
+      return map ? map({ ...response, data }) : data;
+    },
+  );
+
   const octokit = {
     repos: {
       createOrUpdateEnvironment,
@@ -43,6 +59,7 @@ function fakeOctokit(options: FakeOctokitOptions = {}) {
       createDeploymentBranchPolicy,
       deleteDeploymentBranchPolicy,
     },
+    paginate,
   } as unknown as ApplierContext["octokit"];
 
   return {
@@ -51,6 +68,7 @@ function fakeOctokit(options: FakeOctokitOptions = {}) {
     listDeploymentBranchPolicies,
     createDeploymentBranchPolicy,
     deleteDeploymentBranchPolicy,
+    paginate,
   };
 }
 
@@ -246,6 +264,25 @@ describe("applyEnvironments", () => {
 
     const sent = createOrUpdateEnvironment.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(sent).toHaveProperty("deployment_branch_policy", null);
+  });
+
+  it("reads the environment's branch policies through paginate", async () => {
+    const { ctx, config, paginate, listDeploymentBranchPolicies } = build({
+      environments: {
+        production: { deployment_branch_policy: "custom", branch_policies: ["main"] },
+      },
+    });
+
+    const result = await applyEnvironments(ctx, config);
+
+    expect(paginate).toHaveBeenCalledTimes(1);
+    expect(paginate).toHaveBeenCalledWith(
+      listDeploymentBranchPolicies,
+      expect.objectContaining({ environment_name: "production", per_page: 100 }),
+      expect.any(Function),
+    );
+    expect(listDeploymentBranchPolicies).toHaveBeenCalledTimes(1);
+    expect(result.failures).toEqual([]);
   });
 
   it("creates the configured patterns that the environment lacks", async () => {

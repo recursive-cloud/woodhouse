@@ -72,16 +72,26 @@ async function convergeBranchPolicies(
 ): Promise<ChangeRecord[]> {
   const changes: ChangeRecord[] = [];
 
-  const { data } = await withContext(`${environmentName}: listing branch policies`, () =>
-    ctx.octokit.repos.listDeploymentBranchPolicies({
-      owner: ctx.owner,
-      repo: ctx.repo,
-      environment_name: environmentName,
-    }),
+  // GitHub paginates this endpoint (30 per page by default), so read every
+  // page. paginate normalises the wrapped `{ total_count, branch_policies }`
+  // response to the policy array; the map returns it unchanged. Reading only
+  // page one would leave unconfigured policies beyond it undeleted and
+  // re-create configured ones on every sync.
+  const policies = await withContext(`${environmentName}: listing branch policies`, () =>
+    ctx.octokit.paginate(
+      ctx.octokit.repos.listDeploymentBranchPolicies,
+      {
+        owner: ctx.owner,
+        repo: ctx.repo,
+        environment_name: environmentName,
+        per_page: 100,
+      },
+      (response) => response.data,
+    ),
   );
   // The generated OpenAPI type marks both fields optional; a real response
   // always sends them, so ignore an incomplete entry rather than invent one.
-  const existing = data.branch_policies.filter(
+  const existing = policies.filter(
     (policy): policy is { id: number; name: string } =>
       policy.id !== undefined && policy.name !== undefined,
   );
