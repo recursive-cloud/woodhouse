@@ -19,6 +19,7 @@ The config carries a plain mode string, `"protected"` or `"custom"`. The applier
 ## Consequences
 
 - Pattern deletion is intended behaviour. This amends ADR 0011's never-deleted posture for branch policies only; environments themselves are still never deleted.
+- Patterns created under custom mode are left dormant, not deleted, when the mode flips back to protected. A later flip back to custom converges them again.
 - Deployment allowlist changes route through config. A hand-made pattern edit under a configured environment is reverted on the next sync.
 - Authoring-time rejection keeps a config internally consistent: no pattern list without custom mode, no case-variant collisions. A sync never guesses.
 - The API's 303 already-exists response on create is tolerated as already-present. The pattern listing cannot distinguish branch from tag policies, so a tag policy under a configured environment is also removed when the config does not name it. Woodhouse itself only ever creates branch policies.
