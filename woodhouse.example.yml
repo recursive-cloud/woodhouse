@@ -166,3 +166,35 @@ rulesets:
           required_status_checks:
             - context: woodhouse/white-glove
           strict_required_status_checks_policy: true
+
+# Deployment environments and their protection rules, keyed by name. Every
+# configured environment is PUT with its full state on every sync: the config
+# is re-declared, not diffed — the read representation does not round-trip
+# cleanly enough to diff against. Environments are never deleted — removing an
+# entry only stops the re-assertion, so off-board by hand. Requires a public
+# repository, or a paid plan if it is private.
+environments:
+  production:
+    # Minutes a deployment waits before it can proceed: 0-43200.
+    wait_timer: 30
+
+    # Everyone who must approve the deployment. At most 6 entries, each
+    # `{type: User|Team, id: <numeric id>}`. Unset sends null: no required
+    # reviewers.
+    reviewers:
+      - type: User
+        id: 42
+
+    # GitHub does not document this field on the REST reference, but the API
+    # accepts it and it works. Omitted from the write when unset.
+    # can_admins_bypass: false
+
+  # All fields are optional, so `{}` declares an environment with no wait
+  # timer and no required reviewers — for deployments whose protection comes
+  # from OIDC claims alone.
+  # preview: {}
+
+  # An explicit null clears an environment inherited from the baseline: the
+  # local file drops it from the merged config and nothing is written for it.
+  # It does not delete the environment on GitHub.
+  # staging: null
