@@ -26,8 +26,10 @@ Probot instance directly, so a new listener cannot accidentally skip the check.
 **Cascading settings sync.** On a push to the default branch, Woodhouse merges
 `woodhouse.yml` from your owner-level `.github-private` repository with
 `.github/woodhouse.yml` from the repository itself, and reconciles repository
-options, topics, labels, branch protection, rulesets and environments. Settings
-are diffed before writing, so an unchanged repository costs no write calls.
+options, topics, labels, branch protection, rulesets and environments.
+Repository options, topics and labels are diffed before writing, so an
+unchanged repository costs no write calls there; branch protection, rulesets
+and environments are re-declared wholesale on every sync (ADR 0006, ADR 0011).
 Merging a pull request that changes a settings file into the default branch
 triggers the same
 sync, and Woodhouse comments on that pull request with the outcome: what was
