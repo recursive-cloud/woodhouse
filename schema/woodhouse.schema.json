@@ -223,6 +223,79 @@
         "additionalProperties": false
       }
     },
+    "environments": {
+      "default": {},
+      "description": "Deployment environments keyed by name, each name at most 255 characters; names differing only in case are rejected as duplicates at authoring time. Every configured environment is re-declared wholesale (PUT) on each sync, and reported as applied even when it already matches. Unset fields are sent as the API defaults (`wait_timer` 0, `prevent_self_review` false, `reviewers` null), so a bare entry declares an environment with no wait timer and no required reviewers; `deployment_branch_policy` is sent as null, allowing all branches. `reviewers: null` clears an inherited list. Matching is by exact declared name, so a case-variant environment already on the repository is left untouched. Environments are never deleted: removing an entry only stops the re-assertion. An entry whose value is explicit `null` removes that environment from the merged configuration and nothing is written for it — the convention a local file uses to clear an environment it inherited from the baseline.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "maxLength": 255
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "wait_timer": {
+                "description": "Minutes a deployment waits before it can proceed (0-43200). Sent as 0 when unset.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 43200
+              },
+              "prevent_self_review": {
+                "description": "Block the user who triggered a deployment from approving it. Sent as false when unset.",
+                "type": "boolean"
+              },
+              "reviewers": {
+                "description": "Required reviewers, at most 6. A present list needs at least one entry; null clears an inherited list. Sent as null when unset.",
+                "anyOf": [
+                  {
+                    "minItems": 1,
+                    "maxItems": 6,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "User",
+                            "Team"
+                          ],
+                          "description": "Whether `id` names a user or a team."
+                        },
+                        "id": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991,
+                          "description": "Numeric ID of the user or team."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "can_admins_bypass": {
+                "description": "Allow repository admins to deploy without meeting the protection rules. GitHub does not document this field on the REST reference, but it is accepted and functional. Omitted from the write when unset.",
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
     "labels": {
       "default": [],
       "description": "Repository labels converge to this list; removal is governed by `settings.pruneLabels`.",

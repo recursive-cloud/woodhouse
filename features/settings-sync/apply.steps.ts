@@ -24,13 +24,14 @@ const feature = await loadFeature("features/settings-sync/apply.feature");
 
 const ENABLED_CONFIG = "settings:\n  enabled: true\nrepository:\n  has_issues: true\n";
 
-/** One pending change in every area, so all four appliers run. Mirrors `test/apply.test.ts`. */
+/** One pending change in every area, so every applier runs. Mirrors `test/apply.test.ts`. */
 const FULL_CONFIG = {
   settings: { enabled: true },
   repository: { has_issues: true },
   labels: [{ name: "bug", color: "d73a4a" }],
   branchProtection: { main: {} },
   rulesets: [{ name: "main" }],
+  environments: { production: {} },
 };
 
 const CONFIG_FILES = { "widgets:.github/woodhouse.yml": ENABLED_CONFIG };
@@ -303,6 +304,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
         "repos.updateBranchProtection",
         "rulesets.list",
         "request POST /repos/{owner}/{repo}/rulesets",
+        "repos.createOrUpdateEnvironment",
       ]);
     });
     And(`the summary lists the applied changes`, () => {
@@ -311,6 +313,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
         { area: "label", action: "create", target: "bug" },
         { area: "branch-protection", action: "update", target: "main" },
         { area: "ruleset", action: "create", target: "main" },
+        { area: "environments", action: "update", target: "production" },
       ]);
     });
   });

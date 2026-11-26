@@ -208,19 +208,25 @@ describe("planRulesets", () => {
 
 describe("describeForbidden", () => {
   it("names the plan limitation when GitHub hints at it", () => {
-    // Neither branch protection nor rulesets work on a private repo on Free,
-    // so a bare 403 here sends people looking at App permissions for nothing.
+    // Branch protection, rulesets and environments do not work on a private
+    // repo on Free, so a bare 403 here sends people looking at App permissions
+    // for nothing.
     const text = describeForbidden(
       "branch-protection",
       "Upgrade to GitHub Pro or make this repository public to enable this feature.",
     );
     expect(text).toMatch(/public/);
-    expect(text).toMatch(/Free plan a private repository can use neither/);
+    expect(text).toMatch(/Free plan a private repository can use none of them/);
   });
 
   it("mentions the plan caveat for rulesets too", () => {
     const text = describeForbidden("rulesets", "Not available for this repository");
-    expect(text).toMatch(/neither/);
+    expect(text).toMatch(/none of them/);
+  });
+
+  it("names the plan limitation for environments too", () => {
+    const text = describeForbidden("environments", "Not available for this repository");
+    expect(text).toMatch(/Free plan a private repository can use none of them/);
   });
 
   it("still mentions permissions for a plain 403 on a plan-sensitive applier", () => {
