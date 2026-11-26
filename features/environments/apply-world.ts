@@ -5,7 +5,7 @@
  * resolver uses, so an explicit `null` in the local layer deletes the inherited
  * key exactly as it does in a live cascade, and an invalid environments section
  * surfaces as `issues` rather than throwing at fixture-build time. This module
- * is not a vitest entry: `apply.steps.ts` imports it.
+ * is not a vitest entry: the environments `.steps.ts` files import it.
  */
 
 import yaml from "js-yaml";
@@ -107,4 +107,11 @@ export function requireSummary(
     throw new Error("The settings sync has not run yet.");
   }
   return summary;
+}
+
+/** The shared `When` body: run the real orchestrator into the world's summary slot. */
+export function runSync(w: EnvironmentsWorld): () => Promise<void> {
+  return async () => {
+    w.summary = await syncSettings(w.ctx, requireResolved(w.resolved));
+  };
 }

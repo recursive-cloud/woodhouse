@@ -9,14 +9,18 @@
 
 import { expect, type TaskContext } from "vitest";
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
-import { syncSettings } from "../../src/settings/apply.js";
 import {
   type EnvironmentsWorld,
-  requireResolved,
   requireSummary,
   resolvedFromLayers,
+  runSync,
   world,
 } from "./apply-world.js";
+import {
+  assertNoSettingsWritten,
+  rejectInvalidConfig,
+  skippedForInvalidConfig,
+} from "./authoring-rejection.js";
 
 const feature = await loadFeature("features/environments/branch-policies.feature");
 
@@ -44,20 +48,6 @@ function environmentsYaml(
 
   const settings = mode === null ? "" : "settings:\n  enabled: true\n";
   return `${settings}${lines.join("\n")}\n`;
-}
-
-/** The shared When body: run the real orchestrator into the world's summary slot. */
-function runSync(w: EnvironmentsWorld): () => Promise<void> {
-  return async () => {
-    w.summary = await syncSettings(w.ctx, requireResolved(w.resolved));
-  };
-}
-
-/** The shared And body for the authoring-rejection scenarios. */
-function skippedForInvalidConfig(w: EnvironmentsWorld): () => void {
-  return () => {
-    expect(w.log.debug).toHaveBeenCalledWith({ reason: "invalid-config" }, "Settings sync skipped");
-  };
 }
 
 /** The branch-policy ids a fake delete was called with. */
@@ -232,22 +222,16 @@ describeFeature(feature, ({ Scenario }) => {
       Given(
         `the environment {string} declaring patterns without selecting custom branch policies`,
         (_ctx: TaskContext, environment: string) => {
-          w.resolved = resolvedFromLayers(undefined, environmentsYaml(environment, null, ["main"]));
-          const resolved = requireResolved(w.resolved);
-          expect(resolved.issues.length).toBeGreaterThan(0);
-          expect(resolved.issues.map((issue) => issue.message).join("\n")).toContain(
+          rejectInvalidConfig(
+            w,
+            environmentsYaml(environment, null, ["main"]),
             `requires deployment_branch_policy "custom"`,
           );
         },
       );
       When(`the settings sync runs`, runSync(w));
       Then(`no settings are written`, () => {
-        expect(requireSummary(w.summary)).toEqual({
-          changes: [],
-          failures: [],
-          dryRun: false,
-        });
-        expect(w.built.calls).toEqual([]);
+        assertNoSettingsWritten(w);
       });
       And(`the sync is skipped because "invalid-config"`, skippedForInvalidConfig(w));
     },
@@ -289,25 +273,16 @@ describeFeature(feature, ({ Scenario }) => {
       Given(
         `the environment {string} declaring the patterns {string} and {string}`,
         (_ctx: TaskContext, environment: string, first: string, second: string) => {
-          w.resolved = resolvedFromLayers(
-            undefined,
+          rejectInvalidConfig(
+            w,
             environmentsYaml(environment, null, [first, second]),
-          );
-          const resolved = requireResolved(w.resolved);
-          expect(resolved.issues.length).toBeGreaterThan(0);
-          expect(resolved.issues.map((issue) => issue.message).join("\n")).toContain(
             "duplicate branch policy pattern",
           );
         },
       );
       When(`the settings sync runs`, runSync(w));
       Then(`no settings are written`, () => {
-        expect(requireSummary(w.summary)).toEqual({
-          changes: [],
-          failures: [],
-          dryRun: false,
-        });
-        expect(w.built.calls).toEqual([]);
+        assertNoSettingsWritten(w);
       });
       And(`the sync is skipped because "invalid-config"`, skippedForInvalidConfig(w));
     },
