@@ -424,7 +424,7 @@ export const woodhouseConfigSchema = z
         "Classic branch protection keyed by branch name; every configured branch is re-declared wholesale and idempotently (PUT) on each sync, and reported as applied even when the protection already matches. Fields left unset are omitted from the write (GitHub keeps them as-is), except the three API-required fields (`required_status_checks`, `enforce_admins`, `required_pull_request_reviews`), which are sent as explicit `null` when unset; a branch that does not exist is skipped, not an error. Removing a branch block ends the re-assertion and does not delete the protection behind it — a deliberate choice, not an API limit: a prune would be mechanically possible but silently deleting protection Woodhouse did not create is unacceptable; off-board via the assisted Convert to ruleset flow (README.md, Moving off branch protection?).",
       ),
     environments: z
-      .record(z.string().max(255), environmentSchema)
+      .record(z.string().max(255), environmentSchema.nullable())
       // Case-insensitive name-collision check (see the `environments` description).
       .superRefine((environments, ctx) => {
         const seen = new Map<string, string>();
@@ -445,7 +445,7 @@ export const woodhouseConfigSchema = z
       .default({})
       .meta({
         description:
-          "Deployment environments keyed by name, each name at most 255 characters; names differing only in case are rejected as duplicates at authoring time. Every configured environment is re-declared wholesale (PUT) on each sync, and reported as applied even when it already matches. Unset fields are sent as the API defaults (`wait_timer` 0, `prevent_self_review` false, `reviewers` null), so a bare entry declares an environment with no wait timer and no required reviewers; `deployment_branch_policy` is sent as null, allowing all branches. `reviewers: null` clears an inherited list. Matching is by exact declared name, so a case-variant environment already on the repository is left untouched. Environments are never deleted: removing an entry only stops the re-assertion.",
+          "Deployment environments keyed by name, each name at most 255 characters; names differing only in case are rejected as duplicates at authoring time. Every configured environment is re-declared wholesale (PUT) on each sync, and reported as applied even when it already matches. Unset fields are sent as the API defaults (`wait_timer` 0, `prevent_self_review` false, `reviewers` null), so a bare entry declares an environment with no wait timer and no required reviewers; `deployment_branch_policy` is sent as null, allowing all branches. `reviewers: null` clears an inherited list. Matching is by exact declared name, so a case-variant environment already on the repository is left untouched. Environments are never deleted: removing an entry only stops the re-assertion. An entry whose value is explicit `null` removes that environment from the merged configuration and nothing is written for it — the convention a local file uses to clear an environment it inherited from the baseline.",
       }),
     labels: z
       .array(labelSchema)

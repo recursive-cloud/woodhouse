@@ -22,12 +22,22 @@ export function messageOf(error: unknown): string {
 }
 
 /**
+ * Whether a GitHub error message names the billing plan, which is the clearest
+ * signal that a write is plan-restricted. Shared by the 403 classifier and by
+ * appliers that also recognise a plan-naming 422.
+ */
+export function looksLikePlanLimit(message: string): boolean {
+  return /upgrade|not available|plan|public repositor/i.test(message);
+}
+
+/**
  * The plan-limit explanation, framed for one applier.
  *
- * Shared with appliers that map a 404 to the same cause: GitHub hides an
- * endpoint entirely on plans that do not support it, so the write 404s instead
- * of returning the usual 403. `message` is the raw GitHub message when there
- * is one; a 404 mapping has none to add.
+ * Shared with appliers that map a 404, or a plan-naming 422, to the same cause:
+ * GitHub hides an endpoint entirely on plans that do not support it, so the
+ * write 404s instead of returning the usual 403, and some plan-restricted
+ * writes fail with a 422 whose message names the billing plan. `message` is
+ * the raw GitHub message when there is one; a 404 mapping has none to add.
  */
 export function planLimitDetail(applier: string, message?: string): string {
   const reason = message === undefined ? "" : `${message} `;
@@ -40,13 +50,10 @@ export function planLimitDetail(applier: string, message?: string): string {
 }
 
 export function describeForbidden(applier: string, message: string): string {
-  // GitHub's own wording for the plan case is the clearest signal available.
-  const looksLikePlanLimit = /upgrade|not available|plan|public repositor/i.test(message);
-
   const planSensitive =
     applier === "branch-protection" || applier === "rulesets" || applier === "environments";
 
-  if (planSensitive && looksLikePlanLimit) {
+  if (planSensitive && looksLikePlanLimit(message)) {
     return planLimitDetail(applier, message);
   }
 

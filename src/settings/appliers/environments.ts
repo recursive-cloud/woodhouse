@@ -15,7 +15,13 @@
 
 import type { WoodhouseConfig } from "../../config/schema.js";
 import { performWrite } from "../../lib/dry-run.js";
-import { describeForbidden, messageOf, planLimitDetail, statusOf } from "../forbidden.js";
+import {
+  describeForbidden,
+  looksLikePlanLimit,
+  messageOf,
+  planLimitDetail,
+  statusOf,
+} from "../forbidden.js";
 import type { ApplierContext, ApplierResult, ChangeRecord, Failure } from "./types.js";
 
 export async function applyEnvironments(
@@ -29,6 +35,9 @@ export async function applyEnvironments(
   const failures: Failure[] = [];
 
   for (const [name, environment] of environments) {
+    // Null-clears convention: an explicit null drops an inherited entry.
+    if (environment === null) continue;
+
     try {
       await performWrite(ctx, `declare environment ${name}`, () =>
         ctx.octokit.repos.createOrUpdateEnvironment({
@@ -50,13 +59,15 @@ export async function applyEnvironments(
     } catch (error) {
       const status = statusOf(error);
       const message = messageOf(error);
+      // GitHub hides the endpoint on plans without environments (404), and some
+      // plan-restricted writes return a 422 naming the billing plan; both are
+      // the plan limit rather than a validation or missing-environment error.
+      const planLimited = status === 404 || (status === 422 && looksLikePlanLimit(message));
       const detail =
         status === 403
           ? describeForbidden("environments", message)
-          : status === 404
-            ? // GitHub hides the endpoint on plans without environments, so a
-              // 404 here is the plan limit rather than a missing environment.
-              planLimitDetail("environments")
+          : planLimited
+            ? planLimitDetail("environments")
             : message;
 
       ctx.log.error({ applier: "environments", environment: name, status, err: message }, detail);

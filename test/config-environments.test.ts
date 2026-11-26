@@ -28,6 +28,13 @@ describe("environments config", () => {
     expect(result.config.environments.production).toEqual({});
   });
 
+  it("accepts an explicit null entry as clearing that environment", () => {
+    const result = withEnvironment("staging", null);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.environments.staging).toBeNull();
+  });
+
   it("accepts the wait_timer boundaries", () => {
     for (const waitTimer of [0, 43200]) {
       const result = withEnvironment("production", { wait_timer: waitTimer });
