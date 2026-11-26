@@ -3,8 +3,7 @@
  *
  * Every scenario drives the real `syncSettings` orchestrator against the
  * recording octokit fake, so the cascade gate and the environments applier
- * behave exactly as they do in production. The applier does not exist yet:
- * these scenarios are the specification it must satisfy.
+ * behave exactly as they do in production.
  */
 
 import { expect } from "vitest";
@@ -153,19 +152,32 @@ describeFeature(feature, ({ Scenario }) => {
     const w = world();
 
     Given(`a repository whose environments already match the configured environments`, () => {
-      w.resolved = resolvedFromLayers(undefined, PRODUCTION_WITH_REVIEWERS);
+      w.resolved = resolvedFromLayers(undefined, TWO_ENVIRONMENTS);
     });
     When(`the settings sync runs`, runSync(w));
     Then(`each configured environment is re-declared with an idempotent update`, () => {
       const fake = w.built;
       // A re-declaration is a full-state PUT, never a diff: one call per configured name.
-      expect(fake.createOrUpdateEnvironment).toHaveBeenCalledTimes(1);
-      expect(fake.createOrUpdateEnvironment).toHaveBeenCalledWith(
+      expect(fake.createOrUpdateEnvironment).toHaveBeenCalledTimes(2);
+      expect(fake.createOrUpdateEnvironment).nthCalledWith(
+        1,
         expect.objectContaining({
+          owner: "acme",
+          repo: "widgets",
           environment_name: "production",
-          wait_timer: 10,
+          wait_timer: 5,
           prevent_self_review: false,
-          reviewers: [{ type: "User", id: 42 }],
+          reviewers: null,
+          deployment_branch_policy: null,
+        }),
+      );
+      expect(fake.createOrUpdateEnvironment).nthCalledWith(
+        2,
+        expect.objectContaining({
+          environment_name: "staging",
+          wait_timer: 0,
+          prevent_self_review: false,
+          reviewers: null,
           deployment_branch_policy: null,
         }),
       );
@@ -174,7 +186,10 @@ describeFeature(feature, ({ Scenario }) => {
       const changes = requireSummary(w.summary).changes.filter(
         (change) => change.area === "environments",
       );
-      expect(changes).toEqual([{ area: "environments", action: "update", target: "production" }]);
+      expect(changes).toEqual([
+        { area: "environments", action: "update", target: "production" },
+        { area: "environments", action: "update", target: "staging" },
+      ]);
     });
   });
 
