@@ -121,6 +121,10 @@ changes.
   (`src/lib/mutex.ts`) and the config cache is in-process. Redis comes
   first, before any second replica.
 
+- **The routed-reviewers map is in-memory and never evicted on close or
+  merge.** A restart loses it, so the next pass re-requests an idempotent
+  set; bounded in practice by the single replica.
+
 ## Deferred / revisit
 
 - [ ] **Image signing and provenance.** `provenance: false` keeps the GHCR

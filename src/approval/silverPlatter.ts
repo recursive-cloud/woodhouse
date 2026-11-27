@@ -40,7 +40,7 @@ export function resetAppLoginCache(): void {
   cachedAppLogin = undefined;
 }
 
-async function appLogin(octokit: Api): Promise<string> {
+export async function appLogin(octokit: Api): Promise<string> {
   cachedAppLogin ??= octokit.apps
     .getAuthenticated()
     .then((response) => `${(response.data as { slug: string }).slug}[bot]`)
@@ -108,7 +108,7 @@ function sleep(ms: number): Promise<void> {
  * caught: the rejection propagates and fails the pass, so a fetch error can
  * never become a silent `null` that reads as "nobody enabled auto-merge".
  */
-async function getAutoMergeEnabledBy(
+export async function getAutoMergeEnabledBy(
   octokit: Api,
   owner: string,
   repo: string,
