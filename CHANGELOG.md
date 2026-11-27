@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0](https://github.com/recursive-cloud/woodhouse/compare/v1.2.0...v1.3.0) (2026-11-27)
+
+
+### Features
+
+* **approval:** approve only once the commit's checks pass ([#73](https://github.com/recursive-cloud/woodhouse/issues/73)) ([8e2afb3](https://github.com/recursive-cloud/woodhouse/commit/8e2afb3b882f40e4ade6078cd5bae94f29acfe37))
+* **review-routing:** hand a failed bot pull request back to the owners ([#76](https://github.com/recursive-cloud/woodhouse/issues/76)) ([9a9a153](https://github.com/recursive-cloud/woodhouse/commit/9a9a15325473f56946d2a03a3506b424410d0424))
+* **review-routing:** route reviewers on pull request events ([#72](https://github.com/recursive-cloud/woodhouse/issues/72)) ([62ef6b4](https://github.com/recursive-cloud/woodhouse/commit/62ef6b45061b345e50e122f7defbcc6df25b7b78))
+
 ## [1.2.0](https://github.com/recursive-cloud/woodhouse/compare/v1.1.0...v1.2.0) (2026-11-27)
 
 
