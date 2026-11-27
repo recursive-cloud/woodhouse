@@ -11,8 +11,18 @@ import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { ConfigResolver } from "../config/resolver.js";
 import type { AutoApprovalConfig } from "../config/schema.js";
-import { getPullRequest, listChangedFiles } from "../github/pulls.js";
-import { classifyActor, decide } from "./policy.js";
+import {
+  getPullRequest,
+  listChangedFiles,
+  listOpenPullRequestsForCommit,
+} from "../github/pulls.js";
+import { classifyActor, decide, normalizeLogin } from "./policy.js";
+import {
+  handToOwners,
+  holdsRequest,
+  type RoutingDeps,
+  type SharedRoutingState,
+} from "./routing.js";
 import { approvalBody } from "./wording.js";
 import { performWrite } from "../lib/dry-run.js";
 
@@ -77,6 +87,23 @@ export interface SilverPlatterDeps {
   readonly octokit: Api;
   readonly log: Logger;
   readonly dryRun: boolean;
+  /**
+   * The routing state shared with the reviewer-routing listener. Present only
+   * when reviewer routing is live; without it refusal escalation and recovery
+   * reconcile are inert — that is what keeps the auto-approval-only harness
+   * and its scenarios unchanged.
+   */
+  readonly routing?: SharedRoutingState;
+}
+
+/** The routing dependencies of the shared state, for escalation writes. */
+function routingDeps(deps: SilverPlatterDeps, routing: SharedRoutingState): RoutingDeps {
+  return {
+    octokit: deps.octokit,
+    log: deps.log,
+    dryRun: deps.dryRun,
+    routed: routing.routed,
+  };
 }
 
 /**
@@ -171,6 +198,28 @@ async function approvePullRequest(
 
   if (!decision.approve) {
     deps.log.info({ pr: number, reason: decision.reason }, "Not auto-approving");
+
+    // A policy refusal on a passing commit is the other way a bot pull request
+    // gets stuck: routing put the review with Woodhouse, but Woodhouse will
+    // never approve. Hand it to the owners instead. `alreadyApproved` keeps a
+    // re-delivery of an approved commit from re-escalating after recovery
+    // withdrew the owners — the guard is the boolean, never the reason text.
+    if (
+      deps.routing !== undefined &&
+      !alreadyApproved &&
+      holdsRequest(deps.routing, owner, repo, number, self)
+    ) {
+      await handToOwners(
+        routingDeps(deps, deps.routing),
+        owner,
+        repo,
+        number,
+        config,
+        `auto-approval refused: ${decision.reason}`,
+        deps.routing.mutex,
+      );
+    }
+
     return false;
   }
 
@@ -189,6 +238,60 @@ async function approvePullRequest(
   });
 
   if (approved === undefined) return false;
+
+  // Recovery: the owners were asked to look while the commit was failing; now
+  // Woodhouse has the review, so withdraw them. Only the tracked logins other
+  // than Woodhouse are withdrawn — the code never calls removeRequestedReviewers
+  // for a login it does not believe is currently requested. The tracked set
+  // ends empty because Woodhouse holds the review through its approval; the
+  // next routing pass re-requests whatever the desired set then is.
+  //
+  // The read-modify-write runs under the same per-repo routing mutex as every
+  // other reviewer write, so a concurrent routing pass cannot interleave
+  // between the tracked-set read and the withdrawal. Lock order stays commit
+  // mutex → routing mutex: this already runs inside reconcile's commit mutex.
+  // Recovery is only reachable after a confirmed approval write (the dry-run
+  // path returns early above), so the unconditional tracked-set clear in the
+  // no-owners branch corresponds to a real state change and does not violate
+  // the dry-run doctrine the withdrawal branch follows.
+  if (deps.routing !== undefined) {
+    const routing = deps.routing;
+    const key = `${owner}/${repo}#${number}`;
+
+    const recover = async (): Promise<void> => {
+      const tracked = routing.routed.get(key) ?? [];
+      const owners = tracked.filter((login) => normalizeLogin(login) !== normalizeLogin(self));
+
+      if (owners.length > 0) {
+        const withdrawn = await performWrite(
+          deps,
+          "withdraw the owners' review request",
+          async () => {
+            await deps.octokit.pulls.removeRequestedReviewers({
+              owner,
+              repo,
+              pull_number: number,
+              reviewers: [...owners],
+            });
+            return true;
+          },
+        );
+
+        // Dry-run: nothing reached GitHub, so the tracked set stays as it was.
+        if (withdrawn !== undefined) {
+          routing.routed.set(key, []);
+        }
+      } else {
+        routing.routed.set(key, []);
+      }
+    };
+
+    if (routing.mutex !== undefined) {
+      await routing.mutex.run(`${owner}/${repo}`, recover);
+    } else {
+      await recover();
+    }
+  }
 
   deps.log.info({ pr: number, author, sha }, "Approved pull request");
   return true;
@@ -217,12 +320,7 @@ export async function serve(
     return false;
   }
 
-  const associated = await deps.octokit.paginate(
-    deps.octokit.repos.listPullRequestsAssociatedWithCommit,
-    { owner, repo, commit_sha: sha, per_page: 100 },
-  );
-
-  const open = associated.filter((pull) => pull.state === "open");
+  const open = await listOpenPullRequestsForCommit(deps.octokit, owner, repo, sha);
   if (open.length === 0) {
     deps.log.debug({ sha }, "No open pull request is headed by the commit");
     return false;
@@ -255,9 +353,10 @@ export async function serve(
 export function approvalPass(
   resolver: ConfigResolver,
   dryRun: boolean,
+  routing?: SharedRoutingState,
 ): (octokit: Api, log: Logger) => (owner: string, repo: string, sha: string) => Promise<void> {
   return (octokit, log) => async (owner, repo, sha) => {
     const { config } = await resolver.resolve(octokit as never, owner, repo, log);
-    await serve({ octokit, log, dryRun }, owner, repo, sha, config.autoApproval);
+    await serve({ octokit, log, dryRun, routing }, owner, repo, sha, config.autoApproval);
   };
 }

@@ -1,0 +1,165 @@
+/**
+ * Escalation — hands a stuck pull request to the human owners.
+ *
+ * A bot pull request with auto-merge active can sit red forever: routing asked
+ * Woodhouse to review it because the bot enabled auto-merge itself, but the
+ * approval pass only runs after a successful white-glove evaluation, so
+ * Woodhouse holds the review and never approves while checks fail. This pass
+ * runs on failure instead: when Woodhouse holds the review of a bot pull
+ * request the bot asked to merge, it withdraws itself and requests the
+ * configured owners. The owners then see the failing pull request.
+ *
+ * The approval pass complements this on recovery: when the commit finally
+ * passes and Woodhouse approves, it withdraws the owners.
+ */
+
+import type { Context } from "probot";
+import type { Logger } from "pino";
+import type { ConfigResolver } from "../config/resolver.js";
+import type { AutoApprovalConfig } from "../config/schema.js";
+import { getPullRequest, listOpenPullRequestsForCommit } from "../github/pulls.js";
+import type { KeyedMutex } from "../lib/mutex.js";
+import { classifyActor, normalizeLogin, type ActorClass } from "./policy.js";
+import {
+  appLogin,
+  handToOwners,
+  holdsRequest,
+  type RoutingDeps,
+  type SharedRoutingState,
+} from "./routing.js";
+
+type Api = Context<"pull_request">["octokit"];
+
+export interface EscalationFacts {
+  readonly author: string;
+  readonly actorClass: ActorClass;
+  /** Login that enabled auto-merge, from the live pull request; null means nobody. */
+  readonly autoMergeEnabledBy: string | null;
+  /** True when the app's own login is in the tracked routed set. */
+  readonly heldBySelf: boolean;
+}
+
+/**
+ * True only when a bot enabled auto-merge on its own pull request and the app
+ * currently holds its review. An owner, an unlisted author, a bot that did not
+ * ask to merge, or a pull request whose review already sits with someone else
+ * never needs the hand-off.
+ */
+export function shouldHandToOwners(facts: EscalationFacts): boolean {
+  return (
+    facts.actorClass === "bot" &&
+    facts.autoMergeEnabledBy !== null &&
+    normalizeLogin(facts.autoMergeEnabledBy) === normalizeLogin(facts.author) &&
+    facts.heldBySelf
+  );
+}
+
+/**
+ * Evaluate one open pull request headed by a failed commit and hand it to the
+ * owners when it needs the hand-off. The live pull request is re-fetched for
+ * the same reason as the approval pass: a head that moved or a pull request
+ * that closed must never be escalated. A rejected GET propagates to the caller.
+ *
+ * Check events read settled state, so there is deliberately no auto-merge
+ * grace sleep here — the same posture as ADR 0014's commit-level approval.
+ * With `autoApproval.enabled` false routing never requests the app, so `held`
+ * is false and escalation is naturally inert; a mid-process config flip
+ * resolves to the same state `route()` produces when disabled.
+ */
+async function escalatePullRequest(
+  deps: RoutingDeps,
+  owner: string,
+  repo: string,
+  sha: string,
+  number: number,
+  config: AutoApprovalConfig,
+  self: string,
+  mutex?: KeyedMutex,
+): Promise<void> {
+  const pull = await getPullRequest(deps.octokit, owner, repo, number);
+
+  if (pull.state !== "open" || pull.head.sha !== sha) {
+    deps.log.debug(
+      { pr: number, state: pull.state, head: pull.head.sha, sha },
+      "Pull request no longer matches the failed commit; skipping escalation",
+    );
+    return;
+  }
+
+  const author = pull.user?.login;
+  if (author === undefined) {
+    deps.log.debug({ pr: number }, "Not escalating: pull request has no author login");
+    return;
+  }
+
+  const actorClass = classifyActor(author, config);
+  const autoMergeEnabledBy = pull.auto_merge?.enabled_by?.login ?? null;
+  const heldBySelf = holdsRequest(deps, owner, repo, number, self);
+
+  if (!shouldHandToOwners({ author, actorClass, autoMergeEnabledBy, heldBySelf })) {
+    deps.log.debug(
+      { pr: number, actorClass, autoMergeEnabledBy, heldBySelf },
+      "Not handing the review to the owners",
+    );
+    return;
+  }
+
+  await handToOwners(deps, owner, repo, number, config, `checks failed on commit ${sha}`, mutex);
+}
+
+/**
+ * Escalate every open pull request headed by the failed commit. A failure
+ * evaluating one pull request is logged and the walk moves on to the next: the
+ * commit's next event re-runs the pass.
+ */
+async function escalateFailedCommit(
+  deps: RoutingDeps,
+  owner: string,
+  repo: string,
+  sha: string,
+  config: AutoApprovalConfig,
+  self: string,
+  mutex?: KeyedMutex,
+): Promise<void> {
+  const open = await listOpenPullRequestsForCommit(deps.octokit, owner, repo, sha);
+  if (open.length === 0) {
+    deps.log.debug({ sha }, "No open pull request is headed by the failed commit");
+    return;
+  }
+
+  for (const pull of open) {
+    try {
+      await escalatePullRequest(deps, owner, repo, sha, pull.number, config, self, mutex);
+    } catch (err) {
+      deps.log.error({ err, pr: pull.number, sha }, "Failed to escalate pull request; continuing");
+    }
+  }
+}
+
+/**
+ * Factory for the commit-level failure hook: resolve the repository's config,
+ * then hand the stopped pull requests to the owners.
+ *
+ * Mirrors `approvalPass`: the `autoApproval.enabled` gate is checked here
+ * because escalation is the failure-side half of the same decision.
+ */
+export function escalationPass(
+  resolver: ConfigResolver,
+  dryRun: boolean,
+  routing: SharedRoutingState,
+): (octokit: Api, log: Logger) => (owner: string, repo: string, sha: string) => Promise<void> {
+  return (octokit, log) => async (owner, repo, sha) => {
+    const { config } = await resolver.resolve(octokit as never, owner, repo, log);
+    const deps: RoutingDeps = { octokit, log, dryRun, routed: routing.routed };
+
+    // With auto-approval disabled routing never requests the app, so nothing
+    // can be held; skip without resolving the login.
+    const self = config.autoApproval.enabled ? await appLogin(octokit) : undefined;
+    if (self === undefined) {
+      log.debug({ sha }, "Auto-approval disabled by configuration; skipping escalation");
+      return;
+    }
+
+    await escalateFailedCommit(deps, owner, repo, sha, config.autoApproval, self, routing.mutex);
+  };
+}

@@ -24,6 +24,7 @@ import type { Logger } from "pino";
 import type { AutoApprovalConfig } from "../config/schema.js";
 import { getPullRequest } from "../github/pulls.js";
 import { performWrite } from "../lib/dry-run.js";
+import type { KeyedMutex } from "../lib/mutex.js";
 import { classifyActor } from "./policy.js";
 
 type Api = Context<"pull_request">["octokit"];
@@ -55,7 +56,7 @@ export function resetAppLoginCache(): void {
   cachedAppLogin = undefined;
 }
 
-async function appLogin(octokit: Api): Promise<string> {
+export async function appLogin(octokit: Api): Promise<string> {
   cachedAppLogin ??= octokit.apps
     .getAuthenticated()
     .then((response) => `${(response.data as { slug: string }).slug}[bot]`)
@@ -300,59 +301,141 @@ export async function serve(
     selfLogin,
   );
 
-  const key = `${owner}/${repo}#${pr.number}`;
-  const previous = deps.routed.get(key) ?? [];
-  const next = decision.reviewers;
+  await reconcileReviewers(deps, owner, repo, pr.number, decision);
+}
 
-  const toWithdraw = previous.filter(
-    (login) => !next.some((candidate) => normalizeLogin(candidate) === normalizeLogin(login)),
-  );
-  const toRequest = next.filter(
-    (login) => !previous.some((candidate) => normalizeLogin(candidate) === normalizeLogin(login)),
-  );
+/**
+ * True when the reviewer set routing last requested for the pull request
+ * contains `login`, compared case-insensitively.
+ */
+export function holdsRequest(
+  deps: Pick<RoutingDeps, "routed">,
+  owner: string,
+  repo: string,
+  number: number,
+  login: string,
+): boolean {
+  const key = `${owner}/${repo}#${number}`;
+  const tracked = deps.routed.get(key) ?? [];
+  return tracked.some((candidate) => normalizeLogin(candidate) === normalizeLogin(login));
+}
 
-  if (toWithdraw.length > 0) {
-    const withdrawn = await performWrite(deps, "withdraw the previous review request", async () => {
-      await deps.octokit.pulls.removeRequestedReviewers({
-        owner,
-        repo,
-        pull_number: pr.number,
-        reviewers: [...toWithdraw],
-      });
-      return true;
-    });
+/**
+ * Reconcile one desired reviewer set with the set routing last requested for
+ * the pull request: withdraw what is no longer wanted, request what is new,
+ * then remember the result.
+ *
+ * The whole read-modify-write runs under `mutex` when one is given, keyed per
+ * repository exactly like the routing listener. Callers already holding that
+ * lock (the listener itself) pass no mutex.
+ */
+export async function reconcileReviewers(
+  deps: RoutingDeps,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  decision: RoutingDecision,
+  mutex?: KeyedMutex,
+): Promise<void> {
+  const reconcile = async (): Promise<void> => {
+    const key = `${owner}/${repo}#${prNumber}`;
+    const previous = deps.routed.get(key) ?? [];
+    const next = decision.reviewers;
 
-    // Dry-run: nothing reached GitHub, so the next pass must still see the
-    // previous set as un-replaced.
-    if (withdrawn === undefined) return;
-  }
-
-  if (toRequest.length > 0) {
-    const requested = await performWrite(deps, "request the routed reviewer(s)", async () => {
-      await deps.octokit.pulls.requestReviewers({
-        owner,
-        repo,
-        pull_number: pr.number,
-        reviewers: [...toRequest],
-      });
-      return true;
-    });
-
-    // Dry-run: nothing reached GitHub, so remember nothing.
-    if (requested === undefined) return;
-  }
-
-  if (toWithdraw.length === 0 && toRequest.length === 0) {
-    deps.log.debug(
-      { pr: pr.number, reviewers: next, reason: decision.reason },
-      "Review routing unchanged",
+    const toWithdraw = previous.filter(
+      (login) => !next.some((candidate) => normalizeLogin(candidate) === normalizeLogin(login)),
     );
+    const toRequest = next.filter(
+      (login) => !previous.some((candidate) => normalizeLogin(candidate) === normalizeLogin(login)),
+    );
+
+    if (toWithdraw.length > 0) {
+      const withdrawn = await performWrite(
+        deps,
+        "withdraw the previous review request",
+        async () => {
+          await deps.octokit.pulls.removeRequestedReviewers({
+            owner,
+            repo,
+            pull_number: prNumber,
+            reviewers: [...toWithdraw],
+          });
+          return true;
+        },
+      );
+
+      // Dry-run: nothing reached GitHub, so the next pass must still see the
+      // previous set as un-replaced.
+      if (withdrawn === undefined) return;
+    }
+
+    if (toRequest.length > 0) {
+      const requested = await performWrite(deps, "request the routed reviewer(s)", async () => {
+        await deps.octokit.pulls.requestReviewers({
+          owner,
+          repo,
+          pull_number: prNumber,
+          reviewers: [...toRequest],
+        });
+        return true;
+      });
+
+      // Dry-run: nothing reached GitHub, so remember nothing.
+      if (requested === undefined) return;
+    }
+
+    if (toWithdraw.length === 0 && toRequest.length === 0) {
+      deps.log.debug(
+        { pr: prNumber, reviewers: next, reason: decision.reason },
+        "Review routing unchanged",
+      );
+      return;
+    }
+
+    deps.routed.set(key, next);
+    deps.log.info(
+      { pr: prNumber, reviewers: next, reason: decision.reason },
+      "Routed pull request reviewers",
+    );
+  };
+
+  if (mutex !== undefined) {
+    await mutex.run(`${owner}/${repo}`, reconcile);
     return;
   }
 
-  deps.routed.set(key, next);
-  deps.log.info(
-    { pr: pr.number, reviewers: next, reason: decision.reason },
-    "Routed pull request reviewers",
-  );
+  await reconcile();
+}
+
+/**
+ * Hand the pull request's review to the configured owners, withdrawing
+ * whichever routed reviewer is currently tracked (typically Woodhouse itself).
+ *
+ * Replacement semantics do the dedupe the issue asks for: the diff withdraws
+ * Woodhouse exactly when Woodhouse holds the tracked request, and requests the
+ * owners exactly when they are not already the tracked set. A second hand-off
+ * therefore writes nothing.
+ */
+export async function handToOwners(
+  deps: RoutingDeps,
+  owner: string,
+  repo: string,
+  number: number,
+  config: AutoApprovalConfig,
+  reason: string,
+  mutex?: KeyedMutex,
+): Promise<void> {
+  const selfLogin = config.enabled ? await appLogin(deps.octokit) : undefined;
+  await reconcileReviewers(deps, owner, repo, number, ownersFor(config, selfLogin, reason), mutex);
+}
+
+/**
+ * The routing state the commit-level passes share with the routing listener:
+ * the same map the listener tracks, and the optional mutex that serialises
+ * reviewer writes per repository with it. Lock order is commit mutex → routing
+ * mutex only, never the reverse.
+ */
+export interface SharedRoutingState {
+  readonly routed: Map<string, readonly string[]>;
+  readonly mutex?: KeyedMutex;
 }

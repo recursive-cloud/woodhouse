@@ -15,6 +15,7 @@ import { expect, vi } from "vitest";
 import { handleCheckRunCompleted } from "../../src/app.js";
 import { serve } from "../../src/approval/routing.js";
 import type { RoutingDeps } from "../../src/approval/routing.js";
+import { escalationPass } from "../../src/approval/escalation.js";
 import { approvalPass } from "../../src/approval/silverPlatter.js";
 import { autoApprovalSchema, woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { AutoApprovalConfig } from "../../src/config/schema.js";
@@ -297,12 +298,14 @@ export function buildRoutingHarness(options: HarnessOptions = {}) {
   // The scenarios call the production entry points directly rather than
   // through `createApp`, so the harness supplies the same approval hook the
   // app wires into its reconcile deps.
+  const routing = { routed };
   const reconcileDeps: ReconcileDeps = {
     octokit,
     resolver,
     log,
     dryRun,
-    onSuccess: approvalPass(resolver, dryRun)(octokit, log),
+    onSuccess: approvalPass(resolver, dryRun, routing)(octokit, log),
+    onFailure: escalationPass(resolver, dryRun, routing)(octokit, log),
   };
 
   return {
