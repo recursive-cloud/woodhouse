@@ -23,6 +23,7 @@ import { syncSettings } from "./settings/apply.js";
 import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
 import { approvalPass, serve } from "./approval/silverPlatter.js";
+import { forget, serve as routeReviewers } from "./approval/routing.js";
 import { handleOnboarding } from "./onboarding/handler.js";
 import { Scheduler } from "./lib/scheduler.js";
 import { KeyedMutex } from "./lib/mutex.js";
@@ -136,6 +137,8 @@ export function createApp(options: AppOptions) {
     const guarded = new GuardedApp(app, options.allowlist);
     const scheduler = new Scheduler();
     const settingsMutex = new KeyedMutex();
+    const routingMutex = new KeyedMutex();
+    const routedReviewers = new Map<string, readonly string[]>();
 
     const deps = (log: Parameters<typeof serve>[0]["log"]) => ({
       resolver,
@@ -320,6 +323,69 @@ export function createApp(options: AppOptions) {
         );
       },
     );
+
+    // ------------------------------------------------------ reviewer routing
+    // Each open pull request gets one routed reviewer set, replaced on the
+    // events that can change which actor class applies.
+    guarded.on(
+      [
+        "pull_request.opened",
+        "pull_request.reopened",
+        "pull_request.ready_for_review",
+        "pull_request.synchronize",
+      ],
+      "review-routing",
+      async (context, scope) => {
+        if (scope.repo === undefined) return;
+
+        const repo = scope.repo;
+        const pr = context.payload.pull_request;
+
+        const { config } = await resolver.resolve(
+          context.octokit as never,
+          scope.owner,
+          repo,
+          scope.log,
+        );
+
+        // Serialise per repository: concurrent opened and synchronize events
+        // could otherwise both diff against a stale routed set.
+        await routingMutex.run(`${scope.owner}/${repo}`, () =>
+          routeReviewers(
+            {
+              octokit: context.octokit,
+              log: scope.log,
+              dryRun: options.dryRun,
+              routed: routedReviewers,
+            },
+            scope.owner,
+            repo,
+            {
+              number: pr.number,
+              author: pr.user.login,
+              draft: pr.draft ?? false,
+              state: pr.state,
+              action: context.payload.action,
+            },
+            config.autoApproval,
+          ),
+        );
+      },
+    );
+
+    // Close and merge end routing's interest in a pull request: drop the tracked
+    // set so the map cannot grow without bound. No withdrawal — GitHub cleans up
+    // review requests on a closed pull request.
+    guarded.on("pull_request.closed", "review-routing", async (context, scope) => {
+      if (scope.repo === undefined) return;
+      const repo = scope.repo;
+      forget(
+        { log: scope.log, routed: routedReviewers },
+        scope.owner,
+        repo,
+        context.payload.pull_request.number,
+      );
+    });
 
     // --------------------------------------------------- config validation
     guarded.on(
