@@ -9,17 +9,21 @@
 
 import { expect } from "vitest";
 import { describeFeature, loadFeature } from "@amiceli/vitest-cucumber";
-import { syncSettings } from "../../src/settings/apply.js";
 import { httpError } from "../settings-sync/octokit-fakes.js";
 import {
   type EnvironmentsWorld,
   environmentsOf,
-  requireResolved,
   requireSummary,
   resolvedConfig,
   resolvedFromLayers,
+  runSync,
   world,
 } from "./apply-world.js";
+import {
+  assertNoSettingsWritten,
+  rejectInvalidConfig,
+  skippedForInvalidConfig,
+} from "./authoring-rejection.js";
 
 const feature = await loadFeature("features/environments/apply.feature");
 
@@ -85,13 +89,6 @@ const DUPLICATE_ENVIRONMENTS = `environments:
   Prod: {}
   prod: {}
 `;
-
-/** The shared When body: run the real orchestrator into the world's summary slot. */
-function runSync(w: EnvironmentsWorld): () => Promise<void> {
-  return async () => {
-    w.summary = await syncSettings(w.ctx, requireResolved(w.resolved));
-  };
-}
 
 /** The shared And body for the collected-failure scenarios. */
 function remainingEnvironmentsApplied(w: EnvironmentsWorld): () => void {
@@ -266,28 +263,13 @@ describeFeature(feature, ({ Scenario }) => {
       const w = world();
 
       Given(`a configuration declaring the environments "Prod" and "prod"`, () => {
-        w.resolved = resolvedFromLayers(undefined, DUPLICATE_ENVIRONMENTS);
-        const resolved = requireResolved(w.resolved);
-        expect(resolved.issues.length).toBeGreaterThan(0);
-        expect(resolved.issues.map((issue) => issue.message).join("\n")).toContain(
-          "duplicate environment name",
-        );
+        rejectInvalidConfig(w, DUPLICATE_ENVIRONMENTS, "duplicate environment name");
       });
       When(`the settings sync runs`, runSync(w));
       Then(`no settings are written`, () => {
-        expect(requireSummary(w.summary)).toEqual({
-          changes: [],
-          failures: [],
-          dryRun: false,
-        });
-        expect(w.built.calls).toEqual([]);
+        assertNoSettingsWritten(w);
       });
-      And(`the sync is skipped because "invalid-config"`, () => {
-        expect(w.log.debug).toHaveBeenCalledWith(
-          { reason: "invalid-config" },
-          "Settings sync skipped",
-        );
-      });
+      And(`the sync is skipped because "invalid-config"`, skippedForInvalidConfig(w));
     },
   );
 

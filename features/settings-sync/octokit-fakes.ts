@@ -12,7 +12,7 @@ import type { Context } from "probot";
 import type { ChangedFile } from "../../src/github/pulls.js";
 import type { MergeFeedbackDeps } from "../../src/settings/mergeFeedback.js";
 import type { Gate } from "./concurrency.js";
-import { recorder, recorded } from "../support/recorded.js";
+import { type CallLog, recorder, recorded } from "../support/recorded.js";
 
 export const RULESETS_ROUTE = "GET /repos/{owner}/{repo}/rulesets";
 
@@ -133,106 +133,160 @@ export interface OctokitOptions {
   readonly branchPolicies?: readonly BranchPolicy[];
 }
 
-/**
- * One recording octokit fake for every suite. Applier calls append to `calls`,
- * tagged with `label` when supplied; comment calls are never recorded, so an
- * applier assertion stays binding. `paginate` dispatches on the target the way
- * octokit does.
- */
-export function makeOctokit(options?: OctokitOptions) {
-  const {
-    label,
-    gate,
-    current = { has_issues: false },
-    configFiles = {},
-    files = [SETTINGS_FILE],
-    comments = [],
-    existingRulesets = [],
-    branchPolicies: seededBranchPolicies = [],
-    calls: providedCalls,
-  } = options ?? {};
-  const calls = providedCalls ?? [];
-  const record = recorder(calls, label);
+/** The state a fake deployment environment's branch policies live in. */
+interface BranchPolicyState {
+  readonly byEnvironment: Map<string, BranchPolicy[]>;
+  readonly nextId: { value: number };
+}
 
+/** Build the branch-policy state from the policies already on the environment. */
+function seedBranchPolicyState(seeded: readonly BranchPolicy[]): BranchPolicyState {
+  const byEnvironment = new Map<string, BranchPolicy[]>();
+  for (const policy of seeded) {
+    const entries = byEnvironment.get(policy.environment) ?? [];
+    entries.push({ ...policy });
+    byEnvironment.set(policy.environment, entries);
+  }
+  const nextId = { value: seeded.reduce((max, policy) => Math.max(max, policy.id), 0) + 1 };
+  return { byEnvironment, nextId };
+}
+
+/** The listing response for one environment's policies. */
+function listBranchPolicies(state: BranchPolicyState, environmentName: string) {
+  const branch_policies = [...(state.byEnvironment.get(environmentName) ?? [])];
+  return { data: { total_count: branch_policies.length, branch_policies } };
+}
+
+/** Add one policy to an environment and return the created entry. */
+function createBranchPolicy(state: BranchPolicyState, environmentName: string, name: string) {
+  const entry: BranchPolicy = { id: state.nextId.value++, name, environment: environmentName };
+  const entries = state.byEnvironment.get(environmentName) ?? [];
+  entries.push(entry);
+  state.byEnvironment.set(environmentName, entries);
+  return { data: entry };
+}
+
+/** Remove the policy with `policyId` from whichever environment holds it. */
+function deleteBranchPolicy(state: BranchPolicyState, policyId: number) {
+  for (const entries of state.byEnvironment.values()) {
+    const index = entries.findIndex((entry) => entry.id === policyId);
+    if (index !== -1) {
+      entries.splice(index, 1);
+      break;
+    }
+  }
+  return emptyPayload();
+}
+
+/** A copy of every branch policy the fake currently holds. */
+function readBranchPolicies(state: BranchPolicyState): readonly BranchPolicy[] {
+  return [...state.byEnvironment.values()].flat().map((policy) => Object.assign({}, policy));
+}
+
+/**
+ * The deployment branch-policy surface, backed by a per-environment map so a
+ * create, delete and list see the same state a live environment would.
+ */
+function makeBranchPolicySurface(record: CallLog, seeded: readonly BranchPolicy[]) {
+  const state = seedBranchPolicyState(seeded);
+
+  return {
+    listDeploymentBranchPolicies: recorded(
+      record,
+      "repos.listDeploymentBranchPolicies",
+      ({ environment_name }: { environment_name: string }) =>
+        listBranchPolicies(state, environment_name),
+    ),
+    createDeploymentBranchPolicy: recorded(
+      record,
+      "repos.createDeploymentBranchPolicy",
+      ({ environment_name, name }: { environment_name: string; name: string }) =>
+        createBranchPolicy(state, environment_name, name),
+    ),
+    deleteDeploymentBranchPolicy: recorded(
+      record,
+      "repos.deleteDeploymentBranchPolicy",
+      ({ branch_policy_id }: { branch_policy_id: number }) =>
+        deleteBranchPolicy(state, branch_policy_id),
+    ),
+    branchPolicyStore: (): readonly BranchPolicy[] => readBranchPolicies(state),
+  };
+}
+
+/** The `repos` namespace: the settings read plus the appliers' write surface. */
+function makeReposSurface(
+  record: CallLog,
+  options: {
+    readonly gate?: Gate;
+    readonly current?: Record<string, unknown>;
+    readonly configFiles?: Record<string, string>;
+    readonly branchPolicies?: readonly BranchPolicy[];
+  },
+) {
+  const { gate, current = { has_issues: false }, configFiles = {}, branchPolicies = [] } = options;
   const get = recorded(record, "repos.get", async () => {
     if (gate?.claim()) await gate.promise;
     return { data: { ...current } };
   });
-  const getContent = makeGetContent(configFiles);
-  const update = recorded(record, "repos.update", emptyPayload);
-  const replaceAllTopics = recorded(record, "repos.replaceAllTopics", emptyPayload);
-  const updateBranchProtection = recorded(record, "repos.updateBranchProtection", emptyPayload);
-  const createOrUpdateEnvironment = recorded(
-    record,
-    "repos.createOrUpdateEnvironment",
-    emptyPayload,
-  );
-  const getAllEnvironments = recorded(record, "repos.getAllEnvironments", emptyPayload);
 
-  const branchPoliciesByEnvironment = new Map<string, BranchPolicy[]>();
-  for (const policy of seededBranchPolicies) {
-    const entries = branchPoliciesByEnvironment.get(policy.environment) ?? [];
-    entries.push({ ...policy });
-    branchPoliciesByEnvironment.set(policy.environment, entries);
-  }
-  let nextBranchPolicyId =
-    seededBranchPolicies.reduce((max, policy) => Math.max(max, policy.id), 0) + 1;
+  return {
+    get,
+    getContent: makeGetContent(configFiles),
+    update: recorded(record, "repos.update", emptyPayload),
+    replaceAllTopics: recorded(record, "repos.replaceAllTopics", emptyPayload),
+    updateBranchProtection: recorded(record, "repos.updateBranchProtection", emptyPayload),
+    createOrUpdateEnvironment: recorded(record, "repos.createOrUpdateEnvironment", emptyPayload),
+    getAllEnvironments: recorded(record, "repos.getAllEnvironments", emptyPayload),
+    ...makeBranchPolicySurface(record, branchPolicies),
+  };
+}
 
-  const listDeploymentBranchPolicies = recorded(
-    record,
-    "repos.listDeploymentBranchPolicies",
-    async ({ environment_name }: { environment_name: string }) => {
-      const branch_policies = [...(branchPoliciesByEnvironment.get(environment_name) ?? [])];
-      return { data: { total_count: branch_policies.length, branch_policies } };
-    },
-  );
-  const createDeploymentBranchPolicy = recorded(
-    record,
-    "repos.createDeploymentBranchPolicy",
-    async ({ environment_name, name }: { environment_name: string; name: string }) => {
-      const entry: BranchPolicy = { id: nextBranchPolicyId++, name, environment: environment_name };
-      const entries = branchPoliciesByEnvironment.get(environment_name) ?? [];
-      entries.push(entry);
-      branchPoliciesByEnvironment.set(environment_name, entries);
-      return { data: entry };
-    },
-  );
-  const deleteDeploymentBranchPolicy = recorded(
-    record,
-    "repos.deleteDeploymentBranchPolicy",
-    async ({ branch_policy_id }: { branch_policy_id: number }) => {
-      for (const entries of branchPoliciesByEnvironment.values()) {
-        const index = entries.findIndex((entry) => entry.id === branch_policy_id);
-        if (index !== -1) {
-          entries.splice(index, 1);
-          break;
-        }
-      }
-      return emptyPayload();
-    },
-  );
-  const branchPolicyStore = (): readonly BranchPolicy[] =>
-    [...branchPoliciesByEnvironment.values()].flat().map((policy) => Object.assign({}, policy));
+/** The `issues` namespace: label writes plus the merge-feedback comment surface. */
+function makeIssuesSurface(record: CallLog, comments: readonly Comment[]) {
+  return {
+    listLabelsForRepo: vi.fn(async () => ({ data: [] })),
+    createLabel: recorded(record, "issues.createLabel", emptyPayload),
+    updateLabel: recorded(record, "issues.updateLabel", emptyPayload),
+    deleteLabel: recorded(record, "issues.deleteLabel", emptyPayload),
+    listComments: vi.fn(async () => ({ data: [...comments] })),
+    createComment: vi.fn(async (..._args: unknown[]) => ({ data: { id: 1 } })),
+    updateComment: vi.fn(async (..._args: unknown[]) => ({ data: { id: 1 } })),
+    deleteComment: vi.fn(async () => ({ data: {} })),
+  };
+}
 
-  const listLabelsForRepo = vi.fn(async () => ({ data: [] }));
-  const createLabel = recorded(record, "issues.createLabel", emptyPayload);
-  const updateLabel = recorded(record, "issues.updateLabel", emptyPayload);
-  const deleteLabel = recorded(record, "issues.deleteLabel", emptyPayload);
+/** The `pulls` namespace: the changed-files listing. */
+function makePullsSurface(files: readonly ChangedFile[]) {
+  return {
+    listFiles: vi.fn(async () => ({ data: [...files] })),
+  };
+}
 
-  const listFiles = vi.fn(async () => ({ data: [...files] }));
+/**
+ * `paginate` dispatches on the target the way octokit does: comments and files
+ * are methods, rulesets are a route string, deployment branch policies are a
+ * method whose response wraps the array, and anything else is the labels
+ * listing. The branch-policy branch calls the recorded method so call
+ * assertions still bind, then normalises the wrapped response the way octokit's
+ * paginator does before applying the map.
+ */
+function makePaginateSurface(
+  record: CallLog,
+  options: {
+    readonly comments: readonly Comment[];
+    readonly files: readonly ChangedFile[];
+    readonly existingRulesets: readonly { id: number; name: string }[];
+    readonly listComments: ReturnType<typeof makeIssuesSurface>["listComments"];
+    readonly listFiles: ReturnType<typeof makePullsSurface>["listFiles"];
+    readonly listDeploymentBranchPolicies: ReturnType<
+      typeof makeBranchPolicySurface
+    >["listDeploymentBranchPolicies"];
+  },
+) {
+  const { comments, files, existingRulesets, listComments, listFiles } = options;
+  const { listDeploymentBranchPolicies } = options;
 
-  const listComments = vi.fn(async () => ({ data: [...comments] }));
-  const createComment = vi.fn(async (..._args: unknown[]) => ({ data: { id: 1 } }));
-  const updateComment = vi.fn(async (..._args: unknown[]) => ({ data: { id: 1 } }));
-  const deleteComment = vi.fn(async () => ({ data: {} }));
-
-  // Pagination dispatches on the target: comments and files are methods,
-  // rulesets are a route string, deployment branch policies are a method whose
-  // response wraps the array, and anything else is the labels listing. The
-  // branch-policy branch calls the recorded method so call assertions still
-  // bind, then normalises the wrapped response the way octokit's paginator does
-  // before applying the map.
-  const paginate = vi.fn(
+  return vi.fn(
     async (target: unknown, params?: unknown, map?: (response: { data: unknown }) => unknown) => {
       if (target === listComments) return [...comments];
       if (target === listFiles) return [...files];
@@ -249,33 +303,57 @@ export function makeOctokit(options?: OctokitOptions) {
       return [];
     },
   );
+}
 
+/**
+ * One recording octokit fake for every suite. Applier calls append to `calls`,
+ * tagged with `label` when supplied; comment calls are never recorded, so an
+ * applier assertion stays binding. Each namespace is built by a module-level
+ * factory, and the assembled fake is the only variant the suites share.
+ */
+export function makeOctokit(options?: OctokitOptions) {
+  const {
+    label,
+    gate,
+    current,
+    configFiles,
+    files = [SETTINGS_FILE],
+    comments = [],
+    existingRulesets = [],
+    branchPolicies,
+    calls: providedCalls,
+  } = options ?? {};
+  const calls = providedCalls ?? [];
+  const record = recorder(calls, label);
+
+  const repos = makeReposSurface(record, { gate, current, configFiles, branchPolicies });
+  const issues = makeIssuesSurface(record, comments);
+  const pulls = makePullsSurface(files);
+  const paginate = makePaginateSurface(record, {
+    comments,
+    files,
+    existingRulesets,
+    listComments: issues.listComments,
+    listFiles: pulls.listFiles,
+    listDeploymentBranchPolicies: repos.listDeploymentBranchPolicies,
+  });
   const request = recorded(record, (route: string) => `request ${route}`, emptyPayload);
 
   const octokit: RecordingOctokit = {
     repos: {
-      get,
-      getContent,
-      update,
-      replaceAllTopics,
-      updateBranchProtection,
-      createOrUpdateEnvironment,
-      getAllEnvironments,
-      listDeploymentBranchPolicies,
-      createDeploymentBranchPolicy,
-      deleteDeploymentBranchPolicy,
+      get: repos.get,
+      getContent: repos.getContent,
+      update: repos.update,
+      replaceAllTopics: repos.replaceAllTopics,
+      updateBranchProtection: repos.updateBranchProtection,
+      createOrUpdateEnvironment: repos.createOrUpdateEnvironment,
+      getAllEnvironments: repos.getAllEnvironments,
+      listDeploymentBranchPolicies: repos.listDeploymentBranchPolicies,
+      createDeploymentBranchPolicy: repos.createDeploymentBranchPolicy,
+      deleteDeploymentBranchPolicy: repos.deleteDeploymentBranchPolicy,
     },
-    issues: {
-      listLabelsForRepo,
-      createLabel,
-      updateLabel,
-      deleteLabel,
-      listComments,
-      createComment,
-      updateComment,
-      deleteComment,
-    },
-    pulls: { listFiles },
+    issues,
+    pulls,
     paginate,
     request,
   };
@@ -283,26 +361,9 @@ export function makeOctokit(options?: OctokitOptions) {
   return {
     octokit,
     calls,
-    get,
-    getContent,
-    update,
-    replaceAllTopics,
-    updateBranchProtection,
-    createOrUpdateEnvironment,
-    getAllEnvironments,
-    listDeploymentBranchPolicies,
-    createDeploymentBranchPolicy,
-    deleteDeploymentBranchPolicy,
-    branchPolicyStore,
-    listLabelsForRepo,
-    createLabel,
-    updateLabel,
-    deleteLabel,
-    listFiles,
-    listComments,
-    createComment,
-    updateComment,
-    deleteComment,
+    ...repos,
+    ...issues,
+    ...pulls,
     paginate,
     request,
   };

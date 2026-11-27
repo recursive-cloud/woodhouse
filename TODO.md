@@ -32,7 +32,7 @@ file does not repeat them.
       supports rebase shops. GitHub's merge-time `(#N)` suffix never reaches
       the check (titles are validated pre-merge).
 
-- [ ] **Repository environments.** Environments and their protection rules
+- [x] **Repository environments.** Environments and their protection rules
       as a settings area. Slots into the apply pipeline cleanly: ruleset
       rules already carry `required_deployments` (environment names) through
       the passthrough.

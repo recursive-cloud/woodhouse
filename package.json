@@ -28,6 +28,8 @@
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "4.7.0",
+    "@octokit/types": "12.6.0",
+    "@octokit/webhooks": "12.3.2",
     "@types/js-yaml": "4.0.9",
     "@types/node": "24.19.2",
     "ajv": "8.20.0",
