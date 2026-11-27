@@ -1,4 +1,4 @@
-# 0013. Approval Is Gated on the White-Glove Evaluation
+# 0014. Approval Is Gated on the White-Glove Evaluation
 
 Status: Accepted (2026-11-27, REC-44)
 Date: 2026-11-27
