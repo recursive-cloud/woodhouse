@@ -23,6 +23,7 @@ import { syncSettings } from "./settings/apply.js";
 import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
 import { approvalPass, serve } from "./approval/silverPlatter.js";
+import { escalationPass } from "./approval/escalation.js";
 import { forget, serve as routeReviewers } from "./approval/routing.js";
 import { handleOnboarding } from "./onboarding/handler.js";
 import { Scheduler } from "./lib/scheduler.js";
@@ -139,6 +140,7 @@ export function createApp(options: AppOptions) {
     const settingsMutex = new KeyedMutex();
     const routingMutex = new KeyedMutex();
     const routedReviewers = new Map<string, readonly string[]>();
+    const routingState = { routed: routedReviewers, mutex: routingMutex };
 
     const deps = (log: Parameters<typeof serve>[0]["log"]) => ({
       resolver,
@@ -152,7 +154,14 @@ export function createApp(options: AppOptions) {
      * approve the eligible ones. The `autoApproval.enabled` gate lives inside
      * `serve`, so the hook itself stays unconditional.
      */
-    const approvalHook = approvalPass(resolver, options.dryRun);
+    const approvalHook = approvalPass(resolver, options.dryRun, routingState);
+
+    /**
+     * The commit-level failure hook: hand a stopped pull request from
+     * Woodhouse to the human owners. Shares the routing state with the approval
+     * hook and the routing listener so all three diff against one tracked set.
+     */
+    const escalationHook = escalationPass(resolver, options.dryRun, routingState);
 
     // ------------------------------------------------------------- settings
     guarded.on("push", "settings-sync", async (context, scope) => {
@@ -245,6 +254,7 @@ export function createApp(options: AppOptions) {
           octokit: context.octokit,
           ...deps(scope.log),
           onSuccess: approvalHook(context.octokit, scope.log),
+          onFailure: escalationHook(context.octokit, scope.log),
         },
         scope.owner,
         scope.repo,
@@ -263,6 +273,7 @@ export function createApp(options: AppOptions) {
           octokit: context.octokit,
           ...deps(scope.log),
           onSuccess: approvalHook(context.octokit, scope.log),
+          onFailure: escalationHook(context.octokit, scope.log),
         },
         scope.owner,
         scope.repo,
@@ -290,6 +301,7 @@ export function createApp(options: AppOptions) {
             ...deps(scope.log),
             scheduler,
             onSuccess: approvalHook(context.octokit, scope.log),
+            onFailure: escalationHook(context.octokit, scope.log),
           },
           scope.owner,
           scope.repo,
@@ -316,6 +328,7 @@ export function createApp(options: AppOptions) {
             ...deps(scope.log),
             scheduler,
             onSuccess: approvalHook(context.octokit, scope.log),
+            onFailure: escalationHook(context.octokit, scope.log),
           },
           scope.owner,
           scope.repo,
@@ -375,16 +388,19 @@ export function createApp(options: AppOptions) {
 
     // Close and merge end routing's interest in a pull request: drop the tracked
     // set so the map cannot grow without bound. No withdrawal — GitHub cleans up
-    // review requests on a closed pull request.
+    // review requests on a closed pull request. The mutex keeps the delete
+    // serialised with the other writers (routing, escalation, recovery).
     guarded.on("pull_request.closed", "review-routing", async (context, scope) => {
       if (scope.repo === undefined) return;
       const repo = scope.repo;
-      forget(
-        { log: scope.log, routed: routedReviewers },
-        scope.owner,
-        repo,
-        context.payload.pull_request.number,
-      );
+      await routingMutex.run(`${scope.owner}/${repo}`, async () => {
+        forget(
+          { log: scope.log, routed: routedReviewers },
+          scope.owner,
+          repo,
+          context.payload.pull_request.number,
+        );
+      });
     });
 
     // --------------------------------------------------- config validation

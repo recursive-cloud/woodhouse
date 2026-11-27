@@ -136,6 +136,13 @@ changes.
   Routing never proceeds to the replacement request with an unconfirmed
   withdrawal; fail-closed by design.
 
+- **A same-delivery reopen can re-request Woodhouse after escalation.** On
+  `reopened` or `ready_for_review` of a bot pull request whose checks already
+  failed, the routing listener may re-request Woodhouse after escalation
+  handed the review to the owners — last writer wins. CI re-runs on the
+  event, and its failure re-escalates, so the window closes on the next check
+  completion.
+
 ## Deferred / revisit
 
 - [ ] **Image signing and provenance.** `provenance: false` keeps the GHCR

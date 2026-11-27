@@ -61,7 +61,7 @@ export function pathMatches(file: string, pattern: string): boolean {
 export type ActorClass = "owner" | "bot" | "neither";
 
 /** GitHub logins compare case-insensitively; normalise both sides of every check. */
-const normalizeLogin = (login: string): string => login.trim().toLowerCase();
+export const normalizeLogin = (login: string): string => login.trim().toLowerCase();
 
 function isListed(list: readonly string[], login: string): boolean {
   return list.some((entry) => normalizeLogin(entry) === login);

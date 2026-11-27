@@ -88,3 +88,27 @@ export async function getPullRequest(
   const { data } = await octokit.pulls.get({ owner, repo, pull_number: pullNumber });
   return data;
 }
+
+/**
+ * List the open pull requests headed by a commit.
+ *
+ * A rejected listing propagates — an API failure must never read as "no pull
+ * requests". An empty result means the commit heads no open pull request.
+ */
+export async function listOpenPullRequestsForCommit(
+  octokit: Api,
+  owner: string,
+  repo: string,
+  sha: string,
+): Promise<{ number: number }[]> {
+  const associated = await octokit.paginate(octokit.repos.listPullRequestsAssociatedWithCommit, {
+    owner,
+    repo,
+    commit_sha: sha,
+    per_page: PER_PAGE,
+  });
+
+  return associated
+    .filter((pull) => pull.state === "open")
+    .map((pull) => ({ number: pull.number }));
+}

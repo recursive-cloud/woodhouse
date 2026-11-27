@@ -235,6 +235,13 @@ export interface ReconcileDeps {
    * already happened and the next event for the commit re-runs the pass.
    */
   readonly onSuccess?: (owner: string, repo: string, sha: string) => Promise<void>;
+  /**
+   * Invoked after the check write when the evaluation concludes failure, still
+   * inside the per-commit mutex. Failure only: pending and success never call
+   * it. A rejection is logged and swallowed here — the check write already
+   * happened and the next event for the commit re-runs the pass.
+   */
+  readonly onFailure?: (owner: string, repo: string, sha: string) => Promise<void>;
 }
 
 export interface ReconcileResult {
@@ -287,6 +294,17 @@ export async function reconcile(
         await deps.onSuccess(owner, repo, sha);
       } catch (err) {
         deps.log.error({ err, sha }, "Post-success hook failed");
+      }
+    }
+
+    // The symmetric failure hook: hand a stopped commit to the owners. Same
+    // posture as onSuccess — the check write already happened, so a rejection
+    // is logged and swallowed and the next event re-runs the pass.
+    if (evaluation.outcome === "failure" && deps.onFailure !== undefined) {
+      try {
+        await deps.onFailure(owner, repo, sha);
+      } catch (err) {
+        deps.log.error({ err, sha }, "Post-failure hook failed");
       }
     }
 

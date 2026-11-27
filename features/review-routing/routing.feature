@@ -62,3 +62,41 @@ Feature: Reviewer routing
     When a later push re-routes the pull request to Woodhouse
     Then Woodhouse is requested as the reviewer
     And the owner "my-user" is no longer requested as a reviewer
+
+  @REC-45
+  Scenario: Failing checks pull the owner in
+    Given auto-approval lists the Renovate bot as a bot
+    And the bot enabled auto-merge itself
+    And auto-approval lists "my-user" as an owner
+    When the bot's pull request fails its checks
+    Then the owner "my-user" is requested as the reviewer
+    And Woodhouse is no longer requested as a reviewer
+
+  @REC-45
+  Scenario: A recovered pull request is handed back to Woodhouse
+    Given the owner "my-user" was requested after the bot's checks failed
+    When the checks are fixed and pass
+    Then Woodhouse submits an approval review
+    And the owner "my-user" is no longer requested as a reviewer
+
+  @REC-45
+  Scenario: An owner pull request failing its checks gets no extra action
+    Given auto-approval lists "my-user" as an owner
+    When "my-user" opens a pull request and its checks fail
+    Then no additional review request is made
+
+  @REC-45
+  Scenario: Repeated failure does not duplicate the owner request
+    Given the owner "my-user" is requested as the reviewer on the bot's pull request
+    When another check fails on the same commit
+    Then the owner "my-user" is requested as the reviewer exactly once
+
+  @REC-45
+  Scenario: A bot touching a protected path is handed to the owners
+    Given auto-approval lists the Renovate bot as a bot
+    And the bot enabled auto-merge itself
+    And auto-approval lists "my-user" as an owner
+    And the pull request modifies ".github/woodhouse.yml"
+    When the checks pass
+    Then the owner "my-user" is requested as the reviewer
+    And Woodhouse is no longer requested as a reviewer
