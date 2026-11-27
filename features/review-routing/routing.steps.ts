@@ -1,5 +1,5 @@
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
-import { resetAppLoginCache } from "../../src/approval/silverPlatter.js";
+import { resetAppLoginCache } from "../../src/approval/routing.js";
 import {
   DEPENDABOT,
   ENABLED_BY_SELF,

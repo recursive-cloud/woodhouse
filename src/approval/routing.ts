@@ -22,11 +22,73 @@
 import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { AutoApprovalConfig } from "../config/schema.js";
+import { getPullRequest } from "../github/pulls.js";
 import { performWrite } from "../lib/dry-run.js";
 import { classifyActor } from "./policy.js";
-import { appLogin, getAutoMergeEnabledBy } from "./silverPlatter.js";
 
 type Api = Context<"pull_request">["octokit"];
+
+/**
+ * How long to wait, on the `opened` action only, before reading the live pull
+ * request for its auto-merge fact. Routing runs synchronously on the `opened`
+ * event, so an immediate GET can still race the bot's own auto-merge toggle;
+ * the webhook payload's snapshot is stale by the same margin. This grace is
+ * routing's own, independent of commit-level approvals: those re-read the live
+ * pull request after checks pass and no longer need it. A named constant,
+ * tunable without redesign.
+ */
+const AUTO_MERGE_GRACE_MS = 2_000;
+
+/** Promise-based delay so the grace can be awaited inline in the same pass. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The app's own login, e.g. `woodhouse[bot]`. Resolved once per process: it
+ * cannot change while we are running, and `GET /app` is a wasted request on
+ * every pull request otherwise.
+ */
+let cachedAppLogin: Promise<string> | undefined;
+
+export function resetAppLoginCache(): void {
+  cachedAppLogin = undefined;
+}
+
+async function appLogin(octokit: Api): Promise<string> {
+  cachedAppLogin ??= octokit.apps
+    .getAuthenticated()
+    .then((response) => `${(response.data as { slug: string }).slug}[bot]`)
+    .catch((error: unknown) => {
+      // Do not cache a failure; a transient error should not disable routing
+      // for the lifetime of the process.
+      cachedAppLogin = undefined;
+      throw error;
+    });
+  return cachedAppLogin;
+}
+
+/**
+ * Read the login that enabled auto-merge on the pull request, from its current
+ * state — never the stale `auto_merge` snapshot in the webhook payload.
+ *
+ * On `opened` we wait the short grace first (an immediate read races the bot's
+ * own toggle); on the other events the state has settled. A failed GET is not
+ * caught: the rejection propagates and fails the pass, so a fetch error can
+ * never become a silent `null` that reads as "nobody enabled auto-merge".
+ */
+async function getAutoMergeEnabledBy(
+  octokit: Api,
+  owner: string,
+  repo: string,
+  number: number,
+  action: string,
+): Promise<string | null> {
+  if (action === "opened") await sleep(AUTO_MERGE_GRACE_MS);
+
+  const pull = await getPullRequest(octokit, owner, repo, number);
+  return pull.auto_merge?.enabled_by?.login ?? null;
+}
 
 export interface RoutingRequest {
   readonly author: string;

@@ -20,7 +20,7 @@ import { fakeLogger, requireBuilt } from "../support/scenario.js";
 
 type OctokitApi = RoutingDeps["octokit"];
 
-/** Mirrors the module constant in silverPlatter.ts; the scenario pins the delay. */
+/** Mirrors the module constant in routing.ts; the scenario pins the delay. */
 export const GRACE_MS = 2_000;
 
 export const RENOVATE = "renovate[bot]";

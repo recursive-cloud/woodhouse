@@ -2,18 +2,18 @@ import { expect, vi } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { classifyActor, decide } from "../../src/approval/policy.js";
 import type { ApprovalRequest } from "../../src/approval/policy.js";
-import { resetAppLoginCache } from "../../src/approval/silverPlatter.js";
 import type { AutoApprovalConfig } from "../../src/config/schema.js";
 import {
   ENABLED_BY_SELF,
-  GRACE_MS,
+  HEAD,
   RENOVATE,
-  cast,
-  evaluate,
-  harnessFor,
+  checksPass,
+  graceElapsed,
+  openPullRequest,
   parseConfig,
+  readyForReview,
   requireAutoApprovalHarness,
-  requireConfig,
+  synchronize,
   withAllowedBot,
   world,
   type Harness,
@@ -31,13 +31,12 @@ function expectApproval(h: Harness | undefined): void {
       repo: "widgets",
       pull_number: 7,
       event: "APPROVE",
-      commit_id: "abc123",
+      commit_id: HEAD,
     }),
   );
 }
 
-function expectNoReview(h: Harness | undefined, approved: boolean | undefined): void {
-  expect(approved).toBe(false);
+function expectNoReview(h: Harness | undefined): void {
   expect(requireAutoApprovalHarness(h).createReview).not.toHaveBeenCalled();
 }
 
@@ -49,9 +48,16 @@ function submittedBody(h: Harness | undefined): string {
   return review.body;
 }
 
-describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => {
-  // appLogin is cached per process; every scenario owns a fresh fake octokit.
-  BeforeEachScenario(() => resetAppLoginCache());
+describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, AfterEachScenario }) => {
+  // vitest-cucumber runs one vitest test per step, so a per-test hook would
+  // discard the fake clock between the step that schedules the grace re-check
+  // and the step that fires it. These hooks bracket a whole scenario instead.
+  BeforeEachScenario(() => {
+    vi.useFakeTimers();
+  });
+  AfterEachScenario(() => {
+    vi.useRealTimers();
+  });
 
   ScenarioOutline(`Owner-listed author`, ({ Given, When, Then, And }, variables) => {
     let config: AutoApprovalConfig | undefined;
@@ -135,168 +141,164 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
     });
   });
 
-  Scenario(`Owner pull request`, ({ Given, When, Then }) => {
+  Scenario(`Approval waits for the checks to pass`, ({ Given, When, Then, And }) => {
     const w = world();
 
     Given(`auto-approval lists "my-user" as an owner`, () => {
       w.config = parseConfig({ owners: ["my-user"] });
     });
-    When(`"my-user" opens a pull request touching no protected path`, async () => {
-      await evaluate(w, { author: "my-user", action: "opened" });
+    When(`"my-user" opens a pull request while its checks fail`, async () => {
+      w.fixture.checks = "failing";
+      await openPullRequest(w, "my-user");
     });
-    Then(`Woodhouse submits an approval review`, () => {
-      expectApproval(w.harness);
+    Then(`no review is submitted`, () => {
+      expectNoReview(w.harness);
     });
+    And(
+      `when the checks pass Woodhouse submits an approval review pinned to the head commit`,
+      async () => {
+        await checksPass(w);
+        expectApproval(w.harness);
+      },
+    );
   });
 
-  Scenario(`Bot with its own auto-merge`, ({ Given, When, Then, And }) => {
+  Scenario(`Bot approval also waits for the checks to pass`, ({ Given, When, Then, And }) => {
     const w = world();
 
     Given(`auto-approval lists the Renovate bot as a bot`, () => {
       w.config = parseConfig({ bots: [RENOVATE] });
     });
     And(`the bot enabled auto-merge itself`, () => {
-      w.autoMerge = ENABLED_BY_SELF;
+      w.fixture.author = RENOVATE;
+      w.fixture.autoMerge = ENABLED_BY_SELF;
     });
-    When(`the pull request is evaluated`, async () => {
-      await evaluate(w, { author: RENOVATE, action: "synchronize" });
-    });
-    Then(`Woodhouse submits an approval review`, () => {
-      expectApproval(w.harness);
-    });
-  });
-
-  Scenario(`Bot without auto-merge`, ({ Given, When, Then, And }) => {
-    const w = world();
-
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
-    And(`nobody has enabled auto-merge`, () => {
-      w.autoMerge = null;
-    });
-    When(`the pull request is evaluated`, async () => {
-      await evaluate(w, { author: RENOVATE, action: "synchronize" });
+    When(`the bot opens a pull request while its checks fail`, async () => {
+      w.fixture.checks = "failing";
+      await openPullRequest(w, RENOVATE);
     });
     Then(`no review is submitted`, () => {
-      expectNoReview(w.harness, w.approved);
+      expectNoReview(w.harness);
     });
+    And(
+      `when the checks pass Woodhouse submits an approval review pinned to the head commit`,
+      async () => {
+        await checksPass(w);
+        expectApproval(w.harness);
+      },
+    );
   });
 
-  Scenario(`Auto-merge enabled by someone else`, ({ Given, When, Then, And }) => {
-    const w = world();
+  Scenario(
+    `A repository with no checks approves after the grace period`,
+    ({ Given, When, Then, And }) => {
+      const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
-    And(`"my-user" enabled auto-merge on the bot's pull request`, () => {
-      w.autoMerge = { enabled_by: { login: "my-user" } };
-    });
-    When(`the pull request is evaluated`, async () => {
-      await evaluate(w, { author: RENOVATE, action: "synchronize" });
-    });
-    Then(`no review is submitted`, () => {
-      expectNoReview(w.harness, w.approved);
-    });
-  });
+      Given(`auto-approval lists "my-user" as an owner`, () => {
+        w.config = parseConfig({ owners: ["my-user"] });
+      });
+      And(`the repository has no checks`, () => {
+        w.fixture.checks = "none";
+      });
+      When(`"my-user" opens a pull request`, async () => {
+        await openPullRequest(w, "my-user");
+      });
+      And(`the grace period elapses`, async () => {
+        await graceElapsed(w);
+      });
+      Then(`Woodhouse submits an approval review`, () => {
+        expectApproval(w.harness);
+      });
+    },
+  );
 
-  Scenario(`Late toggle is fail-safe`, ({ Given, When, Then, And }) => {
-    const w = world();
-    let openedHarness: Harness | undefined;
-    let openedApproved: boolean | undefined;
+  ScenarioOutline(
+    `A refused pull request stays refused after the checks pass`,
+    ({ Given, When, Then, And }, variables) => {
+      const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
-    When(`the bot opens a pull request and enables auto-merge shortly after`, async () => {
-      vi.useFakeTimers();
-      try {
-        // The opened event races the bot's own toggle, so the live GET happens
-        // only after the grace and still reports no auto-merge.
-        const h = harnessFor(w);
-        openedHarness = h;
-        const pending = cast(h, requireConfig(w), { author: RENOVATE, action: "opened" });
+      Given(`auto-approval lists the Renovate bot as a bot`, () => {
+        w.config = parseConfig({ bots: [RENOVATE] });
+      });
+      And(`<refusal>`, () => {
+        // Every refusal phrase describes a fact about the bot's pull request.
+        w.fixture.author = RENOVATE;
+        const refusal = readCell(variables, "refusal");
 
-        await vi.advanceTimersByTimeAsync(0);
-        expect(h.get).not.toHaveBeenCalled();
+        switch (refusal) {
+          case "nobody has enabled auto-merge":
+            w.fixture.autoMerge = null;
+            return;
+          case `"my-user" enabled auto-merge on the bot's pull request`:
+            w.fixture.autoMerge = { enabled_by: { login: "my-user" } };
+            return;
+          case `the pull request modifies ".github/woodhouse.yml"`:
+            w.fixture.autoMerge = ENABLED_BY_SELF;
+            w.fixture.filePages = [[{ filename: ".github/woodhouse.yml", status: "modified" }]];
+            return;
+          default:
+            throw new Error(`Unrecognised refusal phrase: ${JSON.stringify(refusal)}`);
+        }
+      });
+      When(`the checks pass on the bot's pull request`, async () => {
+        w.fixture.author = RENOVATE;
+        await checksPass(w);
+      });
+      Then(`no review is submitted`, () => {
+        expectNoReview(w.harness);
+      });
+    },
+  );
 
-        await vi.advanceTimersByTimeAsync(GRACE_MS);
-        openedApproved = await pending;
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-    Then(`the opened evaluation submits no review`, () => {
-      expectNoReview(openedHarness, openedApproved);
-    });
-    And(`a later event re-evaluates the pull request with auto-merge enabled`, async () => {
-      // A fresh harness: by the later event the bot has toggled auto-merge.
-      w.autoMerge = ENABLED_BY_SELF;
-      await evaluate(w, { author: RENOVATE, action: "synchronize" });
-    });
-    And(`that evaluation submits an approval review`, () => {
-      expect(w.approved).toBe(true);
-      const h = requireAutoApprovalHarness(w.harness);
-      expect(h.createReview).toHaveBeenCalledOnce();
-      expect(h.createReview).toHaveBeenCalledWith(
-        expect.objectContaining({ event: "APPROVE", commit_id: "abc123" }),
-      );
-    });
-  });
+  Scenario(
+    `Synchronize re-approval waits for the new commit's checks`,
+    ({ Given, When, Then, And }) => {
+      const w = world();
 
-  Scenario(`Bot widens the actor lists`, ({ Given, When, Then, And }) => {
-    const w = world();
+      Given(`auto-approval lists "my-user" as an owner`, () => {
+        w.config = parseConfig({ owners: ["my-user"] });
+      });
+      And(`Woodhouse approved an earlier commit of the pull request`, () => {
+        w.fixture.reviews = [
+          { state: "APPROVED", user: { login: "woodhouse[bot]" }, commit_id: "111111" },
+        ];
+      });
+      When(`the author force-pushes a new head commit`, async () => {
+        // The new head's CI has not concluded yet: approval must wait for it.
+        w.fixture.author = "my-user";
+        w.fixture.checks = "failing";
+        await synchronize(w);
+      });
+      And(`the checks pass on the new commit`, async () => {
+        await checksPass(w);
+      });
+      Then(`Woodhouse submits an approval review pinned to the new commit`, () => {
+        expectApproval(w.harness);
+      });
+    },
+  );
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
-    And(`the bot enabled auto-merge itself`, () => {
-      w.autoMerge = ENABLED_BY_SELF;
-    });
-    When(`the pull request modifies ".github/woodhouse.yml"`, async () => {
-      w.files = [[{ filename: ".github/woodhouse.yml", status: "modified" }]];
-      await evaluate(w, { author: RENOVATE, action: "synchronize" });
-    });
-    Then(`no review is submitted`, () => {
-      expectNoReview(w.harness, w.approved);
-    });
-  });
+  Scenario(
+    `A draft becoming ready is approved once its checks have passed`,
+    ({ Given, When, Then, And }) => {
+      const w = world();
 
-  Scenario(`Draft becomes ready`, ({ Given, When, Then }) => {
-    const w = world();
-
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
-    When(`the draft pull request becomes ready for review`, async () => {
-      // GitHub sends the post-ready payload, where draft is already false.
-      await evaluate(w, { author: "my-user", action: "ready_for_review" });
-    });
-    Then(`Woodhouse submits an approval review`, () => {
-      expectApproval(w.harness);
-    });
-  });
-
-  Scenario(`Synchronize re-approval`, ({ Given, When, Then, And }) => {
-    const w = world();
-
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
-    And(`Woodhouse approved an earlier commit of the pull request`, () => {
-      w.reviews = [{ state: "APPROVED", user: { login: "woodhouse[bot]" }, commit_id: "111111" }];
-    });
-    When(`the author force-pushes a new head commit`, async () => {
-      await evaluate(w, { author: "my-user", action: "synchronize", headSha: "abc123" });
-    });
-    Then(`Woodhouse submits an approval review pinned to the new commit`, () => {
-      const h = requireAutoApprovalHarness(w.harness);
-      expect(h.createReview).toHaveBeenCalledOnce();
-      expect(h.createReview).toHaveBeenCalledWith(
-        expect.objectContaining({ event: "APPROVE", commit_id: "abc123" }),
-      );
-    });
-  });
+      Given(`auto-approval lists "my-user" as an owner`, () => {
+        w.config = parseConfig({ owners: ["my-user"] });
+      });
+      And(`the checks have passed on the draft's head commit`, () => {
+        w.fixture.author = "my-user";
+        w.fixture.draft = true;
+        w.fixture.checks = "passed";
+      });
+      When(`the draft pull request becomes ready for review`, async () => {
+        await readyForReview(w);
+      });
+      Then(`Woodhouse submits an approval review`, () => {
+        expectApproval(w.harness);
+      });
+    },
+  );
 
   Scenario(`No duplicate at the same commit`, ({ Given, When, Then, And }) => {
     const w = world();
@@ -305,14 +307,41 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
       w.config = parseConfig({ owners: ["my-user"] });
     });
     And(`Woodhouse already approved the head commit`, () => {
-      w.reviews = [{ state: "APPROVED", user: { login: "woodhouse[bot]" }, commit_id: "abc123" }];
+      w.fixture.author = "my-user";
+      w.fixture.reviews = [
+        { state: "APPROVED", user: { login: "woodhouse[bot]" }, commit_id: HEAD },
+      ];
     });
-    When(`the event re-delivers for the same commit`, async () => {
-      await evaluate(w, { author: "my-user", action: "synchronize", headSha: "abc123" });
+    When(`the checks pass and the event re-delivers for the same commit`, async () => {
+      await checksPass(w);
     });
     Then(`no review is submitted`, () => {
-      expectNoReview(w.harness, w.approved);
+      expectNoReview(w.harness);
     });
+  });
+
+  Scenario(`Late toggle is fail-safe`, ({ Given, When, Then, And }) => {
+    const w = world();
+
+    Given(`auto-approval lists the Renovate bot as a bot`, () => {
+      w.config = parseConfig({ bots: [RENOVATE] });
+    });
+    When(`the bot opens a pull request and enables auto-merge shortly after`, async () => {
+      w.fixture.checks = "failing";
+      await openPullRequest(w, RENOVATE);
+      // The bot toggles auto-merge a moment after opening.
+      w.fixture.autoMerge = ENABLED_BY_SELF;
+    });
+    Then(`no review is submitted`, () => {
+      expectNoReview(w.harness);
+    });
+    And(
+      `when the checks pass Woodhouse submits an approval review pinned to the head commit`,
+      async () => {
+        await checksPass(w);
+        expectApproval(w.harness);
+      },
+    );
   });
 
   Scenario(`Bot approval names its author`, ({ Given, When, Then, And }) => {
@@ -322,10 +351,12 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
       w.config = parseConfig({ bots: [RENOVATE] });
     });
     And(`the bot enabled auto-merge itself`, () => {
-      w.autoMerge = ENABLED_BY_SELF;
+      w.fixture.author = RENOVATE;
+      w.fixture.autoMerge = ENABLED_BY_SELF;
     });
-    When(`the pull request is approved`, async () => {
-      await evaluate(w, { author: RENOVATE, action: "synchronize" });
+    When(`the checks pass on the bot's pull request`, async () => {
+      w.fixture.author = RENOVATE;
+      await checksPass(w);
     });
     Then(`the review body names the bot as having asked to be merged`, () => {
       expect(submittedBody(w.harness)).toContain("renovate[bot] asked to be merged");
@@ -345,16 +376,19 @@ describeFeature(feature, ({ BeforeEachScenario, ScenarioOutline, Scenario }) => 
     And(`dry-run mode is on`, () => {
       w.dryRun = true;
     });
-    When(`the owner's pull request is evaluated`, async () => {
-      await evaluate(w, { author: "my-user", action: "opened" });
+    When(`the checks pass on the owner's pull request`, async () => {
+      w.fixture.author = "my-user";
+      await checksPass(w);
     });
     Then(`the approval decision is logged`, () => {
+      // The approval's own label, not just any DRY_RUN line: the dry-run check
+      // write logs one too, and this scenario is about the approval.
       expect(requireAutoApprovalHarness(w.harness).log.info).toHaveBeenCalledWith(
         expect.stringContaining("DRY_RUN: would approve pull request"),
       );
     });
     And(`GitHub receives no review`, () => {
-      expectNoReview(w.harness, w.approved);
+      expectNoReview(w.harness);
     });
   });
 });

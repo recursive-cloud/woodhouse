@@ -22,7 +22,7 @@ import {
 import { syncSettings } from "./settings/apply.js";
 import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
-import { serve } from "./approval/silverPlatter.js";
+import { approvalPass, serve } from "./approval/silverPlatter.js";
 import { forget, serve as routeReviewers } from "./approval/routing.js";
 import { handleOnboarding } from "./onboarding/handler.js";
 import { Scheduler } from "./lib/scheduler.js";
@@ -146,6 +146,14 @@ export function createApp(options: AppOptions) {
       dryRun: options.dryRun,
     });
 
+    /**
+     * The commit-level approval hook: after a successful white-glove
+     * evaluation, resolve the open pull requests headed by the commit and
+     * approve the eligible ones. The `autoApproval.enabled` gate lives inside
+     * `serve`, so the hook itself stays unconditional.
+     */
+    const approvalHook = approvalPass(resolver, options.dryRun);
+
     // ------------------------------------------------------------- settings
     guarded.on("push", "settings-sync", async (context, scope) => {
       const repo = scope.repo;
@@ -233,7 +241,11 @@ export function createApp(options: AppOptions) {
       if (scope.repo === undefined) return;
 
       await handleCheckRunCompleted(
-        { octokit: context.octokit, ...deps(scope.log) },
+        {
+          octokit: context.octokit,
+          ...deps(scope.log),
+          onSuccess: approvalHook(context.octokit, scope.log),
+        },
         scope.owner,
         scope.repo,
         context.payload.check_run,
@@ -247,7 +259,11 @@ export function createApp(options: AppOptions) {
       if (scope.repo === undefined) return;
 
       await handleCheckSuiteCompleted(
-        { octokit: context.octokit, ...deps(scope.log) },
+        {
+          octokit: context.octokit,
+          ...deps(scope.log),
+          onSuccess: approvalHook(context.octokit, scope.log),
+        },
         scope.owner,
         scope.repo,
         context.payload.check_suite.head_sha,
@@ -255,13 +271,26 @@ export function createApp(options: AppOptions) {
     });
 
     guarded.on(
-      ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
+      [
+        "pull_request.opened",
+        "pull_request.reopened",
+        "pull_request.synchronize",
+        // A draft becoming ready is the first moment its head commit can be
+        // approved. If its checks already passed, the evaluation succeeds on
+        // the first pass and the approval hook fires immediately.
+        "pull_request.ready_for_review",
+      ],
       "white-glove:pull_request",
       async (context, scope) => {
         if (scope.repo === undefined) return;
 
         await seedAndSchedule(
-          { octokit: context.octokit, ...deps(scope.log), scheduler },
+          {
+            octokit: context.octokit,
+            ...deps(scope.log),
+            scheduler,
+            onSuccess: approvalHook(context.octokit, scope.log),
+          },
           scope.owner,
           scope.repo,
           context.payload.pull_request.head.sha,
@@ -282,58 +311,15 @@ export function createApp(options: AppOptions) {
             : context.payload.check_suite.head_sha;
 
         await seedAndSchedule(
-          { octokit: context.octokit, ...deps(scope.log), scheduler },
+          {
+            octokit: context.octokit,
+            ...deps(scope.log),
+            scheduler,
+            onSuccess: approvalHook(context.octokit, scope.log),
+          },
           scope.owner,
           scope.repo,
           sha,
-        );
-      },
-    );
-
-    // -------------------------------------------------------- silver platter
-    guarded.on(
-      [
-        "pull_request.opened",
-        "pull_request.reopened",
-        // A draft is never approved, so the moment it becomes ready is the
-        // first opportunity to look at it.
-        "pull_request.ready_for_review",
-        // Approvals are pinned to the head SHA, so a push invalidates the
-        // previous review and the pull request needs a fresh one. Renovate
-        // force-pushes on every rebase, which without this leaves its pull
-        // requests approved once and then permanently stale.
-        "pull_request.synchronize",
-      ],
-      "silver-platter",
-      async (context, scope) => {
-        if (scope.repo === undefined) return;
-
-        const pr = context.payload.pull_request;
-
-        const { config } = await resolver.resolve(
-          context.octokit as never,
-          scope.owner,
-          scope.repo,
-          scope.log,
-        );
-
-        await serve(
-          {
-            octokit: context.octokit,
-            log: scope.log,
-            dryRun: options.dryRun,
-          },
-          scope.owner,
-          scope.repo,
-          {
-            number: pr.number,
-            author: pr.user.login,
-            draft: pr.draft ?? false,
-            state: pr.state,
-            headSha: pr.head.sha,
-            action: context.payload.action,
-          },
-          config.autoApproval,
         );
       },
     );

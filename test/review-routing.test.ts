@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import {
   forget,
+  resetAppLoginCache,
   route,
   serve,
   type RoutingDeps,
   type RoutingRequest,
 } from "../src/approval/routing.js";
-import { resetAppLoginCache } from "../src/approval/silverPlatter.js";
 import { autoApprovalSchema, type AutoApprovalConfig } from "../src/config/schema.js";
 
 const SELF = "woodhouse[bot]";
