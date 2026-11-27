@@ -15,6 +15,7 @@
 import { expect, vi } from "vitest";
 import { handleCheckRunCompleted, seedAndSchedule } from "../../src/app.js";
 import type { GraceDeps } from "../../src/app.js";
+import { approvalPass } from "../../src/approval/silverPlatter.js";
 import { autoApprovalSchema, woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { AutoApprovalConfig } from "../../src/config/schema.js";
 import type { ReconcileDeps } from "../../src/gatekeeper/handler.js";
@@ -170,7 +171,9 @@ export function buildAutoApprovalHarness(fixture: PullRequestFixture, options: H
     },
   }));
 
-  const listAssociated = vi.fn(async () => ({ data: [{ number: fixture.number }] }));
+  const listAssociated = vi.fn(async () => ({
+    data: [{ number: fixture.number, state: fixture.state }],
+  }));
 
   const knownRoutes = new Set<unknown>([listForRef, listFiles, listReviews, listAssociated]);
   const paginate = vi.fn(
@@ -206,7 +209,17 @@ export function buildAutoApprovalHarness(fixture: PullRequestFixture, options: H
   } as unknown as ReconcileDeps["octokit"];
 
   const log = fakeLogger();
-  const deps: ReconcileDeps = { octokit, resolver, log, dryRun: options.dryRun ?? false };
+  // The scenarios call the production entry points directly rather than
+  // through `createApp`, so the harness supplies the same approval hook the
+  // app wires into its reconcile deps: after a successful evaluation, approve
+  // the open pull requests headed by the commit.
+  const deps: ReconcileDeps = {
+    octokit,
+    resolver,
+    log,
+    dryRun: options.dryRun ?? false,
+    onSuccess: approvalPass(resolver, options.dryRun ?? false)(octokit, log),
+  };
 
   return {
     deps,

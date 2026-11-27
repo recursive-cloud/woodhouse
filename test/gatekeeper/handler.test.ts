@@ -50,6 +50,9 @@ interface BuildOptions {
    * the white-glove runs among `runs`, since that call filters by name. */
   readonly existing?: readonly RawCheckRun[];
   readonly dryRun?: boolean;
+  /** Overrides the gatekeeper's enabled flag; defaults to enabled. */
+  readonly gatekeeperEnabled?: boolean;
+  readonly onSuccess?: (owner: string, repo: string, sha: string) => Promise<void>;
 }
 
 /**
@@ -80,7 +83,9 @@ function fakeLogger() {
 function build(options: BuildOptions = {}) {
   const fake = fakeOctokit(options);
   const log = fakeLogger();
-  const config = woodhouseConfigSchema.parse({ gatekeeper: { enabled: true } });
+  const config = woodhouseConfigSchema.parse({
+    gatekeeper: { enabled: options.gatekeeperEnabled ?? true },
+  });
   const resolver = {
     resolve: vi.fn(async () => ({ config, sources: [], issues: [] })),
   } as unknown as ReconcileDeps["resolver"];
@@ -90,6 +95,7 @@ function build(options: BuildOptions = {}) {
     resolver,
     log: log as unknown as Logger,
     dryRun: options.dryRun ?? false,
+    ...(options.onSuccess === undefined ? {} : { onSuccess: options.onSuccess }),
   };
 
   return { ...fake, log, deps, config };
@@ -133,5 +139,89 @@ describe("reconcile — white-glove check writes", () => {
     // The guard returns before even looking for an existing run.
     expect(listForRef).not.toHaveBeenCalled();
     expect(log.info).toHaveBeenCalledWith("DRY_RUN: would write white-glove check");
+  });
+});
+
+describe("reconcile — the post-success hook", () => {
+  it("invokes onSuccess with the commit after the check write on success", async () => {
+    const onSuccess = vi.fn(async () => {});
+    const { deps, create } = build({ runs: [completed("build")], onSuccess });
+
+    const result = await reconcile(deps, OWNER, REPO, SHA);
+
+    expect(result?.evaluation.outcome).toBe("success");
+    expect(onSuccess).toHaveBeenCalledOnce();
+    expect(onSuccess).toHaveBeenCalledWith(OWNER, REPO, SHA);
+    expect(create).toHaveBeenCalledOnce();
+
+    // The check write happens first; the hook runs after it, still inside the
+    // per-commit mutex.
+    const writeOrder = create.mock.invocationCallOrder[0];
+    const hookOrder = onSuccess.mock.invocationCallOrder[0];
+    expect(writeOrder ?? -1).toBeLessThan(hookOrder ?? -1);
+  });
+
+  it("does not invoke onSuccess when the evaluation fails", async () => {
+    const onSuccess = vi.fn(async () => {});
+    const { deps, update } = build({
+      runs: [whiteGlove("completed"), completed("build", "failure")],
+      onSuccess,
+    });
+
+    const result = await reconcile(deps, OWNER, REPO, SHA);
+
+    expect(result?.evaluation.outcome).toBe("failure");
+    expect(update).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke onSuccess while the evaluation is pending", async () => {
+    const onSuccess = vi.fn(async () => {});
+    const { deps } = build({ runs: [running("build")], onSuccess });
+
+    const result = await reconcile(deps, OWNER, REPO, SHA);
+
+    expect(result?.evaluation.outcome).toBe("pending");
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke onSuccess when the gatekeeper is disabled", async () => {
+    const onSuccess = vi.fn(async () => {});
+    const { deps, listForRef, create, update } = build({
+      runs: [completed("build")],
+      gatekeeperEnabled: false,
+      onSuccess,
+    });
+
+    const result = await reconcile(deps, OWNER, REPO, SHA);
+
+    expect(result).toBeUndefined();
+    expect(listForRef).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("logs a rejecting onSuccess and still resolves with the evaluation", async () => {
+    const onSuccess = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const { deps, log } = build({ runs: [completed("build")], onSuccess });
+
+    const result = await reconcile(deps, OWNER, REPO, SHA);
+
+    expect(result?.evaluation.outcome).toBe("success");
+    expect(log.error).toHaveBeenCalledWith(
+      { err: expect.any(Error), sha: SHA },
+      "Post-success hook failed",
+    );
+  });
+
+  it("resolves normally when no hook is supplied", async () => {
+    const { deps } = build({ runs: [completed("build")] });
+
+    const result = await reconcile(deps, OWNER, REPO, SHA);
+
+    expect(result?.evaluation.outcome).toBe("success");
   });
 });
