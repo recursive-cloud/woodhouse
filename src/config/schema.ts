@@ -83,6 +83,24 @@ export const autoApprovalSchema = z
       .object({
         owners: z
           .array(githubLogin)
+          // Case-insensitive duplicate check: routing takes this list as-is,
+          // so a repeated login is rejected at authoring time instead.
+          .superRefine((owners, ctx) => {
+            const seen = new Map<string, number>();
+            owners.forEach((owner, index) => {
+              const key = owner.trim().toLowerCase();
+              const first = seen.get(key);
+              if (first !== undefined) {
+                ctx.addIssue({
+                  code: "custom",
+                  message: `duplicate owner "${owner}" (already listed as "${owners[first]}" at index ${first})`,
+                  path: [index],
+                });
+              } else {
+                seen.set(key, index);
+              }
+            });
+          })
           .default([])
           .describe("PR authors approved unconditionally (still subject to protectedPaths)."),
         bots: z

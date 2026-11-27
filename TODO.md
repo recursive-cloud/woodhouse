@@ -121,9 +121,15 @@ changes.
   (`src/lib/mutex.ts`) and the config cache is in-process. Redis comes
   first, before any second replica.
 
-- **The routed-reviewers map is in-memory and never evicted on close or
-  merge.** A restart loses it, so the next pass re-requests an idempotent
-  set; bounded in practice by the single replica.
+- **The routed-reviewers map is in-memory, and each entry is evicted when its
+  pull request closes or merges.** The remaining tradeoff is a process
+  restart: the whole map is forgotten and the next pass re-requests an
+  idempotent set. Bounded in practice by the single replica.
+
+- **A failing reviewer withdrawal is retried on every later event for that
+  pull request** until it succeeds or a restart clears the tracked set.
+  Routing never proceeds to the replacement request with an unconfirmed
+  withdrawal; fail-closed by design.
 
 ## Deferred / revisit
 

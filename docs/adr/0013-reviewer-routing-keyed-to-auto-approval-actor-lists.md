@@ -18,5 +18,5 @@ The executable spec is `features/review-routing/routing.feature`. The decision l
 
 - No new configuration: routing reads `autoApproval.enabled` and `autoApproval.allowedActors` only, so the generated JSON Schema does not change.
 - Woodhouse appears as a requested reviewer on owner and self-auto-merged bot pull requests, which reaches the operator through GitHub's review-request notifications, the same signal the maintainer-agent workflow relies on.
-- The tracked set lives in memory; the "Accepted tradeoffs" section of TODO.md records that it is never evicted on close or merge and that a restart costs a redundant, idempotent re-request.
+- The tracked set lives in memory and is evicted when a pull request closes or merges; the "Accepted tradeoffs" section of TODO.md records the remaining restart tradeoff (the next pass re-requests an idempotent set).
 - Approval timing is a separate concern (Linear REC-44) and stays independent of routing: a routed reviewer set does not imply an approval.

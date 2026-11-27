@@ -50,22 +50,33 @@ export interface RoutingDecision {
 const normalizeLogin = (login: string): string => login.trim().toLowerCase();
 
 /**
- * Route to every configured owner, or to nobody when there is no owner to
- * route to. `reason` carries the situation that led here.
+ * Route to every configured owner except the App's own login, or to nobody
+ * when there is no owner left to route to. `reason` carries the situation
+ * that led here.
  */
-function ownersFor(config: AutoApprovalConfig, reason: string): RoutingDecision {
-  // Deduplicate while preserving order: GitHub rejects a request naming the
-  // same reviewer twice, and a repeated config login must not do that.
-  const owners = [...new Set(config.allowedActors.owners)];
+function ownersFor(
+  config: AutoApprovalConfig,
+  selfLogin: string | undefined,
+  reason: string,
+): RoutingDecision {
+  // Validation rejects duplicate owners case-insensitively (see the schema),
+  // so the list is taken as-is. The App can never be its own reviewer, so a
+  // configured login equal to `selfLogin` is filtered out.
+  const owners =
+    selfLogin === undefined
+      ? [...config.allowedActors.owners]
+      : config.allowedActors.owners.filter(
+          (owner) => normalizeLogin(owner) !== normalizeLogin(selfLogin),
+        );
 
   if (owners.length === 0) {
     return {
       reviewers: [],
-      reason: `${reason}; no owner is configured in autoApproval.allowedActors.owners, so there is no reviewer to route to`,
+      reason: `${reason}; no reviewer to route to in autoApproval.allowedActors.owners`,
     };
   }
 
-  return { reviewers: [...owners], reason };
+  return { reviewers: owners, reason };
 }
 
 /**
@@ -114,6 +125,7 @@ export function route(
     // but never request the literal `undefined`.
     return ownersFor(
       config,
+      selfLogin,
       `author "${request.author}" is an owner but the app login is unknown; routing to the configured owners`,
     );
   }
@@ -132,26 +144,47 @@ export function route(
 
         return ownersFor(
           config,
+          selfLogin,
           `author "${request.author}" is a bot and enabled auto-merge itself but the app login is unknown; routing to the configured owners`,
         );
       }
 
       return ownersFor(
         config,
+        selfLogin,
         `author "${request.author}" is a bot but auto-merge was enabled by "${enabledBy}"; routing to the configured owners`,
       );
     }
 
     return ownersFor(
       config,
+      selfLogin,
       `author "${request.author}" is a bot but nobody enabled auto-merge; routing to the configured owners`,
     );
   }
 
   return ownersFor(
     config,
+    selfLogin,
     `author "${request.author}" is not in autoApproval.allowedActors; routing to the configured owners`,
   );
+}
+
+/** Drop the tracked routed set for a closed pull request. Close and merge end
+ *  routing's interest in a pull request; the tracked entry would otherwise live
+ *  for the rest of the process. No API write: GitHub owns review requests on a
+ *  closed pull request.
+ */
+export function forget(
+  deps: Pick<RoutingDeps, "log" | "routed">,
+  owner: string,
+  repo: string,
+  number: number,
+): void {
+  const key = `${owner}/${repo}#${number}`;
+  if (deps.routed.delete(key)) {
+    deps.log.debug({ pr: number }, "Forgot routed reviewers on close");
+  }
 }
 
 export interface RoutingDeps {

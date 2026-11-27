@@ -54,6 +54,37 @@ describe("config schema", () => {
     });
   });
 
+  it("accepts distinct owners", () => {
+    expect(parseConfig({ autoApproval: { allowedActors: { owners: ["alice", "bob"] } } }).ok).toBe(
+      true,
+    );
+  });
+
+  it("rejects owners that differ only in case", () => {
+    const result = parseConfig({
+      autoApproval: { allowedActors: { owners: ["foo", "Foo"] } },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.map((issue) => issue.message).join("\n")).toContain(
+      'duplicate owner "Foo" (already listed as "foo" at index 0)',
+    );
+    expect(result.issues.map((issue) => issue.path)).toContain(
+      "autoApproval.allowedActors.owners.1",
+    );
+  });
+
+  it("rejects exact duplicate owners", () => {
+    const result = parseConfig({
+      autoApproval: { allowedActors: { owners: ["foo", "foo"] } },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.map((issue) => issue.message).join("\n")).toContain(
+      'duplicate owner "foo" (already listed as "foo" at index 0)',
+    );
+  });
+
   it("defaults both actor lists to empty when allowedActors is omitted", () => {
     const withSection = parseConfig({ autoApproval: { enabled: true } });
     expect(withSection.ok).toBe(true);

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
-import { route, serve, type RoutingDeps, type RoutingRequest } from "../src/approval/routing.js";
+import {
+  forget,
+  route,
+  serve,
+  type RoutingDeps,
+  type RoutingRequest,
+} from "../src/approval/routing.js";
 import { resetAppLoginCache } from "../src/approval/silverPlatter.js";
 import { autoApprovalSchema, type AutoApprovalConfig } from "../src/config/schema.js";
 
@@ -79,6 +85,31 @@ describe("route", () => {
     const config = autoApprovalSchema.parse({ allowedActors: { owners: ["a", "b"] } });
 
     expect(decide({ author: "dependabot[bot]" }, config).reviewers).toEqual(["a", "b"]);
+  });
+
+  it("never routes to the app's own login when it is listed as an owner", () => {
+    const config = autoApprovalSchema.parse({
+      allowedActors: { owners: [SELF, "my-user"] },
+    });
+
+    expect(decide({ author: "dependabot[bot]" }, config).reviewers).toEqual(["my-user"]);
+  });
+
+  it("compares the app login case-insensitively when filtering owners", () => {
+    const config = autoApprovalSchema.parse({
+      allowedActors: { owners: ["WOODHOUSE[bot]", "my-user"] },
+    });
+
+    expect(decide({ author: "dependabot[bot]" }, config).reviewers).toEqual(["my-user"]);
+  });
+
+  it("requests nothing when the only listed owner is the app itself", () => {
+    const config = autoApprovalSchema.parse({ allowedActors: { owners: [SELF] } });
+
+    const decision = decide({ author: "dependabot[bot]" }, config);
+
+    expect(decision.reviewers).toEqual([]);
+    expect(decision.reason).toContain("no reviewer to route to");
   });
 
   it("requests nothing when no owner is configured", () => {
@@ -238,5 +269,46 @@ describe("serve — live writes", () => {
       expect.objectContaining({ reviewers: [SELF] }),
     );
     expect(routed.get("acme/widgets#7")).toEqual([SELF]);
+  });
+
+  it("routes an owner's reopened pull request once and does not re-request on a second pass", async () => {
+    const h = ioHarness();
+    const routed = new Map<string, readonly string[]>();
+    const deps = { octokit: h.octokit, log: h.log, dryRun: false, routed };
+    const reopened = { ...ownerPr, action: "reopened" };
+
+    await serve(deps, "acme", "widgets", reopened, ownerConfig);
+    await serve(deps, "acme", "widgets", reopened, ownerConfig);
+
+    expect(h.requestReviewers).toHaveBeenCalledOnce();
+    expect(h.requestReviewers).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      pull_number: 7,
+      reviewers: [SELF],
+    });
+    expect(h.removeRequestedReviewers).not.toHaveBeenCalled();
+  });
+});
+
+describe("forget", () => {
+  it("drops the tracked set for a closed pull request", () => {
+    const h = ioHarness();
+    const routed = new Map<string, readonly string[]>([["acme/widgets#7", [SELF]]]);
+
+    forget({ log: h.log, routed }, "acme", "widgets", 7);
+
+    expect(routed.has("acme/widgets#7")).toBe(false);
+    expect(h.log.debug).toHaveBeenCalledWith({ pr: 7 }, "Forgot routed reviewers on close");
+  });
+
+  it("leaves an untracked pull request alone", () => {
+    const h = ioHarness();
+    const routed = new Map<string, readonly string[]>();
+
+    forget({ log: h.log, routed }, "acme", "widgets", 7);
+
+    expect(routed.size).toBe(0);
+    expect(h.log.debug).not.toHaveBeenCalled();
   });
 });

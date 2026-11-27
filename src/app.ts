@@ -23,7 +23,7 @@ import { syncSettings } from "./settings/apply.js";
 import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
 import { serve } from "./approval/silverPlatter.js";
-import { serve as routeReviewers } from "./approval/routing.js";
+import { forget, serve as routeReviewers } from "./approval/routing.js";
 import { handleOnboarding } from "./onboarding/handler.js";
 import { Scheduler } from "./lib/scheduler.js";
 import { KeyedMutex } from "./lib/mutex.js";
@@ -386,6 +386,20 @@ export function createApp(options: AppOptions) {
         );
       },
     );
+
+    // Close and merge end routing's interest in a pull request: drop the tracked
+    // set so the map cannot grow without bound. No withdrawal — GitHub cleans up
+    // review requests on a closed pull request.
+    guarded.on("pull_request.closed", "review-routing", async (context, scope) => {
+      if (scope.repo === undefined) return;
+      const repo = scope.repo;
+      forget(
+        { log: scope.log, routed: routedReviewers },
+        scope.owner,
+        repo,
+        context.payload.pull_request.number,
+      );
+    });
 
     // --------------------------------------------------- config validation
     guarded.on(
