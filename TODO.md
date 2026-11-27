@@ -117,6 +117,11 @@ changes.
   hand-made included — the API offers no ownership marker. Documented in
   the schema descriptions.
 
+- **A bot's auto-merge toggle can land after the commit's last check.**
+  The approval pass then reads nobody-enabled and refuses; a later event on
+  the commit evaluates it again. Fail-safe: it never approves a pull request
+  the bot did not ask to merge.
+
 - **Single replica by design.** Per-commit work is serialised in-process
   (`src/lib/mutex.ts`) and the config cache is in-process. Redis comes
   first, before any second replica.
