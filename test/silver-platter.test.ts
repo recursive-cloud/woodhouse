@@ -301,11 +301,40 @@ describe("serve — the commit-level pass", () => {
     expect(h.createReview).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 7 }));
   });
 
-  it("propagates a rejected live GET — a fetch failure is not a refusal", async () => {
-    const h = harness({ getError: new Error("boom") });
+  it("logs a rejected live GET and moves on instead of rejecting", async () => {
+    const failure = new Error("boom");
+    const h = harness({ getError: failure });
 
-    await expect(run(h)).rejects.toThrow("boom");
+    const approved = await run(h);
+
+    expect(approved).toBe(false);
     expect(h.createReview).not.toHaveBeenCalled();
+    expect(h.log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: failure, pr: 7, sha: SHA }),
+      expect.any(String),
+    );
+  });
+
+  it("keeps going when one pull request fails, approving its eligible sibling", async () => {
+    const failure = new Error("boom");
+    const h = harness({
+      associated: [
+        pull({ number: 7, autoMerge: enabledBySelf }),
+        pull({ number: 8, autoMerge: enabledBySelf }),
+      ],
+      // The first pull request's re-fetch rejects; the second is eligible.
+      live: { 7: failure },
+    });
+
+    const approved = await run(h);
+
+    expect(approved).toBe(true);
+    expect(h.createReview).toHaveBeenCalledOnce();
+    expect(h.createReview).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 8 }));
+    expect(h.log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: failure, pr: 7, sha: SHA }),
+      expect.any(String),
+    );
   });
 
   it("propagates a rejected listing — a failure is not 'no pull requests'", async () => {

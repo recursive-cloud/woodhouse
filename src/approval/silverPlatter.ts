@@ -85,8 +85,9 @@ export interface SilverPlatterDeps {
  *
  * The live pull request is re-fetched: the listing and this evaluation can be
  * seconds apart, and a head SHA that has moved or a pull request that has
- * closed must never be approved. A failed GET is not caught — the rejection
- * propagates and fails the pass, so a fetch error cannot read as a refusal.
+ * closed must never be approved. A failed GET is not caught here — the
+ * rejection reaches `serve`, which logs it and moves on, so a fetch error
+ * cannot read as a refusal.
  */
 async function approvePullRequest(
   deps: SilverPlatterDeps,
@@ -199,7 +200,9 @@ async function approvePullRequest(
  *
  * Returns true if at least one review was submitted; a commit heading no open
  * pull request does nothing. A rejected listing propagates — an API failure
- * must never be mistaken for "no pull requests".
+ * must never be mistaken for "no pull requests". A failure evaluating one pull
+ * request is logged and the pass moves on to the next one; the commit's next
+ * event re-runs the pass.
  */
 export async function serve(
   deps: SilverPlatterDeps,
@@ -227,8 +230,14 @@ export async function serve(
 
   let approved = false;
   for (const pull of open) {
-    if (await approvePullRequest(deps, owner, repo, sha, pull.number, config)) {
-      approved = true;
+    try {
+      if (await approvePullRequest(deps, owner, repo, sha, pull.number, config)) {
+        approved = true;
+      }
+    } catch (err) {
+      // One pull request's failure must not block its siblings. Already
+      // approved-at-commit keeps a re-run of the pass idempotent.
+      deps.log.error({ err, pr: pull.number, sha }, "Failed to evaluate pull request; continuing");
     }
   }
   return approved;
