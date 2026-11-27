@@ -15,3 +15,5 @@ Format: status line, then Context (the forces at the time), Decision, and Conseq
 [0011. Repository Environments Are Never Deleted; They Converge by Full Re-Declaration](./0011-repository-environments-never-deleted.md) records why deployment environments are re-declared wholesale on every sync and never deleted, extending ADR 0006's posture to environment protection rules.
 
 [0012. Deployment Branch Policies Under a Configured Environment Are Converged](./0012-deployment-branch-policies-are-converged.md) records that a configured environment's branch-policy patterns converge fully — created when missing, deleted when absent — amending 0011's never-deleted posture for patterns only, and that the config carries a plain mode string the applier maps to the API's mutually exclusive object.
+
+[0013. Reviewer Routing Is Keyed to the Auto-Approval Actor Lists](./0013-reviewer-routing-keyed-to-auto-approval-actor-lists.md) records that reviewer requests follow the same trust model as auto-approval: owner and self-auto-merged bot pull requests are routed to Woodhouse, everything else to the configured owners, with replacement semantics for the pending routed set.
