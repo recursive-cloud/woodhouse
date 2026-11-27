@@ -29,80 +29,83 @@ Feature: Auto-approval of pull requests
       | stranger        |
       | dependabot[bot] |
 
-  @REC-18
-  Scenario: Owner pull request
+  @REC-44
+  Scenario: Approval waits for the checks to pass
     Given auto-approval lists "my-user" as an owner
-    When "my-user" opens a pull request touching no protected path
-    Then Woodhouse submits an approval review
+    When "my-user" opens a pull request while its checks fail
+    Then no review is submitted
+    And when the checks pass Woodhouse submits an approval review pinned to the head commit
 
-  @REC-18
-  Scenario: Bot with its own auto-merge
+  @REC-44
+  Scenario: Bot approval also waits for the checks to pass
     Given auto-approval lists the Renovate bot as a bot
     And the bot enabled auto-merge itself
-    When the pull request is evaluated
+    When the bot opens a pull request while its checks fail
+    Then no review is submitted
+    And when the checks pass Woodhouse submits an approval review pinned to the head commit
+
+  @REC-44
+  Scenario: A repository with no checks approves after the grace period
+    Given auto-approval lists "my-user" as an owner
+    And the repository has no checks
+    When "my-user" opens a pull request
+    And the grace period elapses
     Then Woodhouse submits an approval review
 
-  @REC-18
-  Scenario: Bot without auto-merge
+  @REC-44
+  Scenario Outline: A refused pull request stays refused after the checks pass
     Given auto-approval lists the Renovate bot as a bot
-    And nobody has enabled auto-merge
-    When the pull request is evaluated
+    And <refusal>
+    When the checks pass on the bot's pull request
     Then no review is submitted
 
-  @REC-18
-  Scenario: Auto-merge enabled by someone else
-    Given auto-approval lists the Renovate bot as a bot
-    And "my-user" enabled auto-merge on the bot's pull request
-    When the pull request is evaluated
+    Examples:
+      | refusal                                                |
+      | nobody has enabled auto-merge                          |
+      | "my-user" enabled auto-merge on the bot's pull request |
+      | the pull request modifies ".github/woodhouse.yml"      |
+
+  @REC-44
+  Scenario: Synchronize re-approval waits for the new commit's checks
+    Given auto-approval lists "my-user" as an owner
+    And Woodhouse approved an earlier commit of the pull request
+    When the author force-pushes a new head commit
+    And the checks pass on the new commit
+    Then Woodhouse submits an approval review pinned to the new commit
+
+  @REC-44
+  Scenario: A draft becoming ready is approved once its checks have passed
+    Given auto-approval lists "my-user" as an owner
+    And the checks have passed on the draft's head commit
+    When the draft pull request becomes ready for review
+    Then Woodhouse submits an approval review
+
+  @REC-44
+  Scenario: No duplicate at the same commit
+    Given auto-approval lists "my-user" as an owner
+    And Woodhouse already approved the head commit
+    When the checks pass and the event re-delivers for the same commit
     Then no review is submitted
 
   @REC-18
   Scenario: Late toggle is fail-safe
     Given auto-approval lists the Renovate bot as a bot
     When the bot opens a pull request and enables auto-merge shortly after
-    Then the opened evaluation submits no review
-    And a later event re-evaluates the pull request with auto-merge enabled
-    And that evaluation submits an approval review
-
-  @REC-18
-  Scenario: Bot widens the actor lists
-    Given auto-approval lists the Renovate bot as a bot
-    And the bot enabled auto-merge itself
-    When the pull request modifies ".github/woodhouse.yml"
     Then no review is submitted
-
-  @REC-18
-  Scenario: Draft becomes ready
-    Given auto-approval lists "my-user" as an owner
-    When the draft pull request becomes ready for review
-    Then Woodhouse submits an approval review
-
-  @REC-18
-  Scenario: Synchronize re-approval
-    Given auto-approval lists "my-user" as an owner
-    And Woodhouse approved an earlier commit of the pull request
-    When the author force-pushes a new head commit
-    Then Woodhouse submits an approval review pinned to the new commit
-
-  @REC-18
-  Scenario: No duplicate at the same commit
-    Given auto-approval lists "my-user" as an owner
-    And Woodhouse already approved the head commit
-    When the event re-delivers for the same commit
-    Then no review is submitted
+    And when the checks pass Woodhouse submits an approval review pinned to the head commit
 
   @REC-18
   Scenario: Bot approval names its author
     Given auto-approval lists the Renovate bot as a bot
     And the bot enabled auto-merge itself
-    When the pull request is approved
+    When the checks pass on the bot's pull request
     Then the review body names the bot as having asked to be merged
     And the review body ends with the service sign-off
 
-  @REC-18
+  @REC-44
   Scenario: Dry-run approval
     Given auto-approval lists "my-user" as an owner
     And dry-run mode is on
-    When the owner's pull request is evaluated
+    When the checks pass on the owner's pull request
     Then the approval decision is logged
     And GitHub receives no review
