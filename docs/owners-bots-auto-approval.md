@@ -99,8 +99,8 @@ Both end with the existing `_Woodhouse, at your service._` sign-off.
 |---|---|
 | `src/config/schema.ts` | `allowedActors` → `{ owners, bots }` object; `.describe()` on both sub-lists. |
 | `src/approval/policy.ts` | `ApprovalRequest.autoMergeEnabledBy`; `decide()` classifies owners/bots and gates bots on auto-merge. |
-| `src/approval/silverPlatter.ts` | `getAutoMergeEnabledBy()` (delay + GET); gather the fact in `serve()`; tailored body; `PullRequestFacts.action`. |
-| `src/app.ts` | pass `action: context.payload.action` into `serve()`. |
+| `src/approval/silverPlatter.ts` | re-fetch each pull request and read `auto_merge.enabled_by` there; no delay, no action field; tailored body. |
+| `src/app.ts` | wire the commit-level approval hook into the gatekeeper's `onSuccess`. |
 | `schema/woodhouse.schema.json` | regenerate (CI drift check + `json-schema.test.ts`). |
 | `test/policy.test.ts` | owner/bot/auto-merge matrix. |
 | `test/config.test.ts`, `test/json-schema.test.ts` | the object form. |
@@ -112,6 +112,7 @@ Both end with the existing `_Woodhouse, at your service._` sign-off.
 - **Owner PR** → approved (protectedPaths veto only). No auto-merge needed.
 - **Bot PR** → approved iff it set its own auto-merge, no protected path, not
   truncated, not already approved.
-- **Late-toggle race** (bot opens, sets auto-merge after, no further event) →
-  the `opened` pass declines; caught on the next `synchronize` /
-  `ready_for_review` / `reopened`. Fail-safe: it never wrongly approves.
+- **Late-toggle race** (a bot sets auto-merge after the commit's last check
+  completes) → that pass reads nobody-enabled and declines; a later event on
+  the commit evaluates it again. Approval waits on evaluation success.
+  Fail-safe: it never wrongly approves.

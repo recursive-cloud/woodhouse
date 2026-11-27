@@ -227,6 +227,14 @@ export interface ReconcileDeps {
   readonly resolver: ConfigResolver;
   readonly log: Logger;
   readonly dryRun: boolean;
+  /**
+   * Invoked after the check write when the evaluation concludes success, still
+   * inside the per-commit mutex. Success only: a pending or failing verdict
+   * never calls it. A rejection is logged and swallowed here — an
+   * approval-side failure must not fail the reconcile, because the check write
+   * already happened and the next event for the commit re-runs the pass.
+   */
+  readonly onSuccess?: (owner: string, repo: string, sha: string) => Promise<void>;
 }
 
 export interface ReconcileResult {
@@ -269,6 +277,19 @@ export async function reconcile(
     );
 
     await upsertCheck(deps.octokit, owner, repo, sha, evaluation, deps.log, deps.dryRun);
+
+    // Runs inside the same per-commit mutex as the write. A hook failure is
+    // logged, not thrown: the check write already happened, the next event for
+    // the commit re-runs this reconcile, and an approval already submitted at
+    // the commit is not repeated.
+    if (evaluation.outcome === "success" && deps.onSuccess !== undefined) {
+      try {
+        await deps.onSuccess(owner, repo, sha);
+      } catch (err) {
+        deps.log.error({ err, sha }, "Post-success hook failed");
+      }
+    }
+
     return { evaluation, gatekeeper };
   });
 }

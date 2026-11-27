@@ -1,12 +1,15 @@
 /**
  * Silver Platter — serves approvals to trusted actors.
  *
- * Gathers the facts, hands them to the pure policy in `policy.ts`, and casts
- * the review if permitted.
+ * Approval is commit-level. A white-glove evaluation concluding success calls
+ * in here with the head SHA; this pass resolves the open pull requests headed
+ * by that commit and evaluates each one independently against its live state.
+ * The pure policy in `policy.ts` still owns every decision.
  */
 
 import type { Context } from "probot";
 import type { Logger } from "pino";
+import type { ConfigResolver } from "../config/resolver.js";
 import type { AutoApprovalConfig } from "../config/schema.js";
 import { getPullRequest, listChangedFiles } from "../github/pulls.js";
 import { classifyActor, decide } from "./policy.js";
@@ -20,14 +23,6 @@ type Api = Context<"pull_request">["octokit"];
  * refused rather than approved on incomplete information.
  */
 const MAX_FILE_PAGES = 10;
-
-/**
- * How long to wait, on the `opened` action only, before reading the live pull
- * request. The webhook payload's snapshot is stale — a bot like Renovate
- * toggles auto-merge a moment after opening — so we give it that moment. A
- * named constant, tunable without redesign.
- */
-const AUTO_MERGE_GRACE_MS = 2_000;
 
 /**
  * The app's own login, e.g. `woodhouse[bot]`. Resolved once per process: it
@@ -84,59 +79,49 @@ export interface SilverPlatterDeps {
   readonly dryRun: boolean;
 }
 
-export interface PullRequestFacts {
-  readonly number: number;
-  readonly author: string;
-  readonly draft: boolean;
-  readonly state: string;
-  readonly headSha: string;
-  /** The `pull_request` action that triggered this evaluation, e.g. `opened`. */
-  readonly action: string;
-}
-
-/** Promise-based delay so the grace can be awaited inline in the same pass. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
- * Read the login that enabled auto-merge on the pull request, from its current
- * state — never the stale `auto_merge` snapshot in the webhook payload.
+ * Evaluate one open pull request headed by the commit. Returns true only when
+ * a review was actually submitted.
  *
- * On `opened` we wait the short grace first (an immediate read races the bot's
- * own toggle); on the other events the state has settled. A failed GET is not
- * caught: the rejection propagates and fails the pass, so a fetch error can
- * never become a silent `null` that reads as "nobody enabled auto-merge".
+ * The live pull request is re-fetched: the listing and this evaluation can be
+ * seconds apart, and a head SHA that has moved or a pull request that has
+ * closed must never be approved. A failed GET is not caught here — the
+ * rejection reaches `serve`, which logs it and moves on, so a fetch error
+ * cannot read as a refusal.
  */
-async function getAutoMergeEnabledBy(
-  octokit: Api,
-  owner: string,
-  repo: string,
-  number: number,
-  action: string,
-): Promise<string | null> {
-  if (action === "opened") await sleep(AUTO_MERGE_GRACE_MS);
-
-  const pull = await getPullRequest(octokit, owner, repo, number);
-  return pull.auto_merge?.enabled_by?.login ?? null;
-}
-
-export async function serve(
+async function approvePullRequest(
   deps: SilverPlatterDeps,
   owner: string,
   repo: string,
-  pr: PullRequestFacts,
+  sha: string,
+  number: number,
   config: AutoApprovalConfig,
 ): Promise<boolean> {
-  const actorClass = classifyActor(pr.author, config);
+  const pull = await getPullRequest(deps.octokit, owner, repo, number);
 
-  // Cheap checks first, so an unremarkable PR from an untrusted author costs
-  // no API calls at all. Most webhook traffic will land here.
+  if (pull.state !== "open" || pull.head.sha !== sha) {
+    deps.log.debug(
+      { pr: number, state: pull.state, head: pull.head.sha, sha },
+      "Pull request no longer matches the evaluated commit; skipping",
+    );
+    return false;
+  }
+
+  const author = pull.user?.login;
+  if (author === undefined) {
+    deps.log.info({ pr: number }, "Not auto-approving: pull request has no author login");
+    return false;
+  }
+
+  const actorClass = classifyActor(author, config);
+
+  // Cheap checks first: an untrusted author or a draft is refused before any
+  // review, file or app-login read.
   const preliminary = decide(
     {
-      author: pr.author,
-      draft: pr.draft,
-      state: pr.state,
+      author,
+      draft: pull.draft ?? false,
+      state: pull.state,
       changedFiles: [],
       fileListTruncated: false,
       alreadyApproved: false,
@@ -145,22 +130,24 @@ export async function serve(
   );
 
   if (!preliminary.approve) {
-    deps.log.debug({ pr: pr.number, reason: preliminary.reason }, "Not auto-approving");
+    deps.log.debug({ pr: number, reason: preliminary.reason }, "Not auto-approving");
     return false;
   }
 
   const self = await appLogin(deps.octokit);
 
-  const [{ files, truncated }, alreadyApproved, autoMergeEnabledBy] = await Promise.all([
-    listChangedFiles(deps.octokit, owner, repo, pr.number, { maxPages: MAX_FILE_PAGES }),
-    hasExistingApproval(deps.octokit, owner, repo, pr.number, pr.headSha, self),
-    // Owners skip the fetch entirely — their approval never depends on
-    // auto-merge. For a bot the full pass always carries a gathered fact
-    // (`null` or a login), never `undefined`.
-    actorClass === "bot"
-      ? getAutoMergeEnabledBy(deps.octokit, owner, repo, pr.number, pr.action)
-      : undefined,
-  ]);
+  const alreadyApproved = await hasExistingApproval(deps.octokit, owner, repo, number, sha, self);
+
+  // Owners skip the fact entirely — their approval never depends on
+  // auto-merge. For a bot the fact always comes from the same re-fetched pull
+  // request, never a second GET.
+  const autoMergeEnabledBy =
+    actorClass === "bot" ? (pull.auto_merge?.enabled_by?.login ?? null) : undefined;
+
+  // The file listing is the most expensive read, so it comes last.
+  const { files, truncated } = await listChangedFiles(deps.octokit, owner, repo, number, {
+    maxPages: MAX_FILE_PAGES,
+  });
 
   // A previous_filename means the file was moved; the old location matters
   // just as much for protected-path checks.
@@ -171,9 +158,9 @@ export async function serve(
 
   const decision = decide(
     {
-      author: pr.author,
-      draft: pr.draft,
-      state: pr.state,
+      author,
+      draft: pull.draft ?? false,
+      state: pull.state,
       changedFiles,
       fileListTruncated: truncated,
       alreadyApproved,
@@ -183,7 +170,7 @@ export async function serve(
   );
 
   if (!decision.approve) {
-    deps.log.info({ pr: pr.number, reason: decision.reason }, "Not auto-approving");
+    deps.log.info({ pr: number, reason: decision.reason }, "Not auto-approving");
     return false;
   }
 
@@ -191,18 +178,86 @@ export async function serve(
     await deps.octokit.pulls.createReview({
       owner,
       repo,
-      pull_number: pr.number,
+      pull_number: number,
       event: "APPROVE",
       // Pin the review to the commit we actually inspected. Without this a push
       // landing mid-flight would be approved without ever being examined.
-      commit_id: pr.headSha,
-      body: approvalBody(actorClass, pr.author),
+      commit_id: sha,
+      body: approvalBody(actorClass, author),
     });
     return true;
   });
 
   if (approved === undefined) return false;
 
-  deps.log.info({ pr: pr.number, author: pr.author, sha: pr.headSha }, "Approved pull request");
+  deps.log.info({ pr: number, author, sha }, "Approved pull request");
   return true;
+}
+
+/**
+ * Approve every open pull request headed by `sha`, after a white-glove
+ * evaluation of that commit concluded success.
+ *
+ * Returns true if at least one review was submitted; a commit heading no open
+ * pull request does nothing. A rejected listing propagates — an API failure
+ * must never be mistaken for "no pull requests". A failure evaluating one pull
+ * request is logged and the pass moves on to the next one; the commit's next
+ * event re-runs the pass.
+ */
+export async function serve(
+  deps: SilverPlatterDeps,
+  owner: string,
+  repo: string,
+  sha: string,
+  config: AutoApprovalConfig,
+): Promise<boolean> {
+  // Auto-approval off must not even pay for the commit-to-PR listing.
+  if (!config.enabled) {
+    deps.log.debug({ sha }, "Auto-approval disabled by configuration; skipping");
+    return false;
+  }
+
+  const associated = await deps.octokit.paginate(
+    deps.octokit.repos.listPullRequestsAssociatedWithCommit,
+    { owner, repo, commit_sha: sha, per_page: 100 },
+  );
+
+  const open = associated.filter((pull) => pull.state === "open");
+  if (open.length === 0) {
+    deps.log.debug({ sha }, "No open pull request is headed by the commit");
+    return false;
+  }
+
+  let approved = false;
+  for (const pull of open) {
+    try {
+      if (await approvePullRequest(deps, owner, repo, sha, pull.number, config)) {
+        approved = true;
+      }
+    } catch (err) {
+      // One pull request's failure must not block its siblings. Already
+      // approved-at-commit keeps a re-run of the pass idempotent.
+      deps.log.error({ err, pr: pull.number, sha }, "Failed to evaluate pull request; continuing");
+    }
+  }
+  return approved;
+}
+
+/**
+ * Factory for the commit-level approval hook: resolve the repository's config,
+ * then serve approvals for every open pull request headed by the commit.
+ *
+ * Shared by the production app wiring and the acceptance harness so the
+ * scenarios exercise the same config resolution and `serve` call production
+ * uses. The `autoApproval.enabled` gate lives inside `serve`, so the hook
+ * itself stays unconditional.
+ */
+export function approvalPass(
+  resolver: ConfigResolver,
+  dryRun: boolean,
+): (octokit: Api, log: Logger) => (owner: string, repo: string, sha: string) => Promise<void> {
+  return (octokit, log) => async (owner, repo, sha) => {
+    const { config } = await resolver.resolve(octokit as never, owner, repo, log);
+    await serve({ octokit, log, dryRun }, owner, repo, sha, config.autoApproval);
+  };
 }
