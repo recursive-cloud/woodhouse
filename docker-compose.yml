@@ -8,7 +8,7 @@
 
 services:
   woodhouse:
-    image: ghcr.io/recursive-cloud/woodhouse:v1.1.0@sha256:12026c57266e0097485034039c144a7a27fec4d027c51d04e4f04db7cad45320 # x-release-please-version
+    image: ghcr.io/recursive-cloud/woodhouse:v1.2.0@sha256:12026c57266e0097485034039c144a7a27fec4d027c51d04e4f04db7cad45320 # x-release-please-version
     # Pin the release version rather than `latest`. Portainer will not notice a
     # moving tag has changed, and an unexpected restart pulling a different
     # build is exactly the surprise you do not want from a bot with admin

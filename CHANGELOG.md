@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/recursive-cloud/woodhouse/compare/v1.1.0...v1.2.0) (2026-11-27)
+
+
+### Features
+
+* **environments:** converge deployment branch policies ([#70](https://github.com/recursive-cloud/woodhouse/issues/70)) ([658c3f6](https://github.com/recursive-cloud/woodhouse/commit/658c3f61e149da86ad25ece005318d52377e3b91))
+* **settings:** manage repository environments from config ([#68](https://github.com/recursive-cloud/woodhouse/issues/68)) ([dfa2631](https://github.com/recursive-cloud/woodhouse/commit/dfa26317162fc9aeeee8ee008213758a550f625d))
+
 ## [1.1.0](https://github.com/recursive-cloud/woodhouse/compare/v1.0.0...v1.1.0) (2026-11-18)
 
 
