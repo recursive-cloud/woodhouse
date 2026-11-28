@@ -407,7 +407,7 @@ export async function withdrawTrackedReviewers(
   const key = `${owner}/${repo}#${number}`;
   const except = options.except;
 
-  const withdraw = async (): Promise<boolean> => {
+  const withdraw = async () => {
     const tracked = deps.routed.get(key) ?? [];
     const owners =
       except === undefined

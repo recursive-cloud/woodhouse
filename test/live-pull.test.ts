@@ -13,7 +13,7 @@ function fakeLogger(): Logger {
 }
 
 /** A pull request as the live GET returns it. */
-function livePull(overrides: Record<string, unknown> = {}) {
+function livePull(overrides: Record<string, unknown>) {
   return {
     number: 7,
     state: "open",
@@ -25,7 +25,7 @@ function livePull(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function fakeDeps(data: unknown = livePull()) {
+function fakeDeps(data: unknown = livePull({})) {
   const get = vi.fn(async () => ({ data }));
   const log = fakeLogger();
   const octokit = { pulls: { get } } as unknown as Api;
@@ -34,7 +34,7 @@ function fakeDeps(data: unknown = livePull()) {
 
 describe("evaluateLivePull", () => {
   it("returns the pull and its author when it is open and still headed by the commit", async () => {
-    const pull = livePull();
+    const pull = livePull({});
     const { deps, get } = fakeDeps(pull);
 
     const evaluated = await evaluateLivePull(deps, "acme", "widgets", 7, SHA);
