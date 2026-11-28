@@ -14,10 +14,6 @@
       "matchUpdateTypes": ["lockFileMaintenance"],
       "automerge": true,
       "platformAutomerge": true
-    },
-    {
-      "matchUpdateTypes": ["minor", "major", "digest", "pin", "rollback"],
-      "reviewers": ["gunzy83"]
     }
   ]
 }
