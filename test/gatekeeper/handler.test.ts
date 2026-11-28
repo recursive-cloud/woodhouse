@@ -46,7 +46,7 @@ function whiteGlove(status: "completed" | "in_progress", id = 300): RawCheckRun 
 interface BuildOptions {
   /** Check runs the evaluator sees (via `paginate`). */
   readonly runs?: readonly RawCheckRun[];
-  /** Check runs `findExisting` sees (via `checks.listForRef`); defaults to
+  /** Check runs `findLatestRun` sees (via `checks.listForRef`); defaults to
    * the white-glove runs among `runs`, since that call filters by name. */
   readonly existing?: readonly RawCheckRun[];
   readonly dryRun?: boolean;

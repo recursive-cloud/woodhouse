@@ -26,6 +26,8 @@ import { approvalPass, serve } from "./approval/silverPlatter.js";
 import { escalationPass } from "./approval/escalation.js";
 import { forgetRoutedReviewers, routeReviewers } from "./approval/routing.js";
 import { handleOnboarding } from "./onboarding/handler.js";
+import { reRequestDressCodeCheck, runDressCodeCheck } from "./dresscode/check.js";
+import { DRESS_CODE_CHECK_NAME } from "./dresscode/constants.js";
 import { Scheduler } from "./lib/scheduler.js";
 import { KeyedMutex } from "./lib/mutex.js";
 
@@ -423,6 +425,59 @@ export function createApp(options: AppOptions) {
         );
       },
     );
+
+    // ------------------------------------------------------------ dress-code
+    // The title check shares the white-glove write mechanics through
+    // `findLatestRun`/`resolveCheckWrite`, so every event converges on one run
+    // per head commit.
+    guarded.on(
+      ["pull_request.opened", "pull_request.synchronize"],
+      "dress-code",
+      async (context, scope) => {
+        if (scope.repo === undefined) return;
+
+        await runDressCodeCheck(
+          { octokit: context.octokit, ...deps(scope.log) },
+          {
+            owner: scope.owner,
+            repo: scope.repo,
+            sha: context.payload.pull_request.head.sha,
+            title: context.payload.pull_request.title,
+          },
+        );
+      },
+    );
+
+    // A title edit is the only `pull_request.edited` payload that can change the
+    // verdict; body, label and base changes are ignored.
+    guarded.on("pull_request.edited", "dress-code", async (context, scope) => {
+      if (scope.repo === undefined) return;
+      if (context.payload.changes?.title === undefined) return;
+
+      await runDressCodeCheck(
+        { octokit: context.octokit, ...deps(scope.log) },
+        {
+          owner: scope.owner,
+          repo: scope.repo,
+          sha: context.payload.pull_request.head.sha,
+          title: context.payload.pull_request.title,
+        },
+      );
+    });
+
+    // Manual re-run from the Checks tab. Only our own check is handled; other
+    // check runs are none of dress-code's business.
+    guarded.on("check_run.rerequested", "dress-code", async (context, scope) => {
+      if (scope.repo === undefined) return;
+      if (context.payload.check_run.name !== DRESS_CODE_CHECK_NAME) return;
+
+      await reRequestDressCodeCheck(
+        { octokit: context.octokit, ...deps(scope.log) },
+        scope.owner,
+        scope.repo,
+        context.payload.check_run.head_sha,
+      );
+    });
 
     // ------------------------------------------------------------- onboarding
     // Registered for the two action-scoped events design D1 names: a fresh

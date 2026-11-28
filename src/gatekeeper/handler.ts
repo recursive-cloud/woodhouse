@@ -24,7 +24,11 @@ const mutex = new KeyedMutex();
  */
 const MAX_SUMMARY = 60_000;
 
-function truncate(text: string): string {
+/**
+ * Cap a check-run summary at the GitHub limit, matching the write path.
+ * Exported so the dress-code check applies exactly the same cap.
+ */
+export function truncate(text: string): string {
   return text.length <= MAX_SUMMARY ? text : `${text.slice(0, MAX_SUMMARY)}\n\n_(truncated)_`;
 }
 
@@ -112,7 +116,7 @@ async function upsertCheck(
         };
 
   await performWrite({ dryRun, log }, "write white-glove check", async () => {
-    const existing = await findExisting(octokit, owner, repo, sha);
+    const existing = await findLatestRun(octokit, owner, repo, sha, WHITE_GLOVE_CHECK_NAME);
 
     if (resolveCheckWrite(existing, evaluation.outcome) === "create") {
       await octokit.checks.create({
@@ -151,8 +155,8 @@ async function upsertCheck(
   });
 }
 
-/** The subset of a check run `findExisting` needs to pick the latest attempt. */
-interface ExistingRun {
+/** The subset of a check run `findLatestRun` needs to pick the latest attempt. */
+export interface ExistingRun {
   readonly id: number;
   readonly status: string;
   readonly startedAt?: string;
@@ -180,7 +184,7 @@ function laterThan(candidate: ExistingRun, holder: ExistingRun): boolean {
 }
 
 /**
- * Find the newest same-name run for a commit.
+ * Find the newest run of `checkName` for a commit.
  *
  * After a create-after-completion the SHA can carry two same-name runs in
  * different check suites, so GitHub's own ordering cannot be trusted: the
@@ -190,18 +194,20 @@ function laterThan(candidate: ExistingRun, holder: ExistingRun): boolean {
  *
  * The request pins `check_name`, but the loop re-asserts the name anyway so a
  * foreign-named run can never be selected even if the API response is odd.
+ * Exported so the dress-code check reuses exactly this selection rule.
  */
-async function findExisting(
+export async function findLatestRun(
   octokit: AnyOctokit,
   owner: string,
   repo: string,
   sha: string,
+  checkName: string,
 ): Promise<ExistingRun | undefined> {
   const response = await octokit.checks.listForRef({
     owner,
     repo,
     ref: sha,
-    check_name: WHITE_GLOVE_CHECK_NAME,
+    check_name: checkName,
     filter: "latest",
     per_page: 100,
   });
@@ -209,7 +215,7 @@ async function findExisting(
   let latest: ExistingRun | undefined;
   for (const run of response.data.check_runs) {
     // Fail closed: never select a run that is not ours, whatever the API returns.
-    if (run.name !== WHITE_GLOVE_CHECK_NAME) continue;
+    if (run.name !== checkName) continue;
     const candidate: ExistingRun = {
       id: run.id,
       status: run.status,

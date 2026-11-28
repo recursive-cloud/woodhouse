@@ -6,9 +6,10 @@
  * TypeScript — no GitHub, zod or octokit dependency — so the rules stay
  * directly testable.
  *
- * GitHub delivers a PR title trimmed, so the parser never trims its input:
- * surrounding whitespace is a pattern violation, not something to silently
- * repair. The one pattern below requires a subject that starts and ends with a
+ * The parser deliberately never trims its input: surrounding whitespace is a
+ * pattern violation, not something to silently repair. A title delivered with
+ * no surrounding whitespace therefore passes unchanged; one carrying it fails
+ * closed. The pattern below requires a subject that starts and ends with a
  * non-whitespace character.
  */
 
@@ -34,6 +35,9 @@ export type ConventionalType = (typeof CONVENTIONAL_TYPES)[number];
  *
  * Capture groups: 1 type, 2 scope (optional), 3 breaking marker (optional),
  * 4 subject. Only the title is matched — there is no body in this pattern.
+ *
+ * The scope accepts word characters, `-` and `.` only. That list is deliberate
+ * and not a wildcard: a scope carrying any other character is a failure.
  */
 const TITLE_PATTERN = new RegExp(
   `^(${CONVENTIONAL_TYPES.join("|")})(?:\\(([\\w.-]+)\\))?(!)?: (\\S(?:.*\\S)?)$`,
