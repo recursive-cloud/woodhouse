@@ -19,7 +19,7 @@ images:
     # the 1.0.0 release merges the tag does not exist yet, and a pull fails
     # loudly rather than silently. It replaces the first version-looking string
     # on the line, so keep that annotated line free of any other version string.
-    newTag: v1.3.0 # x-release-please-version
+    newTag: v1.4.0 # x-release-please-version
 
 # Rolls the deployment automatically whenever the allowlist or log level
 # changes, instead of leaving a stale pod running the old configuration.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/recursive-cloud/woodhouse/compare/v1.3.0...v1.4.0) (2026-11-28)
+
+
+### Features
+
+* **dress-code:** enforce conventional-commit PR titles ([#80](https://github.com/recursive-cloud/woodhouse/issues/80)) ([70845c0](https://github.com/recursive-cloud/woodhouse/commit/70845c0fb23e108b1a493328db495b1d3dfeb05b))
+
 ## [1.3.0](https://github.com/recursive-cloud/woodhouse/compare/v1.2.0...v1.3.0) (2026-11-27)
 
 
