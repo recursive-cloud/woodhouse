@@ -149,6 +149,13 @@ changes.
   branch, the same posture as ADR 0009's baseline handling; the flip reaches
   the other repositories at their next event.
 
+- **Enabling dress-code does not backfill open pull requests.** The check's
+  `dressCode.enabled` lookup resolves without a ref (the repository's default
+  branch), so flipping the setting on posts no check on already-open pull
+  requests until each receives its next event (`synchronize`, a title edit, or
+  a re-request). The coupling validation resolves at the pull request head
+  instead.
+
 - **Deleting a config file skips configuration validation entirely.** The
   existing "Deletion is not validated" rule means coupling is not re-checked
   on deletion, and a deletion cannot leave a repository dress-coded.

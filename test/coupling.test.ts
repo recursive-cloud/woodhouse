@@ -13,10 +13,12 @@ const COUPLED = {
 function configWith(
   repository: Partial<WoodhouseConfig["repository"]> = COUPLED,
   enabled = true,
+  strictChecks: readonly string[] = [],
 ): CouplingConfig {
   const config = defaultConfig();
   return {
     dressCode: { ...config.dressCode, enabled },
+    gatekeeper: { strictChecks: [...strictChecks] },
     repository: { ...repository },
   };
 }
@@ -91,5 +93,49 @@ describe("couplingIssues", () => {
   it("reports nothing when dress-code is absent", () => {
     expect(couplingIssues({ repository: { allow_rebase_merge: true } })).toEqual([]);
     expect(couplingIssues({})).toEqual([]);
+  });
+});
+
+describe("couplingIssues — strict-listing dress-code", () => {
+  const DRESS_CODE = "woodhouse/dress-code";
+
+  it("rejects strict-listing dress-code while dress-code is disabled", () => {
+    const issues = couplingIssues(configWith(COUPLED, false, [DRESS_CODE]));
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toBe("gatekeeper.strictChecks");
+    expect(issues[0]?.message).toContain(DRESS_CODE);
+    expect(issues[0]?.message).toContain("stay pending forever");
+    expect(issues[0]?.message).toContain("`dressCode.enabled: true`");
+  });
+
+  it("rejects strict-listing dress-code when the section is absent", () => {
+    const issues = couplingIssues({
+      gatekeeper: { strictChecks: [DRESS_CODE] },
+      repository: { ...COUPLED },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toBe("gatekeeper.strictChecks");
+  });
+
+  it("matches the strict-listing name case-sensitively", () => {
+    expect(couplingIssues(configWith(COUPLED, false, ["Woodhouse/dress-code"]))).toEqual([]);
+  });
+
+  it("does not add the strict-listing issue while dress-code is enabled", () => {
+    const issues = couplingIssues(configWith({}, true, [DRESS_CODE]));
+
+    // The merge-setting rule still applies; the strict-listing rule does not.
+    expect(issues.map((issue) => issue.path)).toEqual([
+      "repository.allow_squash_merge",
+      "repository.squash_merge_commit_title",
+      "repository.allow_rebase_merge",
+      "repository.allow_merge_commit",
+    ]);
+  });
+
+  it("stays clean when dress-code is enabled, coupled and strict-listed", () => {
+    expect(couplingIssues(configWith(COUPLED, true, [DRESS_CODE]))).toEqual([]);
   });
 });

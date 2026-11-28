@@ -334,6 +334,41 @@ describe("runDressCodeCheck", () => {
 });
 
 describe("reRequestDressCodeCheck", () => {
+  it("writes nothing when enabled and no dress-code run exists", async () => {
+    const { deps, create, update, log, paginate } = build({
+      pullRequests: [
+        {
+          number: 12,
+          state: "open",
+          title: "feat: add an environments section",
+          head: { sha: SHA },
+        },
+      ],
+    });
+
+    await reRequestDressCodeCheck(deps, OWNER, REPO, SHA);
+
+    // A whole-suite re-run can arrive for any commit, including one that never
+    // carried a dress-code run. Completing a run that does not exist would
+    // create a check the operator never enabled.
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(paginate).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledWith(
+      { sha: SHA },
+      "No dress-code run to re-request; skipping",
+    );
+  });
+
+  it("writes nothing when disabled and no dress-code run exists", async () => {
+    const { deps, create, update } = build({ enabled: false });
+
+    await reRequestDressCodeCheck(deps, OWNER, REPO, SHA);
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("completes a queued run using the title of the associated pull request", async () => {
     const { deps, create, update } = build({
       runs: [storedRun({ status: "queued", conclusion: null })],
@@ -361,7 +396,8 @@ describe("reRequestDressCodeCheck", () => {
   });
 
   it("reads every page of associated pull requests through the paginator", async () => {
-    const { deps, create, paginate, listPullRequestsAssociatedWithCommit } = build({
+    const { deps, update, paginate, listPullRequestsAssociatedWithCommit } = build({
+      runs: [storedRun({ status: "queued", conclusion: null })],
       pullRequests: [
         {
           number: 12,
@@ -378,11 +414,12 @@ describe("reRequestDressCodeCheck", () => {
       listPullRequestsAssociatedWithCommit,
       expect.objectContaining({ commit_sha: SHA, per_page: 100 }),
     );
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "success" }));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "success" }));
   });
 
   it("ignores pull requests whose head is not the requested commit", async () => {
-    const { deps, create } = build({
+    const { deps, update } = build({
+      runs: [storedRun({ status: "queued", conclusion: null })],
       pullRequests: [
         {
           number: 2,
@@ -401,11 +438,12 @@ describe("reRequestDressCodeCheck", () => {
 
     await reRequestDressCodeCheck(deps, OWNER, REPO, SHA);
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "success" }));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "success" }));
   });
 
   it("prefers an open pull request over a closed one", async () => {
-    const { deps, create } = build({
+    const { deps, update } = build({
+      runs: [storedRun({ status: "queued", conclusion: null })],
       pullRequests: [
         {
           number: 1,
@@ -424,11 +462,12 @@ describe("reRequestDressCodeCheck", () => {
 
     await reRequestDressCodeCheck(deps, OWNER, REPO, SHA);
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "failure" }));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "failure" }));
   });
 
   it("tie-breaks matching open pull requests to the lowest number", async () => {
-    const { deps, create } = build({
+    const { deps, update } = build({
+      runs: [storedRun({ status: "queued", conclusion: null })],
       pullRequests: [
         {
           number: 8,
@@ -447,7 +486,7 @@ describe("reRequestDressCodeCheck", () => {
 
     await reRequestDressCodeCheck(deps, OWNER, REPO, SHA);
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "success" }));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "success" }));
   });
 
   it("completes neutral when no pull request is headed by the commit", async () => {

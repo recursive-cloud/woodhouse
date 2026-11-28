@@ -13,7 +13,7 @@ import type { Logger } from "pino";
 import type { ConfigResolver } from "../config/resolver.js";
 import { titleFailure } from "../conventional/parse.js";
 import type { Outcome } from "../gatekeeper/evaluate.js";
-import { findLatestRun, truncate } from "../gatekeeper/handler.js";
+import { findLatestRun, truncate, type ExistingRun } from "../gatekeeper/handler.js";
 import { resolveCheckWrite } from "../gatekeeper/write-decision.js";
 import { performWrite } from "../lib/dry-run.js";
 import { KeyedMutex } from "../lib/mutex.js";
@@ -115,7 +115,9 @@ async function isEnabled(deps: DressCodeDeps, owner: string, repo: string): Prom
  * Create or update the dress-code run for a commit.
  *
  * Always terminal: a dress-code run never sits pending or queued, so a
- * completed run is always safe to update in place.
+ * completed run is always safe to update in place. `existingRun` lets a caller
+ * that has already looked the run up (the re-request path) reuse it instead of
+ * reading the commit's runs twice.
  */
 async function writeDecision(
   deps: DressCodeDeps,
@@ -123,6 +125,7 @@ async function writeDecision(
   repo: string,
   sha: string,
   decision: DressCodeDecision,
+  existingRun?: ExistingRun,
 ): Promise<void> {
   const state = {
     status: "completed" as const,
@@ -142,7 +145,8 @@ async function writeDecision(
   const writeOutcome: Outcome = decision.outcome === "neutral" ? "success" : decision.outcome;
 
   await performWrite({ dryRun: deps.dryRun, log: deps.log }, "write dress-code check", async () => {
-    const existing = await findLatestRun(deps.octokit, owner, repo, sha, DRESS_CODE_CHECK_NAME);
+    const existing =
+      existingRun ?? (await findLatestRun(deps.octokit, owner, repo, sha, DRESS_CODE_CHECK_NAME));
 
     if (resolveCheckWrite(existing, writeOutcome) === "create") {
       await deps.octokit.checks.create({
@@ -238,6 +242,12 @@ export async function runDressCodeCheck(
  * A re-requested run must never stay queued. When dress-code is disabled, or
  * the commit has no associated pull request, the run completes neutral with an
  * explanation instead of a title verdict.
+ *
+ * GitHub delivers `check_suite.rerequested` for ANY commit when an operator
+ * clicks "Re-run all checks", including commits that never carried a
+ * dress-code run. A re-request can only complete a run that exists: creating
+ * one here would add a check the operator never enabled, so no existing run
+ * means no write at all.
  */
 export async function reRequestDressCodeCheck(
   deps: DressCodeDeps,
@@ -248,8 +258,21 @@ export async function reRequestDressCodeCheck(
   const enabled = await isEnabled(deps, owner, repo);
 
   await mutex.run(lockKey(owner, repo, sha), async () => {
+    const existing = await findLatestRun(deps.octokit, owner, repo, sha, DRESS_CODE_CHECK_NAME);
+    if (existing === undefined) {
+      deps.log.debug({ sha }, "No dress-code run to re-request; skipping");
+      return;
+    }
+
     if (!enabled) {
-      await writeDecision(deps, owner, repo, sha, neutralDressCode(DRESS_CODE_DISABLED_REASON));
+      await writeDecision(
+        deps,
+        owner,
+        repo,
+        sha,
+        neutralDressCode(DRESS_CODE_DISABLED_REASON),
+        existing,
+      );
       return;
     }
 
@@ -261,10 +284,11 @@ export async function reRequestDressCodeCheck(
         repo,
         sha,
         neutralDressCode(DRESS_CODE_NO_PULL_REQUEST_REASON),
+        existing,
       );
       return;
     }
 
-    await writeDecision(deps, owner, repo, sha, decideDressCode(title));
+    await writeDecision(deps, owner, repo, sha, decideDressCode(title), existing);
   });
 }

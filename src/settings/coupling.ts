@@ -1,5 +1,5 @@
 /**
- * Merge-setting coupling required by dress-code.
+ * Coupling required by dress-code.
  *
  * The `woodhouse/dress-code` check validates the pull-request title because a
  * squash merge carries that title into the commit. GitHub only guarantees that
@@ -8,12 +8,18 @@
  * any other merge configuration would let a pull request merge with a commit
  * message the check never saw.
  *
- * This module is the pure statement of that rule. It runs against the config
+ * A second rule guards strict-listing: a `gatekeeper.strictChecks` entry for
+ * `woodhouse/dress-code` while the check is not enabled would hold every
+ * white-glove verdict in the repository pending forever, because nothing ever
+ * posts the check.
+ *
+ * This module is the pure statement of both rules. It runs against the config
  * resolved from a pull request's head, so a repository file cannot re-enable a
  * merge setting the baseline's dress-code enablement forbids.
  */
 
 import type { ValidationIssue } from "../config/schema.js";
+import { DRESS_CODE_CHECK_NAME } from "../dresscode/constants.js";
 
 /**
  * The narrowest config shape the rule reads.
@@ -23,6 +29,7 @@ import type { ValidationIssue } from "../config/schema.js";
  */
 export interface CouplingConfig {
   readonly dressCode?: { readonly enabled?: boolean | undefined } | undefined;
+  readonly gatekeeper?: { readonly strictChecks?: readonly string[] | undefined } | undefined;
   readonly repository?:
     | {
         readonly allow_squash_merge?: boolean | undefined;
@@ -58,10 +65,27 @@ function message({ field, required, value }: Requirement): string {
  * the pair out lets GitHub keep whatever the repository already had.
  */
 export function couplingIssues(config: CouplingConfig): ValidationIssue[] {
-  if (config.dressCode?.enabled !== true) return [];
+  const issues: ValidationIssue[] = [];
+
+  // Exact, case-sensitive match: ADR 0010 governs check-name matching, and a
+  // mis-cased entry does not select the check either.
+  const strictChecks = config.gatekeeper?.strictChecks ?? [];
+  if (config.dressCode?.enabled !== true && strictChecks.includes(DRESS_CODE_CHECK_NAME)) {
+    issues.push({
+      path: "gatekeeper.strictChecks",
+      message:
+        `\`gatekeeper.strictChecks\` lists \`${DRESS_CODE_CHECK_NAME}\` while ` +
+        "`dressCode.enabled` is not true: the white-glove verdict would stay " +
+        "pending forever because nothing posts the check. Strict-listing it " +
+        "requires `dressCode.enabled: true`.",
+    });
+  }
+
+  // The merge-setting rule only applies while dress-code is enabled; the
+  // strict-listing rule above fires independently.
+  if (config.dressCode?.enabled !== true) return issues;
 
   const repository = config.repository ?? {};
-  const issues: ValidationIssue[] = [];
 
   const requirements: readonly Requirement[] = [
     {
