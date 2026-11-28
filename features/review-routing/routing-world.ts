@@ -12,7 +12,7 @@
  */
 
 import { expect, vi } from "vitest";
-import { serve } from "../../src/approval/routing.js";
+import { routeReviewers } from "../../src/approval/routing.js";
 import type { RoutingDeps } from "../../src/approval/routing.js";
 import { escalationPass } from "../../src/approval/escalation.js";
 import { approvalPass } from "../../src/approval/silverPlatter.js";
@@ -301,7 +301,7 @@ export async function routeOnce(w: World, facts: Facts): Promise<void> {
   const config = requireConfig(w);
 
   if (facts.action !== "opened") {
-    await serve(h.deps, OWNER, REPO, request, config);
+    await routeReviewers(h.deps, OWNER, REPO, request, config);
     return;
   }
 
@@ -309,7 +309,7 @@ export async function routeOnce(w: World, facts: Facts): Promise<void> {
   try {
     // The opened event races a bot's own auto-merge toggle, so the live GET
     // happens only after the grace.
-    const pending = serve(h.deps, OWNER, REPO, request, config);
+    const pending = routeReviewers(h.deps, OWNER, REPO, request, config);
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(GRACE_MS);
     await pending;

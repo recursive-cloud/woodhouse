@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import {
-  forget,
+  forgetRoutedReviewers,
   route,
-  serve,
+  routeReviewers,
+  withdrawTrackedReviewers,
   type RoutingDeps,
   type RoutingRequest,
 } from "../src/approval/routing.js";
 import { autoApprovalSchema, type AutoApprovalConfig } from "../src/config/schema.js";
 import { resetAppLoginCache } from "../src/github/app-login.js";
+import { KeyedMutex } from "../src/lib/mutex.js";
 
 const SELF = "woodhouse[bot]";
 const RENOVATE = "renovate[bot]";
@@ -174,12 +176,12 @@ beforeEach(() => {
   resetAppLoginCache();
 });
 
-describe("serve — dry-run", () => {
+describe("routeReviewers — dry-run", () => {
   it("performs no reviewer writes and remembers nothing", async () => {
     const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
-    await serve(
+    await routeReviewers(
       { octokit: h.octokit, log: h.log, dryRun: true, routed },
       "acme",
       "widgets",
@@ -192,14 +194,34 @@ describe("serve — dry-run", () => {
     expect(routed.size).toBe(0);
     expect(h.log.info).toHaveBeenCalledWith(expect.stringContaining("DRY_RUN: would request"));
   });
+
+  it("logs both the withdrawal and the request and leaves the tracked set unchanged", async () => {
+    const h = ioHarness({});
+    const previous = ["stale-reviewer"];
+    const routed = new Map<string, readonly string[]>([["acme/widgets#7", previous]]);
+
+    await routeReviewers(
+      { octokit: h.octokit, log: h.log, dryRun: true, routed },
+      "acme",
+      "widgets",
+      ownerPr,
+      ownerConfig,
+    );
+
+    expect(h.removeRequestedReviewers).not.toHaveBeenCalled();
+    expect(h.requestReviewers).not.toHaveBeenCalled();
+    expect(h.log.info).toHaveBeenCalledWith("DRY_RUN: would withdraw the previous review request");
+    expect(h.log.info).toHaveBeenCalledWith("DRY_RUN: would request the routed reviewer(s)");
+    expect(routed.get("acme/widgets#7")).toBe(previous);
+  });
 });
 
-describe("serve — live writes", () => {
+describe("routeReviewers — live writes", () => {
   it("requests the routed reviewer and records the set", async () => {
     const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
-    await serve(
+    await routeReviewers(
       { octokit: h.octokit, log: h.log, dryRun: false, routed },
       "acme",
       "widgets",
@@ -224,7 +246,7 @@ describe("serve — live writes", () => {
     const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
-    await serve(
+    await routeReviewers(
       { octokit: h.octokit, log: h.log, dryRun: false, routed },
       "acme",
       "widgets",
@@ -248,7 +270,7 @@ describe("serve — live writes", () => {
     // The GET reads the fact at call time, so the toggle below is visible.
     h.get.mockImplementation(async () => ({ data: { auto_merge: autoMerge } }));
 
-    await serve(deps, "acme", "widgets", botPr, bothConfig);
+    await routeReviewers(deps, "acme", "widgets", botPr, bothConfig);
     expect(h.requestReviewers).toHaveBeenLastCalledWith(
       expect.objectContaining({ reviewers: ["my-user"] }),
     );
@@ -257,7 +279,7 @@ describe("serve — live writes", () => {
     // owner with the app, withdrawing only what it requested.
     autoMerge = { enabled_by: { login: RENOVATE } };
 
-    await serve(deps, "acme", "widgets", botPr, bothConfig);
+    await routeReviewers(deps, "acme", "widgets", botPr, bothConfig);
 
     expect(h.removeRequestedReviewers).toHaveBeenCalledWith({
       owner: "acme",
@@ -277,8 +299,8 @@ describe("serve — live writes", () => {
     const deps = { octokit: h.octokit, log: h.log, dryRun: false, routed };
     const reopened = { ...ownerPr, action: "reopened" };
 
-    await serve(deps, "acme", "widgets", reopened, ownerConfig);
-    await serve(deps, "acme", "widgets", reopened, ownerConfig);
+    await routeReviewers(deps, "acme", "widgets", reopened, ownerConfig);
+    await routeReviewers(deps, "acme", "widgets", reopened, ownerConfig);
 
     expect(h.requestReviewers).toHaveBeenCalledOnce();
     expect(h.requestReviewers).toHaveBeenCalledWith({
@@ -291,12 +313,33 @@ describe("serve — live writes", () => {
   });
 });
 
-describe("forget", () => {
+describe("withdrawTrackedReviewers — no-owners clear", () => {
+  it("clears a tracked set that held only the app without a reviewer write", async () => {
+    const h = ioHarness({});
+    const routed = new Map<string, readonly string[]>([["acme/widgets#7", [SELF]]]);
+
+    const withdrew = await withdrawTrackedReviewers(
+      { octokit: h.octokit, log: h.log, dryRun: false, routed },
+      "acme",
+      "widgets",
+      7,
+      { except: SELF, mutex: new KeyedMutex() },
+    );
+
+    expect(withdrew).toBe(false);
+    expect(h.removeRequestedReviewers).not.toHaveBeenCalled();
+    // The clear happens inside the function's locked section, so a caller does
+    // not have to touch the tracked map after `mutex.run` returns.
+    expect(routed.get("acme/widgets#7")).toEqual([]);
+  });
+});
+
+describe("forgetRoutedReviewers", () => {
   it("drops the tracked set for a closed pull request", () => {
     const h = ioHarness({});
     const routed = new Map<string, readonly string[]>([["acme/widgets#7", [SELF]]]);
 
-    forget({ log: h.log, routed }, "acme", "widgets", 7);
+    forgetRoutedReviewers({ log: h.log, routed }, "acme", "widgets", 7);
 
     expect(routed.has("acme/widgets#7")).toBe(false);
     expect(h.log.debug).toHaveBeenCalledWith({ pr: 7 }, "Forgot routed reviewers on close");
@@ -306,7 +349,7 @@ describe("forget", () => {
     const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
-    forget({ log: h.log, routed }, "acme", "widgets", 7);
+    forgetRoutedReviewers({ log: h.log, routed }, "acme", "widgets", 7);
 
     expect(routed.size).toBe(0);
     expect(h.log.debug).not.toHaveBeenCalled();

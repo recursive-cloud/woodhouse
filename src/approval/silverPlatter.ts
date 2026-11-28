@@ -12,13 +12,14 @@ import type { Logger } from "pino";
 import type { ConfigResolver } from "../config/resolver.js";
 import type { AutoApprovalConfig } from "../config/schema.js";
 import { appLogin } from "../github/app-login.js";
-import { listChangedFiles, listOpenPullRequestsForCommit } from "../github/pulls.js";
-import { commitPass, type CommitPass } from "./commitPass.js";
+import { listChangedFiles } from "../github/pulls.js";
+import { commitPass, forEachOpenPull, type CommitPass } from "./commitPass.js";
 import { evaluateLivePull } from "./livePull.js";
-import { classifyActor, decide, normalizeLogin } from "./policy.js";
+import { classifyActor, decide } from "./policy.js";
 import {
   handToOwners,
   holdsRequest,
+  withdrawTrackedReviewers,
   type RoutingDeps,
   type SharedRoutingState,
 } from "./routing.js";
@@ -87,8 +88,8 @@ function routingDeps(deps: SilverPlatterDeps, routing: SharedRoutingState): Rout
  *
  * The live pull request comes from `evaluateLivePull`, so a head that moved or
  * a pull request that closed is skipped. A failed GET is not caught here — the
- * rejection reaches `serve`, which logs it and moves on, so a fetch error
- * cannot read as a refusal.
+ * rejection reaches the commit-level fan-out, which logs it and moves on, so a
+ * fetch error cannot read as a refusal.
  */
 async function approvePullRequest(
   deps: SilverPlatterDeps,
@@ -209,51 +210,20 @@ async function approvePullRequest(
   // ends empty because Woodhouse holds the review through its approval; the
   // next routing pass re-requests whatever the desired set then is.
   //
-  // The read-modify-write runs under the same per-repo routing mutex as every
-  // other reviewer write, so a concurrent routing pass cannot interleave
-  // between the tracked-set read and the withdrawal. Lock order stays commit
-  // mutex → routing mutex: this already runs inside reconcile's commit mutex.
-  // Recovery is only reachable after a confirmed approval write (the dry-run
-  // path returns early above), so the unconditional tracked-set clear in the
-  // no-owners branch corresponds to a real state change and does not violate
-  // the dry-run doctrine the withdrawal branch follows.
+  // The read-modify-write, including the clear for a set with no owner left
+  // to withdraw, runs under the same per-repo routing mutex as every other
+  // reviewer write, so a concurrent routing pass cannot interleave between the
+  // tracked-set read and the write. Lock order stays commit mutex → routing
+  // mutex: this already runs inside reconcile's commit mutex. Recovery is only
+  // reachable after a confirmed approval write (the dry-run path returns early
+  // above), so the unconditional tracked-set clear corresponds to a real state
+  // change and does not violate the dry-run doctrine the withdrawal branch
+  // follows.
   if (deps.routing !== undefined) {
-    const routing = deps.routing;
-    const key = `${owner}/${repo}#${number}`;
-
-    const recover = async (): Promise<void> => {
-      const tracked = routing.routed.get(key) ?? [];
-      const owners = tracked.filter((login) => normalizeLogin(login) !== normalizeLogin(self));
-
-      if (owners.length > 0) {
-        const withdrawn = await performWrite(
-          deps,
-          "withdraw the owners' review request",
-          async () => {
-            await deps.octokit.pulls.removeRequestedReviewers({
-              owner,
-              repo,
-              pull_number: number,
-              reviewers: [...owners],
-            });
-            return true;
-          },
-        );
-
-        // Dry-run: nothing reached GitHub, so the tracked set stays as it was.
-        if (withdrawn !== undefined) {
-          routing.routed.set(key, []);
-        }
-      } else {
-        routing.routed.set(key, []);
-      }
-    };
-
-    if (routing.mutex !== undefined) {
-      await routing.mutex.run(`${owner}/${repo}`, recover);
-    } else {
-      await recover();
-    }
+    await withdrawTrackedReviewers(routingDeps(deps, deps.routing), owner, repo, number, {
+      except: self,
+      mutex: deps.routing.mutex,
+    });
   }
 
   deps.log.info({ pr: number, author, sha }, "Approved pull request");
@@ -283,25 +253,10 @@ export async function serve(
     return false;
   }
 
-  const open = await listOpenPullRequestsForCommit(deps.octokit, owner, repo, sha);
-  if (open.length === 0) {
-    deps.log.debug({ sha }, "No open pull request is headed by the commit");
-    return false;
-  }
-
-  let approved = false;
-  for (const pull of open) {
-    try {
-      if (await approvePullRequest(deps, owner, repo, sha, pull.number, config)) {
-        approved = true;
-      }
-    } catch (err) {
-      // One pull request's failure must not block its siblings. Already
-      // approved-at-commit keeps a re-run of the pass idempotent.
-      deps.log.error({ err, pr: pull.number, sha }, "Failed to evaluate pull request; continuing");
-    }
-  }
-  return approved;
+  const approved = await forEachOpenPull(deps, owner, repo, sha, (number) =>
+    approvePullRequest(deps, owner, repo, sha, number, config),
+  );
+  return approved.some((result) => result);
 }
 
 /**

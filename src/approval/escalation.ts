@@ -16,9 +16,8 @@
 import type { ConfigResolver } from "../config/resolver.js";
 import type { AutoApprovalConfig } from "../config/schema.js";
 import { appLogin } from "../github/app-login.js";
-import { listOpenPullRequestsForCommit } from "../github/pulls.js";
 import type { KeyedMutex } from "../lib/mutex.js";
-import { commitPass, type CommitPass } from "./commitPass.js";
+import { commitPass, forEachOpenPull, type CommitPass } from "./commitPass.js";
 import { evaluateLivePull } from "./livePull.js";
 import { classifyActor, normalizeLogin, type ActorClass } from "./policy.js";
 import {
@@ -108,19 +107,9 @@ async function escalateFailedCommit(
   self: string,
   mutex?: KeyedMutex,
 ): Promise<void> {
-  const open = await listOpenPullRequestsForCommit(deps.octokit, owner, repo, sha);
-  if (open.length === 0) {
-    deps.log.debug({ sha }, "No open pull request is headed by the failed commit");
-    return;
-  }
-
-  for (const pull of open) {
-    try {
-      await escalatePullRequest(deps, owner, repo, sha, pull.number, config, self, mutex);
-    } catch (err) {
-      deps.log.error({ err, pr: pull.number, sha }, "Failed to escalate pull request; continuing");
-    }
-  }
+  await forEachOpenPull(deps, owner, repo, sha, (number) =>
+    escalatePullRequest(deps, owner, repo, sha, number, config, self, mutex),
+  );
 }
 
 /**

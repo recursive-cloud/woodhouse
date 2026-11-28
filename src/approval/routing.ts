@@ -212,7 +212,7 @@ export function route(
  *  for the rest of the process. No API write: GitHub owns review requests on a
  *  closed pull request.
  */
-export function forget(
+export function forgetRoutedReviewers(
   deps: Pick<RoutingDeps, "log" | "routed">,
   owner: string,
   repo: string,
@@ -245,7 +245,7 @@ export interface RoutingFacts {
  * Gather the facts, decide, and reconcile the requested reviewer set with the
  * last one routing made.
  */
-export async function serve(
+export async function routeReviewers(
   deps: RoutingDeps,
   owner: string,
   repo: string,
@@ -324,27 +324,19 @@ export async function reconcileReviewers(
     );
 
     if (toWithdraw.length > 0) {
-      const withdrawn = await performWrite(
-        deps,
-        "withdraw the previous review request",
-        async () => {
-          await deps.octokit.pulls.removeRequestedReviewers({
-            owner,
-            repo,
-            pull_number: prNumber,
-            reviewers: [...toWithdraw],
-          });
-          return true;
-        },
-      );
-
-      // Dry-run: nothing reached GitHub, so the next pass must still see the
-      // previous set as un-replaced.
-      if (withdrawn === undefined) return;
+      await performWrite(deps, "withdraw the previous review request", async () => {
+        await deps.octokit.pulls.removeRequestedReviewers({
+          owner,
+          repo,
+          pull_number: prNumber,
+          reviewers: [...toWithdraw],
+        });
+        return true;
+      });
     }
 
     if (toRequest.length > 0) {
-      const requested = await performWrite(deps, "request the routed reviewer(s)", async () => {
+      await performWrite(deps, "request the routed reviewer(s)", async () => {
         await deps.octokit.pulls.requestReviewers({
           owner,
           repo,
@@ -353,9 +345,6 @@ export async function reconcileReviewers(
         });
         return true;
       });
-
-      // Dry-run: nothing reached GitHub, so remember nothing.
-      if (requested === undefined) return;
     }
 
     if (toWithdraw.length === 0 && toRequest.length === 0) {
@@ -365,6 +354,10 @@ export async function reconcileReviewers(
       );
       return;
     }
+
+    // Dry-run: nothing reached GitHub, so the next pass must still see the
+    // previous set as un-replaced.
+    if (deps.dryRun) return;
 
     deps.routed.set(key, next);
     deps.log.info(
@@ -379,6 +372,77 @@ export async function reconcileReviewers(
   }
 
   await reconcile();
+}
+
+/** Options for `withdrawTrackedReviewers`. */
+export interface WithdrawTrackedReviewersOptions {
+  /** Login to leave in place, compared case-insensitively; omitted withdraws all. */
+  readonly except?: string;
+  /** Serialises the read-modify-write with the other reviewer writers. */
+  readonly mutex?: KeyedMutex;
+}
+
+/**
+ * Withdraw the reviewers a pull request's tracked set still holds, optionally
+ * keeping one login (typically the App's own) in place, then end the tracked
+ * set because another actor now holds the review.
+ *
+ * Only logins routing believes are currently requested are ever withdrawn. The
+ * read-modify-write runs under `mutex` when one is given, keyed per repository
+ * exactly like the routing listener; callers already holding that lock pass no
+ * mutex. Returns true when the tracked set held a reviewer to withdraw (the
+ * withdrawal is attempted on the live path; dry-run returns true and writes
+ * nothing), and false when there was nothing to withdraw. Either way the
+ * locked body ends the tracked set: a completed withdrawal and the no-owners
+ * case (empty, or only `except`) both clear it, so a later pass starts from
+ * nothing.
+ */
+export async function withdrawTrackedReviewers(
+  deps: RoutingDeps,
+  owner: string,
+  repo: string,
+  number: number,
+  options: WithdrawTrackedReviewersOptions = {},
+): Promise<boolean> {
+  const key = `${owner}/${repo}#${number}`;
+  const except = options.except;
+
+  const withdraw = async (): Promise<boolean> => {
+    const tracked = deps.routed.get(key) ?? [];
+    const owners =
+      except === undefined
+        ? [...tracked]
+        : tracked.filter((login) => normalizeLogin(login) !== normalizeLogin(except));
+
+    // Nothing to withdraw: the set is empty, or holds only `except`. End the
+    // tracked set here, inside the locked section — recovery has taken the
+    // review, so the next pass must start from nothing. A caller-side clear
+    // after `mutex.run` returns would race a queued pass's tracked write.
+    if (owners.length === 0) {
+      deps.routed.set(key, []);
+      return false;
+    }
+
+    await performWrite(deps, "withdraw the owners' review request", async () => {
+      await deps.octokit.pulls.removeRequestedReviewers({
+        owner,
+        repo,
+        pull_number: number,
+        reviewers: [...owners],
+      });
+      return true;
+    });
+
+    // Dry-run: nothing reached GitHub, so the tracked set stays as it was.
+    if (!deps.dryRun) deps.routed.set(key, []);
+    return true;
+  };
+
+  if (options.mutex !== undefined) {
+    return options.mutex.run(`${owner}/${repo}`, withdraw);
+  }
+
+  return withdraw();
 }
 
 /**
