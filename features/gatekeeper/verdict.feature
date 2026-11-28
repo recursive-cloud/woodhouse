@@ -82,3 +82,28 @@ Feature: White-glove verdict
       | "ci/unit" failing started "2024-01-01T00:00:00Z" id 100 and "ci/unit" still running started "2024-06-01T00:00:00Z" id 200 | stays pending   |
       | "shared" passing started "2024-01-01T00:00:00Z" id 10 and "shared" failing started "2024-01-01T00:00:00Z" id 20           | reports failure |
       | "shared" passing started "2024-01-01T00:00:00Z" id 10 and "shared" failing started "2025-01-01T00:00:00Z" id 20           | reports failure |
+
+  @REC-50
+  Scenario Outline: A strict dress-code check composes by the normal verdict rules
+    Given gatekeeper.strictChecks lists "woodhouse/dress-code"
+    And the head commit carries the checks <checks>
+    When the white-glove verdict is evaluated
+    Then the consolidated verdict <outcome>
+
+    Examples:
+      | checks                                                          | outcome         |
+      | only "build" passing                                            | stays pending   |
+      | "woodhouse/dress-code" failing and "build" passing              | reports failure |
+      | "woodhouse/dress-code" passing and "build" passing              | passes          |
+
+  @REC-50
+  Scenario: A dress-code check not listed as strict does not hold the verdict when absent
+    Given the head commit carries the checks only "build" passing
+    When the white-glove verdict is evaluated
+    Then the consolidated verdict passes
+
+  @REC-50
+  Scenario: A failing dress-code check fails the verdict without being strict
+    Given the head commit carries the checks "woodhouse/dress-code" failing and "build" passing
+    When the white-glove verdict is evaluated
+    Then the consolidated verdict reports failure

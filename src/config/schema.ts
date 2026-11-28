@@ -19,9 +19,10 @@
  */
 
 import { z } from "zod";
+import { dressCodeSchema } from "./schema-dress-code.js";
 import { environmentSchema, environmentsSchema } from "./schema-environments.js";
 
-export { environmentSchema, environmentsSchema };
+export { dressCodeSchema, environmentSchema, environmentsSchema };
 
 const githubLogin = z
   .string()
@@ -447,6 +448,7 @@ export const woodhouseConfigSchema = z
         ],
       }),
     gatekeeper: gatekeeperSchema,
+    dressCode: dressCodeSchema,
     autoApproval: autoApprovalSchema,
   })
   .strict()
@@ -454,6 +456,7 @@ export const woodhouseConfigSchema = z
 
 export type WoodhouseConfig = z.infer<typeof woodhouseConfigSchema>;
 export type GatekeeperConfig = WoodhouseConfig["gatekeeper"];
+export type DressCodeConfig = WoodhouseConfig["dressCode"];
 export type AutoApprovalConfig = WoodhouseConfig["autoApproval"];
 export type SettingsConfig = WoodhouseConfig["settings"];
 export type RepositoryConfig = WoodhouseConfig["repository"];

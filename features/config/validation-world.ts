@@ -11,6 +11,7 @@
 
 import { vi } from "vitest";
 import type { Logger } from "pino";
+import { ConfigResolver, DEFAULT_BASELINE_REPO } from "../../src/config/resolver.js";
 import { validatePullRequest } from "../../src/settings/validate.js";
 import { fakeLogger, paginateFake } from "../support/scenario.js";
 
@@ -23,6 +24,7 @@ export const REPO = "widgets";
 export const PR_NUMBER = 7;
 export const HEAD_SHA = "headsha";
 export const LOCAL_PATH = ".github/woodhouse.yml";
+export const BASELINE_REPO = DEFAULT_BASELINE_REPO;
 
 export const VALID_SOURCE = "gatekeeper:\n  strictChecks:\n    - build\n";
 export const INVALID_SOURCE = "gatekeeper:\n  enabled: definitely\n";
@@ -45,6 +47,8 @@ interface Blob {
 interface ScenarioState {
   readonly files: ChangedFile[];
   readonly blobs: Record<string, Blob>;
+  /** Files in the baseline repository, keyed by path. */
+  readonly baseline: Record<string, Blob>;
   readonly comments: Comment[];
   dryRun: boolean;
   /** The `<contents>` cell of the last Given, for the Then step's expectations. */
@@ -52,7 +56,7 @@ interface ScenarioState {
 }
 
 export function newScenario(): ScenarioState {
-  return { files: [], blobs: {}, comments: [], dryRun: false };
+  return { files: [], blobs: {}, baseline: {}, comments: [], dryRun: false };
 }
 
 /** Examples cells quote path-like values; strip the surrounding quotes. */
@@ -77,9 +81,24 @@ interface ValidationOctokitOptions {
 function makeValidationOctokit({ state }: ValidationOctokitOptions) {
   const listFiles = vi.fn(async () => ({ data: state.files }));
 
-  const getContent = vi.fn(async (params: { path: string }) => ({
-    data: state.blobs[params.path] ?? { type: "file", content: base64(VALID_SOURCE) },
-  }));
+  // Repo-aware so the resolver can read a seeded baseline layer while the
+  // pull request's own files stay keyed by path. The baseline repository has
+  // no fallback content: an unseeded baseline is a 404, exactly like GitHub.
+  const getContent = vi.fn(
+    async (params: { owner: string; repo: string; path: string; ref?: string }) => {
+      if (params.repo === BASELINE_REPO) {
+        const baseline = state.baseline[params.path];
+        if (baseline === undefined) {
+          throw Object.assign(new Error("Not Found"), { status: 404 });
+        }
+        return { data: baseline };
+      }
+
+      return {
+        data: state.blobs[params.path] ?? { type: "file", content: base64(VALID_SOURCE) },
+      };
+    },
+  );
 
   const createCheck = vi.fn(async () => ({ data: {} }));
 
@@ -118,7 +137,8 @@ export type Capture = ReturnType<typeof makeValidationOctokit> & {
 export async function runValidation(state: ScenarioState): Promise<Capture> {
   const fake = makeValidationOctokit({ state });
   const log = fakeLogger();
-  const deps: Deps = { octokit: fake.octokit, log, dryRun: state.dryRun };
+  const resolver = new ConfigResolver({ baselineRepo: BASELINE_REPO });
+  const deps: Deps = { octokit: fake.octokit, resolver, log, dryRun: state.dryRun };
   const result = await validatePullRequest(deps, OWNER, REPO, PR_NUMBER, HEAD_SHA);
   return { ...fake, log, result };
 }
@@ -200,6 +220,11 @@ export function change(
 ): void {
   state.files.push({ filename, status });
   state.blobs[filename] = { type: "file", content: base64(source) };
+}
+
+/** Seed a file in the owner-wide baseline repository (for cascade scenarios). */
+export function setBaseline(state: ScenarioState, path: string, source: string): void {
+  state.baseline[path] = { type: "file", content: base64(source) };
 }
 
 /** Re-point every changed (non-deleted) file at `source`. */

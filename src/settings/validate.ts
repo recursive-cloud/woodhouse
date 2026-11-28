@@ -16,6 +16,8 @@ import { SCHEMA_MODELINE } from "../config/json-schema.js";
 import { listChangedFiles } from "../github/pulls.js";
 import { syncMarkerComment } from "../github/comments.js";
 import { performWrite } from "../lib/dry-run.js";
+import type { ConfigResolver, ContentsClient } from "../config/resolver.js";
+import { couplingIssues } from "./coupling.js";
 
 type Api = Context<"pull_request">["octokit"];
 
@@ -30,6 +32,15 @@ export const CONFIG_CHECK_NAME = "woodhouse/config";
  */
 export const COMMENT_MARKER = "<!-- woodhouse:config-validation -->";
 
+/**
+ * The synthetic path a coupling verdict reports under.
+ *
+ * The problem is not in one touched file: it is the merged result of the whole
+ * cascade (baseline plus the pull request's local layer), so naming a single
+ * file would point the author at the wrong place.
+ */
+export const RESOLVED_CONFIGURATION_PATH = "(resolved configuration)";
+
 /** Any path this app would ever read as configuration. */
 export function isConfigPath(path: string): boolean {
   return isSettingsPath(path);
@@ -40,7 +51,7 @@ export type FileVerdict =
   | {
       readonly path: string;
       readonly ok: false;
-      readonly kind: "yaml" | "schema";
+      readonly kind: "yaml" | "schema" | "coupling";
       readonly issues: readonly ValidationIssue[];
     };
 
@@ -93,11 +104,7 @@ export function summarise(verdicts: readonly FileVerdict[]): {
   const lines: string[] = ["The following problems must be fixed before this can be merged:", ""];
 
   for (const verdict of bad) {
-    lines.push(
-      `### \`${verdict.path}\``,
-      verdict.kind === "yaml" ? "Not valid YAML:" : "Schema errors:",
-      "",
-    );
+    lines.push(`### \`${verdict.path}\``, kindHeading(verdict.kind), "");
     for (const issue of verdict.issues) {
       lines.push(`- \`${issue.path}\` — ${issue.message}`);
     }
@@ -110,12 +117,28 @@ export function summarise(verdicts: readonly FileVerdict[]): {
       "would be a security problem rather than a cosmetic one._",
   );
 
-  const count = bad.length;
+  // A coupling verdict stands for the resolved cascade, not for a file, so it
+  // never inflates the invalid-file count.
+  const invalidFiles = bad.filter((verdict) => verdict.kind !== "coupling").length;
   return {
     conclusion: "failure",
-    title: `${count} configuration file${count === 1 ? "" : "s"} invalid`,
+    title:
+      invalidFiles === 0
+        ? "Dress-code merge settings are not coupled"
+        : `${invalidFiles} configuration file${invalidFiles === 1 ? "" : "s"} invalid`,
     summary: lines.join("\n"),
   };
+}
+
+function kindHeading(kind: "yaml" | "schema" | "coupling"): string {
+  switch (kind) {
+    case "yaml":
+      return "Not valid YAML:";
+    case "schema":
+      return "Schema errors:";
+    case "coupling":
+      return "Merge settings required by dress-code:";
+  }
 }
 
 /**
@@ -147,6 +170,7 @@ export function buildComment(verdicts: readonly FileVerdict[]): string {
 
 export interface ValidateDeps {
   readonly octokit: Api;
+  readonly resolver: ConfigResolver;
   readonly log: Logger;
   readonly dryRun: boolean;
 }
@@ -196,6 +220,10 @@ export async function validatePullRequest(
 
   const touched = files.filter((file) => isConfigPath(file.filename) && file.status !== "removed");
 
+  // A deletion-only pull request still skips validation entirely. Accepted gap:
+  // the coupling rule is not evaluated when the change removes a settings file.
+  // A deletion cannot leave a repository dress-coded, and the runtime falls
+  // back to defaults (dress-code off) on the next event.
   if (touched.length === 0) return undefined;
 
   const verdicts: FileVerdict[] = [];
@@ -219,6 +247,32 @@ export async function validatePullRequest(
   }
 
   if (verdicts.length === 0) return undefined;
+
+  // Resolve the cascade at the pull-request head: the local layer is the
+  // proposed content, while the baseline layer stays pinned to the default
+  // branch of the baseline repository (the resolver's semantics). A pull request
+  // in the baseline repository therefore never sees its own PR-time dress-code
+  // flip; ADR 0015 records that limitation.
+  const { config } = await deps.resolver.resolve(
+    deps.octokit as ContentsClient,
+    owner,
+    repo,
+    deps.log,
+    headSha,
+  );
+
+  // Accepted gap: when the cascade fails to parse, the resolver falls back to
+  // defaults (dress-code disabled), so the coupling check is skipped. The
+  // schema errors are already reported by the per-document verdicts above.
+  const issues = couplingIssues(config);
+  if (issues.length > 0) {
+    verdicts.push({
+      path: RESOLVED_CONFIGURATION_PATH,
+      ok: false,
+      kind: "coupling",
+      issues,
+    });
+  }
 
   const result = summarise(verdicts);
 
