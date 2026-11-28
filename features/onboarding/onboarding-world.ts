@@ -31,7 +31,7 @@ import {
 } from "../settings-sync/octokit-fakes.js";
 import { gatekeeperDeps } from "../gatekeeper/gatekeeper-world.js";
 import { fakeResolver } from "../settings-sync/resolver-fakes.js";
-import { fakeLogger } from "../support/scenario.js";
+import { fakeLogger, paginatePages } from "../support/scenario.js";
 
 /* -------------------------------------------------------------------------
  * The onboarding walk world (scenarios 1-12)
@@ -158,19 +158,12 @@ function paginateStub() {
     async (
       route: (params: Record<string, unknown>) => Promise<{ data: unknown }>,
       params: Record<string, unknown> = {},
-    ) => {
-      const perPage = typeof params.per_page === "number" ? params.per_page : 30;
-      const items: unknown[] = [];
-      for (let page = 1; ; page += 1) {
-        const { data } = await route({ ...params, page });
-        const batch = Array.isArray(data)
-          ? data
-          : ((data as { repositories?: unknown[] }).repositories ?? []);
-        items.push(...batch);
-        if (batch.length < perPage) break;
-      }
-      return items;
-    },
+    ) =>
+      paginatePages(route, params, {
+        defaultPerPage: 30,
+        unwrap: (data) =>
+          Array.isArray(data) ? data : ((data as { repositories?: unknown[] }).repositories ?? []),
+      }),
   );
 }
 

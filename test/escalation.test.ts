@@ -1,16 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import { escalationPass, shouldHandToOwners } from "../src/approval/escalation.js";
-import {
-  handToOwners,
-  holdsRequest,
-  resetAppLoginCache as resetRoutingAppLoginCache,
-} from "../src/approval/routing.js";
-import {
-  resetAppLoginCache as resetApprovalAppLoginCache,
-  serve,
-} from "../src/approval/silverPlatter.js";
+import { handToOwners, holdsRequest } from "../src/approval/routing.js";
+import { serve } from "../src/approval/silverPlatter.js";
 import { autoApprovalSchema, woodhouseConfigSchema } from "../src/config/schema.js";
+import { resetAppLoginCache } from "../src/github/app-login.js";
 
 const SELF = "woodhouse[bot]";
 const RENOVATE = "renovate[bot]";
@@ -114,7 +108,7 @@ interface FakeOptions {
 type Deps = Parameters<typeof serve>[0];
 
 /** A live, eligible, open bot pull request headed by SHA. */
-function harness(options: FakeOptions = {}) {
+function harness(options: FakeOptions) {
   const files = options.files ?? [{ filename: "src/index.ts", status: "modified" }];
   const autoMerge = options.autoMerge === undefined ? ENABLED_BY_SELF : options.autoMerge;
 
@@ -199,13 +193,12 @@ function run(
 }
 
 beforeEach(() => {
-  resetRoutingAppLoginCache();
-  resetApprovalAppLoginCache();
+  resetAppLoginCache();
 });
 
 describe("serve — recovery reconcile", () => {
   it("approves a recovered commit and withdraws the owners, clearing the tracked set", async () => {
-    const h = harness();
+    const h = harness({});
     const routed = new Map<string, readonly string[]>([["acme/widgets#7", [OWNER]]]);
 
     const approved = await run(h, routed);
@@ -222,7 +215,7 @@ describe("serve — recovery reconcile", () => {
   });
 
   it("clears a Woodhouse-only tracked set without a reviewer write", async () => {
-    const h = harness();
+    const h = harness({});
     const routed = new Map<string, readonly string[]>([["acme/widgets#7", [SELF]]]);
 
     const approved = await run(h, routed);
@@ -233,7 +226,7 @@ describe("serve — recovery reconcile", () => {
   });
 
   it("leaves the tracked set alone when the owners' withdrawal fails", async () => {
-    const h = harness();
+    const h = harness({});
     const routed = new Map<string, readonly string[]>([["acme/widgets#7", [OWNER]]]);
     h.removeRequestedReviewers.mockRejectedValueOnce(new Error("boom"));
 
@@ -286,7 +279,7 @@ describe("serve — refusal escalation", () => {
 
 describe("handToOwners — replacement dedupe", () => {
   it("does not write when the owners already hold the tracked set", async () => {
-    const h = harness();
+    const h = harness({});
     const routed = new Map<string, readonly string[]>([["acme/widgets#7", [OWNER]]]);
 
     await handToOwners(
@@ -310,7 +303,7 @@ describe("handToOwners — replacement dedupe", () => {
 
 describe("escalationPass — disabled auto-approval", () => {
   it("touches no octokit API at all", async () => {
-    const h = harness();
+    const h = harness({});
     const disabled = autoApprovalSchema.parse({
       enabled: false,
       allowedActors: { bots: [RENOVATE] },

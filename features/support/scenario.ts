@@ -32,28 +32,67 @@ export function requireBuilt<T>(value: T | undefined, message: string): T {
   return value;
 }
 
+export interface PaginatePagesOptions {
+  /** Page size when the caller did not set `per_page`; defaults to 100. */
+  readonly defaultPerPage?: number;
+  /** Pull the page rows out of the response's `data`; defaults to `data` as an array. */
+  readonly unwrap?: (data: unknown) => unknown[];
+}
+
 /**
  * Mirrors octokit's pagination: call the route once per page until a short page.
- * The `per_page` fallback of 100 is the fakes' historical behaviour, not the
- * REST API default (30): these scenarios list well under 100 rows, so one page
- * is always short and the loop stops after a single call.
+ * `unwrap` selects the array inside an object response (e.g. `check_runs`). The
+ * `per_page` fallback of 100 is the fakes' historical behaviour, not the REST
+ * API default (30): these scenarios list well under 100 rows, so one page is
+ * always short and the loop stops after a single call.
  */
+export async function paginatePages(
+  route: (params: Record<string, unknown>) => Promise<{ data: unknown }>,
+  params: Record<string, unknown>,
+  options: PaginatePagesOptions,
+): Promise<unknown[]> {
+  const perPage =
+    typeof params.per_page === "number" ? params.per_page : (options.defaultPerPage ?? 100);
+  const unwrap = options.unwrap ?? ((data: unknown) => (Array.isArray(data) ? data : []));
+  const rows: unknown[] = [];
+  for (let page = 1; ; page += 1) {
+    const { data } = await route({ ...params, page });
+    const batch = unwrap(data);
+    rows.push(...batch);
+    if (batch.length < perPage) break;
+  }
+  return rows;
+}
+
+/** The fakes' array-response pagination, kept for the suites that only list arrays. */
 export function paginateFake() {
   return vi.fn(
-    async (
+    (
       route: (params: Record<string, unknown>) => Promise<{ data: unknown[] }>,
       params: Record<string, unknown>,
-    ) => {
-      const perPage = (params.per_page as number | undefined) ?? 100;
-      const out: unknown[] = [];
-      for (let page = 1; ; page += 1) {
-        const { data } = await route({ ...params, page });
-        out.push(...data);
-        if (data.length < perPage) break;
-      }
-      return out;
-    },
+    ) => paginatePages(route, params, {}),
   );
+}
+
+/** The scenario-level hook functions `describeFeature` hands a steps file. */
+export interface ScenarioClockHooks {
+  readonly BeforeEachScenario: (callback: () => void) => void;
+  readonly AfterEachScenario: (callback: () => void) => void;
+}
+
+/**
+ * Bracket every scenario with the fake clock. vitest-cucumber runs one test per
+ * step, so a per-test hook would discard the clock between the step that
+ * schedules work and the step that advances it; these hooks install it once
+ * per scenario and restore real timers afterwards.
+ */
+export function installScenarioFakeClock(hooks: ScenarioClockHooks): void {
+  hooks.BeforeEachScenario(() => {
+    vi.useFakeTimers();
+  });
+  hooks.AfterEachScenario(() => {
+    vi.useRealTimers();
+  });
 }
 
 type LogSpy = ReturnType<typeof vi.fn>;

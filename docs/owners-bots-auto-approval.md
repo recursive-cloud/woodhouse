@@ -79,7 +79,7 @@ the app:
 
 The result is folded into the request facts and the bot gate in `decide()`
 applies. Owners skip this entirely. `PullRequestFacts` gains the `action` so
-`serve()` knows when to apply the delay.
+routing's `routeReviewers()` knows when to apply the delay.
 
 ### Review body
 

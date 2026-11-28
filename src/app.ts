@@ -24,7 +24,7 @@ import { commentSettingsApplied } from "./settings/mergeFeedback.js";
 import { validatePullRequest } from "./settings/validate.js";
 import { approvalPass, serve } from "./approval/silverPlatter.js";
 import { escalationPass } from "./approval/escalation.js";
-import { forget, serve as routeReviewers } from "./approval/routing.js";
+import { forgetRoutedReviewers, routeReviewers } from "./approval/routing.js";
 import { handleOnboarding } from "./onboarding/handler.js";
 import { Scheduler } from "./lib/scheduler.js";
 import { KeyedMutex } from "./lib/mutex.js";
@@ -394,7 +394,7 @@ export function createApp(options: AppOptions) {
       if (scope.repo === undefined) return;
       const repo = scope.repo;
       await routingMutex.run(`${scope.owner}/${repo}`, async () => {
-        forget(
+        forgetRoutedReviewers(
           { log: scope.log, routed: routedReviewers },
           scope.owner,
           repo,
