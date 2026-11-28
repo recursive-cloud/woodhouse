@@ -17,20 +17,21 @@ file does not repeat them.
 
 ## Post-1.0
 
-- [ ] **`woodhouse/dress-code` — enforce conventional-commit PR titles.**
+- [x] **`woodhouse/dress-code` — enforce conventional-commit PR titles.**
       Woodhouse-native, because a ruleset `commit_message_pattern` rule is
       not a PR-title gate: it evaluates commits on the head branch at merge
       time, blocks squash merges on intermediate commits, and rulesets do
-      not exist on private Free repositories anyway. Title-only first pass —
-      a named check validating the PR title against the conventional-commit
-      pattern, re-checked on `pull_request.edited` (title edits; nothing
-      listens for that event today). Only meaningful when the squash commit
-      title is the PR title, so dress-code enabled requires the repository
-      merge settings coupled accordingly — squash merges with
-      `squash_merge_commit_title: PR_TITLE`, rebase and merge-commit
-      disabled, enforced by config validation — until a v2 all-commits mode
-      supports rebase shops. GitHub's merge-time `(#N)` suffix never reaches
-      the check (titles are validated pre-merge).
+      not exist on private Free repositories anyway. The title-only first
+      pass shipped in this pull request (REC-50): a named check validating
+      the PR title against the conventional-commit pattern, re-run on
+      `pull_request.edited` (title edits) and `pull_request.synchronize`.
+      Only meaningful when the squash commit title is the PR title, so
+      dress-code enabled requires the repository merge settings coupled
+      accordingly — squash merges with `squash_merge_commit_title: PR_TITLE`,
+      rebase and merge-commit disabled, enforced by config validation. The
+      v2 all-commits mode for rebase shops stays deferred. GitHub's
+      merge-time `(#N)` suffix never reaches the check (titles are
+      validated pre-merge). See ADR 0015.
 
 - [x] **Repository environments.** Environments and their protection rules
       as a settings area. Slots into the apply pipeline cleanly: ruleset
@@ -142,6 +143,20 @@ changes.
   handed the review to the owners — last writer wins. CI re-runs on the
   event, and its failure re-escalates, so the window closes on the next check
   completion.
+
+- **A pull request in the baseline repository never sees its own PR-time
+  `dressCode` flip.** The resolver pins the baseline layer to the default
+  branch, the same posture as ADR 0009's baseline handling; the flip reaches
+  the other repositories at their next event.
+
+- **Deleting a config file skips configuration validation entirely.** The
+  existing "Deletion is not validated" rule means coupling is not re-checked
+  on deletion, and a deletion cannot leave a repository dress-coded.
+
+- **An unparseable cascade skips the dress-code coupling check.** Resolution
+  falls back to defaults (dress-code disabled), so coupling is not
+  evaluated; the schema errors still report through the per-document
+  verdicts.
 
 ## Deferred / revisit
 
