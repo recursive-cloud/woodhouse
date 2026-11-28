@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deepMerge } from "../src/config/merge.js";
-import { parseConfig } from "../src/config/schema.js";
+import { defaultConfig, parseConfig } from "../src/config/schema.js";
 
 describe("deepMerge", () => {
   it("leaves the base untouched when the override is undefined", () => {
@@ -32,6 +32,24 @@ describe("config schema", () => {
     expect(result.config.settings.enabled).toBe(true);
     expect(result.config.gatekeeper.strictChecks).toEqual([]);
     expect(result.config.autoApproval.protectedPaths).toContain(".github/woodhouse.yml");
+  });
+
+  it("defaults dressCode.enabled to false", () => {
+    const result = parseConfig({});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.dressCode.enabled).toBe(false);
+  });
+
+  it("defaultConfig().dressCode.enabled is false", () => {
+    expect(defaultConfig().dressCode.enabled).toBe(false);
+  });
+
+  it("rejects an unknown key inside dressCode", () => {
+    const result = parseConfig({ dressCode: { enable: true } });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.some((issue) => issue.path.startsWith("dressCode"))).toBe(true);
   });
 
   it("rejects unknown keys so typos are not silently ignored", () => {

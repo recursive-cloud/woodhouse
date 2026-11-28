@@ -552,6 +552,19 @@
       "additionalProperties": false,
       "description": "The `woodhouse/white-glove` consolidated check this schema configures."
     },
+    "dressCode": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Create the `woodhouse/dress-code` check on every pull request's head commit, validating the title against the conventional-commit pattern. Enabling requires the repository merge settings coupled accordingly (squash merges carrying the PR title, rebase and merge-commit merges disallowed), enforced by pull-request configuration validation.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The `woodhouse/dress-code` PR-title check this schema configures."
+    },
     "autoApproval": {
       "default": {},
       "type": "object",
