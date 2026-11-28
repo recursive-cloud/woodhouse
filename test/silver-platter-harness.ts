@@ -4,11 +4,15 @@
  * The test file owns every assertion; this module only builds the pull
  * requests and the fake client they are served through. It is not a vitest
  * entry: vitest includes only `*.test.ts` files under `test/` as entries.
+ *
+ * Each fake route is a module-level factory over the plain data it reads, so
+ * the harness itself only assembles them.
  */
 
 import { vi } from "vitest";
 import type { Logger } from "pino";
 import { serve } from "../src/approval/silverPlatter.js";
+import { paginateFake } from "../features/support/scenario.js";
 
 type Deps = Parameters<typeof serve>[0];
 
@@ -76,33 +80,39 @@ export interface HarnessOptions {
   /** Changed-file pages; defaults to one unremarkable page. */
   readonly filePages?: ReturnType<typeof pageOf>[];
   /** Existing reviews, for the idempotency case. */
-  readonly reviews?: unknown[];
+  readonly reviews?: readonly unknown[];
   /** When set, every live GET rejects with this error. */
   readonly getError?: Error;
   /** When set, the commit→PR listing rejects with this error. */
   readonly listError?: Error;
 }
 
-export function harness(options: HarnessOptions) {
-  const associated = options.associated ?? [pull({})];
-  const filePages = options.filePages ?? [pageOf(3)];
-
+/** The live fixture per PR number: an explicit override, else the listing entry. */
+function liveByNumber(
+  associated: readonly FakePullRequest[],
+  overrides: HarnessOptions["live"],
+): Map<number, FakePullRequest | Error> {
   const live = new Map<number, FakePullRequest | Error>();
   for (const entry of associated) {
-    live.set(entry.number, options.live?.[entry.number] ?? entry);
+    live.set(entry.number, overrides?.[entry.number] ?? entry);
   }
+  return live;
+}
 
-  const getAuthenticated = vi.fn(async () => ({ data: { slug: "woodhouse" } }));
-
-  const listAssociated = vi.fn(async (params: { page?: number }) => {
-    if (options.listError !== undefined) throw options.listError;
-    return { data: (params.page ?? 1) === 1 ? associated.map(apiPull) : [] };
+/** The commit→PR listing: page one carries every fixture, later pages are empty. */
+function makeListAssociated(associated: readonly FakePullRequest[], listError?: Error) {
+  return vi.fn(async (params: { page?: number }) => {
+    if (listError !== undefined) throw listError;
+    const page = params.page ?? 1;
+    return { data: page === 1 ? associated.map(apiPull) : [] };
   });
+}
 
-  // The live pull request GET: the only source of the author, draft, state,
-  // head and auto-merge facts.
-  const get = vi.fn(async (params: { pull_number: number }) => {
-    if (options.getError !== undefined) throw options.getError;
+// The live pull request GET: the only source of the author, draft, state,
+// head and auto-merge facts.
+function makeGet(live: ReadonlyMap<number, FakePullRequest | Error>, getError?: Error) {
+  return vi.fn(async (params: { pull_number: number }) => {
+    if (getError !== undefined) throw getError;
     const entry = live.get(params.pull_number);
     if (entry === undefined) {
       throw new Error(`No live pull request fixture for #${params.pull_number}`);
@@ -110,30 +120,39 @@ export function harness(options: HarnessOptions) {
     if (entry instanceof Error) throw entry;
     return { data: apiPull(entry) };
   });
+}
 
-  const listFiles = vi.fn(async (params: { page?: number }) => ({
+function makeListFiles(filePages: ReturnType<typeof pageOf>[]) {
+  return vi.fn(async (params: { page?: number }) => ({
     data: filePages[(params.page ?? 1) - 1] ?? [],
   }));
+}
 
-  const listReviews = vi.fn(async () => ({ data: options.reviews ?? ([] as unknown[]) }));
+function makeListReviews(reviews: readonly unknown[] | undefined) {
+  return vi.fn(async () => ({ data: reviews ?? [] }));
+}
 
-  const createReview = vi.fn(async () => ({ data: {} }));
+function makeCreateReview() {
+  return vi.fn(async () => ({ data: {} }));
+}
 
-  // Mirrors octokit.paginate: call the route per page until a short page.
-  const paginate = vi.fn(
-    async (
-      route: (params: Record<string, unknown>) => Promise<{ data: unknown[] }>,
-      params: Record<string, unknown>,
-    ) => {
-      const out: unknown[] = [];
-      for (let page = 1; ; page += 1) {
-        const { data } = await route({ ...params, page });
-        out.push(...data);
-        if (data.length < ((params.per_page as number | undefined) ?? 100)) break;
-      }
-      return out;
-    },
-  );
+function makeGetAuthenticated() {
+  return vi.fn(async () => ({ data: { slug: "woodhouse" } }));
+}
+
+export function harness(options: HarnessOptions) {
+  const associated = options.associated ?? [pull({})];
+  const filePages = options.filePages ?? [pageOf(3)];
+  const live = liveByNumber(associated, options.live);
+
+  const listAssociated = makeListAssociated(associated, options.listError);
+  const get = makeGet(live, options.getError);
+  const listFiles = makeListFiles(filePages);
+  const listReviews = makeListReviews(options.reviews);
+  const createReview = makeCreateReview();
+  const getAuthenticated = makeGetAuthenticated();
+  // Mirrors octokit.paginate; shared with the Gherkin fakes.
+  const paginate = paginateFake();
 
   const octokit = {
     pulls: { listFiles, listReviews, createReview, get },
