@@ -415,6 +415,7 @@ export function createApp(options: AppOptions) {
         await validatePullRequest(
           {
             octokit: context.octokit,
+            resolver,
             log: scope.log,
             dryRun: options.dryRun,
           },
