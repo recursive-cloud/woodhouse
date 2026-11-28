@@ -87,9 +87,21 @@ export function makeDressCodeWorld(options: DressCodeWorldOptions) {
     }),
   );
 
+  // Mirrors `octokit.paginate` over the associated-pull-request listing.
+  const paginate = vi.fn(async (target: unknown, params?: Record<string, unknown>) => {
+    if (target !== listPullRequestsAssociatedWithCommit) {
+      throw new Error(`Unexpected paginate target: ${String(target)}`);
+    }
+    const response = await listPullRequestsAssociatedWithCommit(
+      params as { owner: string; repo: string; commit_sha: string },
+    );
+    return response.data;
+  });
+
   const octokit = {
     checks: { create, update, listForRef },
     repos: { listPullRequestsAssociatedWithCommit },
+    paginate,
   } as unknown as DressCodeDeps["octokit"];
 
   const config = woodhouseConfigSchema.parse({ dressCode: { enabled: options.enabled } });
@@ -156,6 +168,7 @@ export function makeDressCodeWorld(options: DressCodeWorldOptions) {
     update,
     listForRef,
     listPullRequestsAssociatedWithCommit,
+    paginate,
     setTitle,
     queueRun,
     runsFor,

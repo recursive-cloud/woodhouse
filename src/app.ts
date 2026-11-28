@@ -432,7 +432,7 @@ export function createApp(options: AppOptions) {
     // `findLatestRun`/`resolveCheckWrite`, so every event converges on one run
     // per head commit.
     guarded.on(
-      ["pull_request.opened", "pull_request.synchronize"],
+      ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
       "dress-code",
       async (context, scope) => {
         if (scope.repo === undefined) return;
@@ -466,19 +466,35 @@ export function createApp(options: AppOptions) {
       );
     });
 
-    // Manual re-run from the Checks tab. Only our own check is handled; other
-    // check runs are none of dress-code's business.
-    guarded.on("check_run.rerequested", "dress-code", async (context, scope) => {
-      if (scope.repo === undefined) return;
-      if (context.payload.check_run.name !== DRESS_CODE_CHECK_NAME) return;
+    // Manual re-run from the Checks tab or "Re-run all checks". GitHub sends
+    // only `check_suite.rerequested` for a whole-suite re-run, and that payload
+    // names no single check, so it is always handled: the suite re-queued our
+    // run and `reRequestDressCodeCheck` completes it (or explains why it stays
+    // neutral). A `check_run.rerequested` names one run, so other checks are
+    // none of dress-code's business.
+    guarded.on(
+      ["check_run.rerequested", "check_suite.rerequested"],
+      "dress-code",
+      async (context, scope) => {
+        if (scope.repo === undefined) return;
 
-      await reRequestDressCodeCheck(
-        { octokit: context.octokit, ...deps(scope.log) },
-        scope.owner,
-        scope.repo,
-        context.payload.check_run.head_sha,
-      );
-    });
+        const payload = context.payload;
+        const sha =
+          "check_run" in payload
+            ? payload.check_run.name === DRESS_CODE_CHECK_NAME
+              ? payload.check_run.head_sha
+              : undefined
+            : payload.check_suite.head_sha;
+        if (sha === undefined) return;
+
+        await reRequestDressCodeCheck(
+          { octokit: context.octokit, ...deps(scope.log) },
+          scope.owner,
+          scope.repo,
+          sha,
+        );
+      },
+    );
 
     // ------------------------------------------------------------- onboarding
     // Registered for the two action-scoped events design D1 names: a fresh

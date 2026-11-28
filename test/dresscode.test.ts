@@ -99,15 +99,23 @@ function build(options: BuildOptions = {}) {
     },
   }));
 
-  const listPullRequestsAssociatedWithCommit = vi.fn(
-    async (_params: { owner: string; repo: string; commit_sha: string }) => ({
-      data: pullRequests,
-    }),
-  );
+  const listPullRequestsAssociatedWithCommit = vi.fn(async (_params: Record<string, unknown>) => ({
+    data: pullRequests,
+  }));
+
+  // Mirrors `octokit.paginate` over the associated-pull-request listing.
+  const paginate = vi.fn(async (target: unknown, params?: Record<string, unknown>) => {
+    if (target !== listPullRequestsAssociatedWithCommit) {
+      throw new Error(`Unexpected paginate target: ${String(target)}`);
+    }
+    const response = await listPullRequestsAssociatedWithCommit(params ?? {});
+    return response.data;
+  });
 
   const octokit = {
     checks: { create, update, listForRef },
     repos: { listPullRequestsAssociatedWithCommit },
+    paginate,
   } as unknown as DressCodeDeps["octokit"];
 
   const log = {
@@ -140,6 +148,7 @@ function build(options: BuildOptions = {}) {
     update,
     listForRef,
     listPullRequestsAssociatedWithCommit,
+    paginate,
   };
 }
 
@@ -349,6 +358,27 @@ describe("reRequestDressCodeCheck", () => {
         conclusion: "success",
       }),
     );
+  });
+
+  it("reads every page of associated pull requests through the paginator", async () => {
+    const { deps, create, paginate, listPullRequestsAssociatedWithCommit } = build({
+      pullRequests: [
+        {
+          number: 12,
+          state: "open",
+          title: "feat: add an environments section",
+          head: { sha: SHA },
+        },
+      ],
+    });
+
+    await reRequestDressCodeCheck(deps, OWNER, REPO, SHA);
+
+    expect(paginate).toHaveBeenCalledWith(
+      listPullRequestsAssociatedWithCommit,
+      expect.objectContaining({ commit_sha: SHA, per_page: 100 }),
+    );
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ conclusion: "success" }));
   });
 
   it("ignores pull requests whose head is not the requested commit", async () => {

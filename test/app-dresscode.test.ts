@@ -9,7 +9,7 @@ import { fakeProbot } from "../features/settings-sync/probot-fakes.js";
 import { fakeLogger } from "../features/support/scenario.js";
 
 /**
- * App-level coverage for the three dress-code listeners `createApp` registers.
+ * App-level coverage for the dress-code listeners `createApp` registers.
  *
  * The registration test follows the silver-platter pattern: spy on
  * `GuardedApp.prototype.on` and assert the event/name pairs. The behaviour
@@ -79,26 +79,69 @@ function scopeFor(event: string): EventScope {
   };
 }
 
+interface FakeRun {
+  readonly id: number;
+  readonly head_sha: string;
+  readonly name: string;
+  readonly status: string;
+  readonly conclusion: string | null;
+}
+
+interface FakePull {
+  readonly number: number;
+  readonly state: string;
+  readonly title: string;
+  readonly head: { readonly sha: string };
+}
+
+interface OctokitOptions {
+  readonly runs?: readonly FakeRun[];
+  readonly pullRequests?: readonly FakePull[];
+}
+
 /** The Checks and Contents surfaces dress-code reaches, over the shared config fake. */
-function buildOctokit() {
+function buildOctokit(options: OctokitOptions = {}) {
   const base = makeOctokit({ configFiles: CONFIG_FILES });
 
   const create = vi.fn(async (_params: Record<string, unknown>) => ({ data: {} }));
   const update = vi.fn(async (_params: Record<string, unknown>) => ({ data: {} }));
   const listForRef = vi.fn(async (_params: Record<string, unknown>) => ({
-    data: { check_runs: [] },
+    data: { check_runs: [...(options.runs ?? [])] },
   }));
   const listPullRequestsAssociatedWithCommit = vi.fn(async (_params: Record<string, unknown>) => ({
-    data: [],
+    data: [...(options.pullRequests ?? [])],
   }));
+
+  // Mirrors `octokit.paginate` over the associated-pull-request listing.
+  const paginate = vi.fn(
+    async (
+      target: unknown,
+      params?: Record<string, unknown>,
+      map?: (response: { data: unknown }) => unknown,
+    ) => {
+      if (target !== listPullRequestsAssociatedWithCommit) {
+        throw new Error("unexpected paginate target");
+      }
+      const response = await listPullRequestsAssociatedWithCommit(params ?? {});
+      return map === undefined ? response.data : map(response);
+    },
+  );
 
   const octokit = {
     ...base.octokit,
     checks: { create, update, listForRef },
     repos: { ...base.octokit.repos, listPullRequestsAssociatedWithCommit },
+    paginate,
   } as unknown as Context<"pull_request">["octokit"];
 
-  return { octokit, create, update, listForRef, listPullRequestsAssociatedWithCommit };
+  return {
+    octokit,
+    create,
+    update,
+    listForRef,
+    listPullRequestsAssociatedWithCommit,
+    paginate,
+  };
 }
 
 interface PullRequestContextOptions {
@@ -155,8 +198,45 @@ function rerequestContext(octokit: Context<"pull_request">["octokit"], checkName
   };
 }
 
+function suiteRerequestContext(octokit: Context<"pull_request">["octokit"]) {
+  return {
+    name: "check_suite",
+    id: "delivery-dress-code",
+    log: fakeLogger(),
+    octokit,
+    payload: {
+      action: "rerequested",
+      // A suite payload names no single check; GitHub re-queued our run in it.
+      check_suite: { id: 501, head_sha: SHA },
+      repository: {
+        name: REPO,
+        default_branch: "main",
+        owner: { login: OWNER },
+      },
+    },
+  };
+}
+
+/** A dress-code run GitHub re-queued when the checks were re-requested. */
+function queuedRun(): FakeRun {
+  return {
+    id: 77,
+    head_sha: SHA,
+    name: DRESS_CODE_CHECK_NAME,
+    status: "queued",
+    conclusion: null,
+  };
+}
+
+const ASSOCIATED_PULL: FakePull = {
+  number: 12,
+  state: "open",
+  title: "feat: add an environments section",
+  head: { sha: SHA },
+};
+
 describe("createApp — dress-code listener coverage", () => {
-  it("registers all four dress-code events under the guarded name", () => {
+  it("registers all six dress-code events under the guarded name", () => {
     const registrations = captureRegistrations();
 
     const registered = new Set(
@@ -168,9 +248,11 @@ describe("createApp — dress-code listener coverage", () => {
     expect(registered).toEqual(
       new Set([
         "pull_request.opened",
+        "pull_request.reopened",
         "pull_request.synchronize",
         "pull_request.edited",
         "check_run.rerequested",
+        "check_suite.rerequested",
       ]),
     );
   });
@@ -220,6 +302,31 @@ describe("dress-code handler — pull_request.edited", () => {
   });
 });
 
+describe("dress-code handler — pull_request.synchronize", () => {
+  it("writes the check for the synchronize payload's head commit", async () => {
+    const handler = dressCodeHandler(captureRegistrations(), "pull_request.synchronize");
+    const { octokit, create, update } = buildOctokit();
+
+    await handler(
+      pullRequestContext(octokit, {
+        action: "synchronize",
+        title: "feat: add an environments section",
+      }),
+      scopeFor("pull_request"),
+    );
+
+    expect(update).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: DRESS_CODE_CHECK_NAME,
+        head_sha: SHA,
+        conclusion: "success",
+      }),
+    );
+  });
+});
+
 describe("dress-code handler — check_run.rerequested", () => {
   it("ignores a re-request for a run with a foreign name", async () => {
     const handler = dressCodeHandler(captureRegistrations(), "check_run.rerequested");
@@ -232,5 +339,61 @@ describe("dress-code handler — check_run.rerequested", () => {
     expect(update).not.toHaveBeenCalled();
     expect(listForRef).not.toHaveBeenCalled();
     expect(listPullRequestsAssociatedWithCommit).not.toHaveBeenCalled();
+  });
+
+  it("completes our own queued run using the associated pull request's title", async () => {
+    const handler = dressCodeHandler(captureRegistrations(), "check_run.rerequested");
+    const { octokit, create, update } = buildOctokit({
+      runs: [queuedRun()],
+      pullRequests: [ASSOCIATED_PULL],
+    });
+
+    await handler(rerequestContext(octokit, DRESS_CODE_CHECK_NAME), scopeFor("check_run"));
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: DRESS_CODE_CHECK_NAME,
+        check_run_id: 77,
+        status: "completed",
+        conclusion: "success",
+      }),
+    );
+  });
+});
+
+describe("dress-code handler — check_suite.rerequested", () => {
+  it("completes a queued run using the associated pull request's title", async () => {
+    const handler = dressCodeHandler(captureRegistrations(), "check_suite.rerequested");
+    const { octokit, create, update } = buildOctokit({
+      runs: [queuedRun()],
+      pullRequests: [ASSOCIATED_PULL],
+    });
+
+    await handler(suiteRerequestContext(octokit), scopeFor("check_suite"));
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: DRESS_CODE_CHECK_NAME,
+        check_run_id: 77,
+        status: "completed",
+        conclusion: "success",
+      }),
+    );
+  });
+
+  it("completes neutral when the suite's commit heads no pull request", async () => {
+    const handler = dressCodeHandler(captureRegistrations(), "check_suite.rerequested");
+    const { octokit, create, update } = buildOctokit({ runs: [queuedRun()] });
+
+    await handler(suiteRerequestContext(octokit), scopeFor("check_suite"));
+
+    expect(create).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ check_run_id: 77, conclusion: "neutral" }),
+    );
   });
 });

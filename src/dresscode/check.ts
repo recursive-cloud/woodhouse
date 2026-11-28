@@ -180,8 +180,10 @@ async function writeDecision(
  * and then the lowest PR number.
  *
  * A re-requested check carries no pull-request payload, so the associated-PR
- * listing is the only way back to the title. Returns undefined when no
- * pull request's head is the commit we were asked about.
+ * listing is the only way back to the title. The listing is paginated so a
+ * commit with many associated pull requests cannot hide the open one on a later
+ * page. Returns undefined when no pull request's head is the commit we were
+ * asked about.
  */
 async function titleForCommit(
   octokit: AnyOctokit,
@@ -189,13 +191,14 @@ async function titleForCommit(
   repo: string,
   sha: string,
 ): Promise<string | undefined> {
-  const { data } = await octokit.repos.listPullRequestsAssociatedWithCommit({
+  const pulls = await octokit.paginate(octokit.repos.listPullRequestsAssociatedWithCommit, {
     owner,
     repo,
     commit_sha: sha,
+    per_page: 100,
   });
 
-  const matching = data.filter((pull) => pull.head.sha === sha);
+  const matching = pulls.filter((pull) => pull.head.sha === sha);
   if (matching.length === 0) return undefined;
 
   const open = matching.filter((pull) => pull.state === "open");
