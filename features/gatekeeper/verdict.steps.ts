@@ -145,7 +145,7 @@ function requireEvaluation(evaluation: Evaluation | undefined): Evaluation {
   return evaluation;
 }
 
-describeFeature(feature, ({ ScenarioOutline }) => {
+describeFeature(feature, ({ Scenario, ScenarioOutline }) => {
   ScenarioOutline(
     `A check's conclusion decides the consolidated verdict`,
     ({ Given, When, Then }, variables) => {
@@ -255,6 +255,69 @@ describeFeature(feature, ({ ScenarioOutline }) => {
         expect(requireEvaluation(evaluation).outcome).toBe(
           parseOutcome(readCell(variables, "outcome")),
         );
+      });
+    },
+  );
+
+  ScenarioOutline(
+    `A strict dress-code check composes by the normal verdict rules`,
+    ({ Given, And, When, Then }, variables) => {
+      let strictChecks: string[] = [];
+      let checks: CheckRunLike[] | undefined;
+      let evaluation: Evaluation | undefined;
+
+      Given(`gatekeeper.strictChecks lists "woodhouse/dress-code"`, () => {
+        strictChecks = ["woodhouse/dress-code"];
+      });
+      And(`the head commit carries the checks <checks>`, () => {
+        checks = parseChecks(readCell(variables, "checks"));
+      });
+      When(`the white-glove verdict is evaluated`, () => {
+        evaluation = evaluate(requireChecks(checks), buildConfig(strictChecks));
+      });
+      Then(`the consolidated verdict <outcome>`, () => {
+        expect(requireEvaluation(evaluation).outcome).toBe(
+          parseOutcome(readCell(variables, "outcome")),
+        );
+      });
+    },
+  );
+
+  Scenario(
+    `A dress-code check not listed as strict does not hold the verdict when absent`,
+    ({ Given, When, Then }) => {
+      let checks: CheckRunLike[] | undefined;
+      let evaluation: Evaluation | undefined;
+
+      Given(`the head commit carries the checks only "build" passing`, () => {
+        checks = parseChecks(`only "build" passing`);
+      });
+      When(`the white-glove verdict is evaluated`, () => {
+        evaluation = evaluate(requireChecks(checks), buildConfig());
+      });
+      Then(`the consolidated verdict passes`, () => {
+        expect(requireEvaluation(evaluation).outcome).toBe(parseOutcome("passes"));
+      });
+    },
+  );
+
+  Scenario(
+    `A failing dress-code check fails the verdict without being strict`,
+    ({ Given, When, Then }) => {
+      let checks: CheckRunLike[] | undefined;
+      let evaluation: Evaluation | undefined;
+
+      Given(
+        `the head commit carries the checks "woodhouse/dress-code" failing and "build" passing`,
+        () => {
+          checks = parseChecks(`"woodhouse/dress-code" failing and "build" passing`);
+        },
+      );
+      When(`the white-glove verdict is evaluated`, () => {
+        evaluation = evaluate(requireChecks(checks), buildConfig());
+      });
+      Then(`the consolidated verdict reports failure`, () => {
+        expect(requireEvaluation(evaluation).outcome).toBe(parseOutcome("reports failure"));
       });
     },
   );
