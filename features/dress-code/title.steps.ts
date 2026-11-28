@@ -22,7 +22,7 @@ function unquoteTitle(cell: string): string {
   throw new Error(`Expected a quoted title cell, got ${JSON.stringify(cell)}`);
 }
 
-function requireSummary(world: DressCodeWorld, sha: string): string {
+function requireRunSummary(world: DressCodeWorld, sha: string): string {
   const summary = world.latestRun(sha).output?.summary;
   if (summary === undefined) {
     throw new Error(`The dress-code run on ${sha} has no output summary.`);
@@ -76,7 +76,7 @@ describeFeature(feature, ({ Scenario, ScenarioOutline }) => {
         expectCompleted(requireWorld(world), HEAD_SHA, "failure");
       });
       And(`the check output names the expected pattern and the offending title`, () => {
-        const summary = requireSummary(requireWorld(world), HEAD_SHA);
+        const summary = requireRunSummary(requireWorld(world), HEAD_SHA);
         expect(summary).toContain(titlePatternDescription());
         expect(summary).toContain(JSON.stringify(title));
       });

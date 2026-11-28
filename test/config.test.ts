@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deepMerge } from "../src/config/merge.js";
 import { defaultConfig, parseConfig } from "../src/config/schema.js";
+import { dressCodeSchema } from "../src/config/schema-dress-code.js";
 
 describe("deepMerge", () => {
   it("leaves the base untouched when the override is undefined", () => {
@@ -20,6 +21,20 @@ describe("deepMerge", () => {
     );
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(result.polluted).toBeUndefined();
+  });
+});
+
+describe("dressCodeSchema", () => {
+  it("defaults enabled to false before parsing", () => {
+    expect(dressCodeSchema.parse({})).toEqual({ enabled: false });
+  });
+
+  it("passes an explicit enabled value through", () => {
+    expect(dressCodeSchema.parse({ enabled: true })).toEqual({ enabled: true });
+  });
+
+  it("rejects an unknown key", () => {
+    expect(() => dressCodeSchema.parse({ enabled: true, unknown: 1 })).toThrow();
   });
 });
 

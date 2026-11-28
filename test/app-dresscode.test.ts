@@ -100,16 +100,16 @@ interface OctokitOptions {
 }
 
 /** The Checks and Contents surfaces dress-code reaches, over the shared config fake. */
-function buildOctokit(options: OctokitOptions = {}) {
+function buildOctokit(options?: OctokitOptions) {
   const base = makeOctokit({ configFiles: CONFIG_FILES });
 
   const create = vi.fn(async (_params: Record<string, unknown>) => ({ data: {} }));
   const update = vi.fn(async (_params: Record<string, unknown>) => ({ data: {} }));
   const listForRef = vi.fn(async (_params: Record<string, unknown>) => ({
-    data: { check_runs: [...(options.runs ?? [])] },
+    data: { check_runs: [...(options?.runs ?? [])] },
   }));
   const listPullRequestsAssociatedWithCommit = vi.fn(async (_params: Record<string, unknown>) => ({
-    data: [...(options.pullRequests ?? [])],
+    data: [...(options?.pullRequests ?? [])],
   }));
 
   // Mirrors `octokit.paginate` over the associated-pull-request listing.

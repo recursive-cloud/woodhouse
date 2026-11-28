@@ -46,12 +46,14 @@ export function isConfigPath(path: string): boolean {
   return isSettingsPath(path);
 }
 
+export type VerdictKind = "yaml" | "schema" | "coupling";
+
 export type FileVerdict =
   | { readonly path: string; readonly ok: true }
   | {
       readonly path: string;
       readonly ok: false;
-      readonly kind: "yaml" | "schema" | "coupling";
+      readonly kind: VerdictKind;
       readonly issues: readonly ValidationIssue[];
     };
 
@@ -130,15 +132,18 @@ export function summarise(verdicts: readonly FileVerdict[]): {
   };
 }
 
-function kindHeading(kind: "yaml" | "schema" | "coupling"): string {
-  switch (kind) {
-    case "yaml":
-      return "Not valid YAML:";
-    case "schema":
-      return "Schema errors:";
-    case "coupling":
-      return "Merge settings required by dress-code:";
-  }
+/**
+ * Heading shown above each verdict's issues. The union type makes the lookup
+ * exhaustive: a new verdict kind fails to compile until its heading is added.
+ */
+const KIND_HEADING: Record<VerdictKind, string> = {
+  yaml: "Not valid YAML:",
+  schema: "Schema errors:",
+  coupling: "Merge settings required by dress-code:",
+};
+
+function kindHeading(kind: VerdictKind): string {
+  return KIND_HEADING[kind];
 }
 
 /**
