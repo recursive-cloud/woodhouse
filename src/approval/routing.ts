@@ -439,10 +439,10 @@ export async function withdrawTrackedReviewers(
   };
 
   if (options.mutex !== undefined) {
-    return options.mutex.run(`${owner}/${repo}`, withdraw);
+    return await options.mutex.run(`${owner}/${repo}`, withdraw);
   }
 
-  return withdraw();
+  return await withdraw();
 }
 
 /**

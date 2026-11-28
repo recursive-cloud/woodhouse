@@ -13,16 +13,17 @@ function fakeLogger(): Logger {
 }
 
 /** A pull request as the live GET returns it. */
+const BASE_LIVE_PULL = {
+  number: 7,
+  state: "open",
+  draft: false,
+  user: { login: RENOVATE },
+  head: { sha: SHA },
+  auto_merge: null,
+};
+
 function livePull(overrides: Record<string, unknown>) {
-  return {
-    number: 7,
-    state: "open",
-    draft: false,
-    user: { login: RENOVATE },
-    head: { sha: SHA },
-    auto_merge: null,
-    ...overrides,
-  };
+  return { ...BASE_LIVE_PULL, ...overrides };
 }
 
 function fakeDeps(data: unknown = livePull({})) {
