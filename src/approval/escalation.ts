@@ -13,22 +13,20 @@
  * passes and Woodhouse approves, it withdraws the owners.
  */
 
-import type { Context } from "probot";
-import type { Logger } from "pino";
 import type { ConfigResolver } from "../config/resolver.js";
 import type { AutoApprovalConfig } from "../config/schema.js";
-import { getPullRequest, listOpenPullRequestsForCommit } from "../github/pulls.js";
+import { appLogin } from "../github/app-login.js";
+import { listOpenPullRequestsForCommit } from "../github/pulls.js";
 import type { KeyedMutex } from "../lib/mutex.js";
+import { commitPass, type CommitPass } from "./commitPass.js";
+import { evaluateLivePull } from "./livePull.js";
 import { classifyActor, normalizeLogin, type ActorClass } from "./policy.js";
 import {
-  appLogin,
   handToOwners,
   holdsRequest,
   type RoutingDeps,
   type SharedRoutingState,
 } from "./routing.js";
-
-type Api = Context<"pull_request">["octokit"];
 
 export interface EscalationFacts {
   readonly author: string;
@@ -56,9 +54,9 @@ export function shouldHandToOwners(facts: EscalationFacts): boolean {
 
 /**
  * Evaluate one open pull request headed by a failed commit and hand it to the
- * owners when it needs the hand-off. The live pull request is re-fetched for
- * the same reason as the approval pass: a head that moved or a pull request
- * that closed must never be escalated. A rejected GET propagates to the caller.
+ * owners when it needs the hand-off. `evaluateLivePull` provides the same
+ * moved-head and closed guards as the approval pass. A rejected GET propagates
+ * to the caller.
  *
  * Check events read settled state, so there is deliberately no auto-merge
  * grace sleep here — the same posture as ADR 0014's commit-level approval.
@@ -76,21 +74,10 @@ async function escalatePullRequest(
   self: string,
   mutex?: KeyedMutex,
 ): Promise<void> {
-  const pull = await getPullRequest(deps.octokit, owner, repo, number);
+  const evaluated = await evaluateLivePull(deps, owner, repo, number, sha);
+  if (evaluated === undefined) return;
 
-  if (pull.state !== "open" || pull.head.sha !== sha) {
-    deps.log.debug(
-      { pr: number, state: pull.state, head: pull.head.sha, sha },
-      "Pull request no longer matches the failed commit; skipping escalation",
-    );
-    return;
-  }
-
-  const author = pull.user?.login;
-  if (author === undefined) {
-    deps.log.debug({ pr: number }, "Not escalating: pull request has no author login");
-    return;
-  }
+  const { pull, author } = evaluated;
 
   const actorClass = classifyActor(author, config);
   const autoMergeEnabledBy = pull.auto_merge?.enabled_by?.login ?? null;
@@ -147,19 +134,18 @@ export function escalationPass(
   resolver: ConfigResolver,
   dryRun: boolean,
   routing: SharedRoutingState,
-): (octokit: Api, log: Logger) => (owner: string, repo: string, sha: string) => Promise<void> {
-  return (octokit, log) => async (owner, repo, sha) => {
-    const { config } = await resolver.resolve(octokit as never, owner, repo, log);
-    const deps: RoutingDeps = { octokit, log, dryRun, routed: routing.routed };
+): CommitPass {
+  return commitPass(resolver, async (deps, owner, repo, sha, config) => {
+    const routingDeps: RoutingDeps = { ...deps, dryRun, routed: routing.routed };
 
     // With auto-approval disabled routing never requests the app, so nothing
     // can be held; skip without resolving the login.
-    const self = config.autoApproval.enabled ? await appLogin(octokit) : undefined;
+    const self = config.enabled ? await appLogin(deps.octokit) : undefined;
     if (self === undefined) {
-      log.debug({ sha }, "Auto-approval disabled by configuration; skipping escalation");
+      deps.log.debug({ sha }, "Auto-approval disabled by configuration; skipping escalation");
       return;
     }
 
-    await escalateFailedCommit(deps, owner, repo, sha, config.autoApproval, self, routing.mutex);
-  };
+    await escalateFailedCommit(routingDeps, owner, repo, sha, config, self, routing.mutex);
+  });
 }

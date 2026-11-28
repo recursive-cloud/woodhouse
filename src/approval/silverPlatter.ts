@@ -11,11 +11,10 @@ import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { ConfigResolver } from "../config/resolver.js";
 import type { AutoApprovalConfig } from "../config/schema.js";
-import {
-  getPullRequest,
-  listChangedFiles,
-  listOpenPullRequestsForCommit,
-} from "../github/pulls.js";
+import { appLogin } from "../github/app-login.js";
+import { listChangedFiles, listOpenPullRequestsForCommit } from "../github/pulls.js";
+import { commitPass, type CommitPass } from "./commitPass.js";
+import { evaluateLivePull } from "./livePull.js";
 import { classifyActor, decide, normalizeLogin } from "./policy.js";
 import {
   handToOwners,
@@ -33,30 +32,6 @@ type Api = Context<"pull_request">["octokit"];
  * refused rather than approved on incomplete information.
  */
 const MAX_FILE_PAGES = 10;
-
-/**
- * The app's own login, e.g. `woodhouse[bot]`. Resolved once per process: it
- * cannot change while we are running, and `GET /app` is a wasted request on
- * every pull request otherwise.
- */
-let cachedAppLogin: Promise<string> | undefined;
-
-export function resetAppLoginCache(): void {
-  cachedAppLogin = undefined;
-}
-
-async function appLogin(octokit: Api): Promise<string> {
-  cachedAppLogin ??= octokit.apps
-    .getAuthenticated()
-    .then((response) => `${(response.data as { slug: string }).slug}[bot]`)
-    .catch((error: unknown) => {
-      // Do not cache a failure; a transient error should not disable approvals
-      // for the lifetime of the process.
-      cachedAppLogin = undefined;
-      throw error;
-    });
-  return cachedAppLogin;
-}
 
 async function hasExistingApproval(
   octokit: Api,
@@ -110,9 +85,8 @@ function routingDeps(deps: SilverPlatterDeps, routing: SharedRoutingState): Rout
  * Evaluate one open pull request headed by the commit. Returns true only when
  * a review was actually submitted.
  *
- * The live pull request is re-fetched: the listing and this evaluation can be
- * seconds apart, and a head SHA that has moved or a pull request that has
- * closed must never be approved. A failed GET is not caught here — the
+ * The live pull request comes from `evaluateLivePull`, so a head that moved or
+ * a pull request that closed is skipped. A failed GET is not caught here — the
  * rejection reaches `serve`, which logs it and moves on, so a fetch error
  * cannot read as a refusal.
  */
@@ -124,21 +98,10 @@ async function approvePullRequest(
   number: number,
   config: AutoApprovalConfig,
 ): Promise<boolean> {
-  const pull = await getPullRequest(deps.octokit, owner, repo, number);
+  const evaluated = await evaluateLivePull(deps, owner, repo, number, sha);
+  if (evaluated === undefined) return false;
 
-  if (pull.state !== "open" || pull.head.sha !== sha) {
-    deps.log.debug(
-      { pr: number, state: pull.state, head: pull.head.sha, sha },
-      "Pull request no longer matches the evaluated commit; skipping",
-    );
-    return false;
-  }
-
-  const author = pull.user?.login;
-  if (author === undefined) {
-    deps.log.info({ pr: number }, "Not auto-approving: pull request has no author login");
-    return false;
-  }
+  const { pull, author } = evaluated;
 
   const actorClass = classifyActor(author, config);
 
@@ -354,9 +317,8 @@ export function approvalPass(
   resolver: ConfigResolver,
   dryRun: boolean,
   routing?: SharedRoutingState,
-): (octokit: Api, log: Logger) => (owner: string, repo: string, sha: string) => Promise<void> {
-  return (octokit, log) => async (owner, repo, sha) => {
-    const { config } = await resolver.resolve(octokit as never, owner, repo, log);
-    await serve({ octokit, log, dryRun, routing }, owner, repo, sha, config.autoApproval);
-  };
+): CommitPass {
+  return commitPass(resolver, async (deps, owner, repo, sha, config) => {
+    await serve({ ...deps, dryRun, routing }, owner, repo, sha, config);
+  });
 }

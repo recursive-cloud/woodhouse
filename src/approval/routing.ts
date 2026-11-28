@@ -22,10 +22,11 @@
 import type { Context } from "probot";
 import type { Logger } from "pino";
 import type { AutoApprovalConfig } from "../config/schema.js";
+import { appLogin } from "../github/app-login.js";
 import { getPullRequest } from "../github/pulls.js";
 import { performWrite } from "../lib/dry-run.js";
 import type { KeyedMutex } from "../lib/mutex.js";
-import { classifyActor } from "./policy.js";
+import { classifyActor, normalizeLogin } from "./policy.js";
 
 type Api = Context<"pull_request">["octokit"];
 
@@ -43,30 +44,6 @@ const AUTO_MERGE_GRACE_MS = 2_000;
 /** Promise-based delay so the grace can be awaited inline in the same pass. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * The app's own login, e.g. `woodhouse[bot]`. Resolved once per process: it
- * cannot change while we are running, and `GET /app` is a wasted request on
- * every pull request otherwise.
- */
-let cachedAppLogin: Promise<string> | undefined;
-
-export function resetAppLoginCache(): void {
-  cachedAppLogin = undefined;
-}
-
-export async function appLogin(octokit: Api): Promise<string> {
-  cachedAppLogin ??= octokit.apps
-    .getAuthenticated()
-    .then((response) => `${(response.data as { slug: string }).slug}[bot]`)
-    .catch((error: unknown) => {
-      // Do not cache a failure; a transient error should not disable routing
-      // for the lifetime of the process.
-      cachedAppLogin = undefined;
-      throw error;
-    });
-  return cachedAppLogin;
 }
 
 /**
@@ -108,9 +85,6 @@ export interface RoutingDecision {
   readonly reviewers: readonly string[];
   readonly reason: string;
 }
-
-/** GitHub logins compare case-insensitively; normalise both sides of every check. */
-const normalizeLogin = (login: string): string => login.trim().toLowerCase();
 
 /**
  * Route to every configured owner except the App's own login, or to nobody

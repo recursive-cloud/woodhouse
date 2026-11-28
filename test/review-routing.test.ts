@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import {
   forget,
-  resetAppLoginCache,
   route,
   serve,
   type RoutingDeps,
   type RoutingRequest,
 } from "../src/approval/routing.js";
 import { autoApprovalSchema, type AutoApprovalConfig } from "../src/config/schema.js";
+import { resetAppLoginCache } from "../src/github/app-login.js";
 
 const SELF = "woodhouse[bot]";
 const RENOVATE = "renovate[bot]";
@@ -146,7 +146,7 @@ function fakeLogger(): Logger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Logger;
 }
 
-function ioHarness(options: IoHarnessOptions = {}) {
+function ioHarness(options: IoHarnessOptions) {
   const get = vi.fn(async () => ({ data: { auto_merge: options.autoMerge ?? null } }));
   const requestReviewers = vi.fn(async () => ({ data: {} }));
   const removeRequestedReviewers = vi.fn(async () => ({ data: {} }));
@@ -176,7 +176,7 @@ beforeEach(() => {
 
 describe("serve — dry-run", () => {
   it("performs no reviewer writes and remembers nothing", async () => {
-    const h = ioHarness();
+    const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
     await serve(
@@ -196,7 +196,7 @@ describe("serve — dry-run", () => {
 
 describe("serve — live writes", () => {
   it("requests the routed reviewer and records the set", async () => {
-    const h = ioHarness();
+    const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
     await serve(
@@ -221,7 +221,7 @@ describe("serve — live writes", () => {
   });
 
   it("does not fetch the auto-merge fact for a neither-list author", async () => {
-    const h = ioHarness();
+    const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
     await serve(
@@ -240,7 +240,7 @@ describe("serve — live writes", () => {
 
   it("withdraws the previous reviewer and requests the replacement", async () => {
     let autoMerge: { enabled_by: { login: string } } | null = null;
-    const h = ioHarness();
+    const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
     const deps = { octokit: h.octokit, log: h.log, dryRun: false, routed };
 
@@ -272,7 +272,7 @@ describe("serve — live writes", () => {
   });
 
   it("routes an owner's reopened pull request once and does not re-request on a second pass", async () => {
-    const h = ioHarness();
+    const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
     const deps = { octokit: h.octokit, log: h.log, dryRun: false, routed };
     const reopened = { ...ownerPr, action: "reopened" };
@@ -293,7 +293,7 @@ describe("serve — live writes", () => {
 
 describe("forget", () => {
   it("drops the tracked set for a closed pull request", () => {
-    const h = ioHarness();
+    const h = ioHarness({});
     const routed = new Map<string, readonly string[]>([["acme/widgets#7", [SELF]]]);
 
     forget({ log: h.log, routed }, "acme", "widgets", 7);
@@ -303,7 +303,7 @@ describe("forget", () => {
   });
 
   it("leaves an untracked pull request alone", () => {
-    const h = ioHarness();
+    const h = ioHarness({});
     const routed = new Map<string, readonly string[]>();
 
     forget({ log: h.log, routed }, "acme", "widgets", 7);

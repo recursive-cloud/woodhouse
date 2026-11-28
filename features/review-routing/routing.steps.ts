@@ -1,6 +1,10 @@
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
-import { resetAppLoginCache } from "../../src/approval/routing.js";
-import { resetAppLoginCache as resetApprovalAppLoginCache } from "../../src/approval/silverPlatter.js";
+import { resetAppLoginCache } from "../../src/github/app-login.js";
+import {
+  givenOwnerMyUser,
+  givenRenovateBot,
+  givenRenovateListed,
+} from "../support/approval-givens.js";
 import {
   DEPENDABOT,
   ENABLED_BY_SELF,
@@ -22,19 +26,16 @@ import {
 const feature = await loadFeature("features/review-routing/routing.feature");
 
 describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
-  // Both modules cache the App login per process; every scenario owns a fresh
-  // fake octokit, so neither cache may leak into the next one.
+  // The App login is cached per process; every scenario owns a fresh fake
+  // octokit, so the cache may not leak into the next one.
   BeforeEachScenario(() => {
     resetAppLoginCache();
-    resetApprovalAppLoginCache();
   });
 
   Scenario(`Owner pull request routes Woodhouse as reviewer`, ({ Given, When, Then }) => {
     const w = world();
 
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
+    givenOwnerMyUser({ Given }, w);
     When(`"my-user" opens a pull request`, async () => {
       await routeOnce(w, { author: "my-user", action: "opened" });
     });
@@ -48,10 +49,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
     ({ Given, When, Then, And }) => {
       const w = world();
 
-      Given(`auto-approval lists the Renovate bot as a bot`, () => {
-        w.config = parseConfig({ bots: [RENOVATE] });
-      });
-      And(`the bot enabled auto-merge itself`, () => {
+      givenRenovateBot({ Given, And }, w, () => {
         w.autoMerge = ENABLED_BY_SELF;
       });
       When(`the bot opens a pull request`, async () => {
@@ -68,9 +66,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
     ({ Given, When, Then, And }) => {
       const w = world();
 
-      Given(`auto-approval lists the Renovate bot as a bot`, () => {
-        w.config = parseConfig({ bots: [RENOVATE] });
-      });
+      givenRenovateListed({ Given }, w);
       And(`auto-approval lists "my-user" as an owner`, () => {
         w.config = withOwner(requireConfig(w), "my-user");
       });
@@ -91,9 +87,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
     ({ Given, When, Then, And }) => {
       const w = world();
 
-      Given(`auto-approval lists the Renovate bot as a bot`, () => {
-        w.config = parseConfig({ bots: [RENOVATE] });
-      });
+      givenRenovateListed({ Given }, w);
       And(`auto-approval lists "my-user" as an owner`, () => {
         w.config = withOwner(requireConfig(w), "my-user");
       });
@@ -109,9 +103,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
   Scenario(`Draft pull request gets no reviewer`, ({ Given, When, Then }) => {
     const w = world();
 
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
+    givenOwnerMyUser({ Given }, w);
     When(`"my-user" opens a draft pull request`, async () => {
       // The opened payload reports the pull request as a draft.
       await routeOnce(w, { author: "my-user", action: "opened", draft: true });
@@ -124,9 +116,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
   Scenario(`Draft becoming ready is routed`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
+    givenOwnerMyUser({ Given }, w);
     And(`"my-user" opened a draft pull request`, async () => {
       await routeOnce(w, { author: "my-user", action: "opened", draft: true });
     });
@@ -142,9 +132,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
   Scenario(`Late auto-merge toggle re-routes to Woodhouse`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
+    givenRenovateListed({ Given }, w);
     And(`auto-approval lists "my-user" as an owner`, () => {
       w.config = withOwner(requireConfig(w), "my-user");
     });
@@ -169,9 +157,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
   Scenario(`Re-routing withdraws the previous reviewer`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
+    givenRenovateListed({ Given }, w);
     And(`auto-approval lists "my-user" as an owner`, () => {
       w.config = withOwner(requireConfig(w), "my-user");
     });
@@ -199,10 +185,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
   Scenario(`Failing checks pull the owner in`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
-    And(`the bot enabled auto-merge itself`, () => {
+    givenRenovateBot({ Given, And }, w, () => {
       w.autoMerge = ENABLED_BY_SELF;
     });
     And(`auto-approval lists "my-user" as an owner`, () => {
@@ -252,9 +235,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
     ({ Given, When, Then }) => {
       const w = world();
 
-      Given(`auto-approval lists "my-user" as an owner`, () => {
-        w.config = parseConfig({ owners: ["my-user"] });
-      });
+      givenOwnerMyUser({ Given }, w);
       When(`"my-user" opens a pull request and its checks fail`, async () => {
         await routeOnce(w, { author: "my-user", action: "opened" });
         await checkRunFails(w);
@@ -290,10 +271,7 @@ describeFeature(feature, ({ BeforeEachScenario, Scenario }) => {
     ({ Given, When, Then, And }) => {
       const w = world();
 
-      Given(`auto-approval lists the Renovate bot as a bot`, () => {
-        w.config = parseConfig({ bots: [RENOVATE] });
-      });
-      And(`the bot enabled auto-merge itself`, () => {
+      givenRenovateBot({ Given, And }, w, () => {
         w.autoMerge = ENABLED_BY_SELF;
       });
       And(`auto-approval lists "my-user" as an owner`, () => {

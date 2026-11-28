@@ -1,4 +1,4 @@
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { classifyActor, decide } from "../../src/approval/policy.js";
 import type { ApprovalRequest } from "../../src/approval/policy.js";
@@ -18,7 +18,12 @@ import {
   world,
   type Harness,
 } from "./auto-approval-world.js";
-import { readCell } from "../support/scenario.js";
+import {
+  givenOwnerMyUser,
+  givenRenovateBot,
+  givenRenovateListed,
+} from "../support/approval-givens.js";
+import { installScenarioFakeClock, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/auto-approval/auto-approval.feature");
 
@@ -49,15 +54,10 @@ function submittedBody(h: Harness | undefined): string {
 }
 
 describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, AfterEachScenario }) => {
-  // vitest-cucumber runs one vitest test per step, so a per-test hook would
-  // discard the fake clock between the step that schedules the grace re-check
-  // and the step that fires it. These hooks bracket a whole scenario instead.
-  BeforeEachScenario(() => {
-    vi.useFakeTimers();
-  });
-  AfterEachScenario(() => {
-    vi.useRealTimers();
-  });
+  // The fake clock must bracket a whole scenario: a per-step hook would
+  // discard it between the step that schedules the grace re-check and the step
+  // that fires it.
+  installScenarioFakeClock({ BeforeEachScenario, AfterEachScenario });
 
   ScenarioOutline(`Owner-listed author`, ({ Given, When, Then, And }, variables) => {
     let config: AutoApprovalConfig | undefined;
@@ -144,9 +144,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
   Scenario(`Approval waits for the checks to pass`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
+    givenOwnerMyUser({ Given }, w);
     When(`"my-user" opens a pull request while its checks fail`, async () => {
       w.fixture.checks = "failing";
       await openPullRequest(w, "my-user");
@@ -166,10 +164,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
   Scenario(`Bot approval also waits for the checks to pass`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
-    And(`the bot enabled auto-merge itself`, () => {
+    givenRenovateBot({ Given, And }, w, () => {
       w.fixture.author = RENOVATE;
       w.fixture.autoMerge = ENABLED_BY_SELF;
     });
@@ -194,9 +189,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
     ({ Given, When, Then, And }) => {
       const w = world();
 
-      Given(`auto-approval lists "my-user" as an owner`, () => {
-        w.config = parseConfig({ owners: ["my-user"] });
-      });
+      givenOwnerMyUser({ Given }, w);
       And(`the repository has no checks`, () => {
         w.fixture.checks = "none";
       });
@@ -217,9 +210,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
     ({ Given, When, Then, And }, variables) => {
       const w = world();
 
-      Given(`auto-approval lists the Renovate bot as a bot`, () => {
-        w.config = parseConfig({ bots: [RENOVATE] });
-      });
+      givenRenovateListed({ Given }, w);
       And(`<refusal>`, () => {
         // Every refusal phrase describes a fact about the bot's pull request.
         w.fixture.author = RENOVATE;
@@ -255,9 +246,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
     ({ Given, When, Then, And }) => {
       const w = world();
 
-      Given(`auto-approval lists "my-user" as an owner`, () => {
-        w.config = parseConfig({ owners: ["my-user"] });
-      });
+      givenOwnerMyUser({ Given }, w);
       And(`Woodhouse approved an earlier commit of the pull request`, () => {
         w.fixture.reviews = [
           { state: "APPROVED", user: { login: "woodhouse[bot]" }, commit_id: "111111" },
@@ -283,9 +272,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
     ({ Given, When, Then, And }) => {
       const w = world();
 
-      Given(`auto-approval lists "my-user" as an owner`, () => {
-        w.config = parseConfig({ owners: ["my-user"] });
-      });
+      givenOwnerMyUser({ Given }, w);
       And(`the checks have passed on the draft's head commit`, () => {
         w.fixture.author = "my-user";
         w.fixture.draft = true;
@@ -303,9 +290,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
   Scenario(`No duplicate at the same commit`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
+    givenOwnerMyUser({ Given }, w);
     And(`Woodhouse already approved the head commit`, () => {
       w.fixture.author = "my-user";
       w.fixture.reviews = [
@@ -323,9 +308,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
   Scenario(`Late toggle is fail-safe`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
+    givenRenovateListed({ Given }, w);
     When(`the bot opens a pull request and enables auto-merge shortly after`, async () => {
       w.fixture.checks = "failing";
       await openPullRequest(w, RENOVATE);
@@ -347,10 +330,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
   Scenario(`Bot approval names its author`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists the Renovate bot as a bot`, () => {
-      w.config = parseConfig({ bots: [RENOVATE] });
-    });
-    And(`the bot enabled auto-merge itself`, () => {
+    givenRenovateBot({ Given, And }, w, () => {
       w.fixture.author = RENOVATE;
       w.fixture.autoMerge = ENABLED_BY_SELF;
     });
@@ -370,9 +350,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, After
   Scenario(`Dry-run approval`, ({ Given, When, Then, And }) => {
     const w = world();
 
-    Given(`auto-approval lists "my-user" as an owner`, () => {
-      w.config = parseConfig({ owners: ["my-user"] });
-    });
+    givenOwnerMyUser({ Given }, w);
     And(`dry-run mode is on`, () => {
       w.dryRun = true;
     });

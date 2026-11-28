@@ -9,7 +9,7 @@ import {
   type GatekeeperHarness,
   type RawCheckRun,
 } from "./gatekeeper-world.js";
-import { readCell } from "../support/scenario.js";
+import { installScenarioFakeClock, readCell } from "../support/scenario.js";
 
 const feature = await loadFeature("features/gatekeeper/grace.feature");
 
@@ -93,16 +93,9 @@ async function runFirstPass(harness: GatekeeperHarness, scheduler: Scheduler): P
 }
 
 describeFeature(feature, ({ ScenarioOutline, Scenario, BeforeEachScenario, AfterEachScenario }) => {
-  // vitest-cucumber runs one vitest test per step, so a per-test hook would
-  // discard the fake clock between the step that schedules and the step that
-  // advances it. These hooks bracket a whole scenario instead: the clock is
-  // installed once and the scheduled timer survives into the step that fires it.
-  BeforeEachScenario(() => {
-    vi.useFakeTimers();
-  });
-  AfterEachScenario(() => {
-    vi.useRealTimers();
-  });
+  // The fake clock must bracket a whole scenario: the clock is installed once
+  // and the scheduled timer survives into the step that fires it.
+  installScenarioFakeClock({ BeforeEachScenario, AfterEachScenario });
   ScenarioOutline(
     `Inside the grace window the check holds pending and schedules a re-check`,
     ({ Given, When, Then, And }, variables) => {

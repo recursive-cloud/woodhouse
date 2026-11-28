@@ -13,108 +13,43 @@
  */
 
 import { expect, vi } from "vitest";
-import { handleCheckRunCompleted, seedAndSchedule } from "../../src/app.js";
+import { seedAndSchedule } from "../../src/app.js";
 import type { GraceDeps } from "../../src/app.js";
 import { approvalPass } from "../../src/approval/silverPlatter.js";
-import { autoApprovalSchema, woodhouseConfigSchema } from "../../src/config/schema.js";
+import { woodhouseConfigSchema } from "../../src/config/schema.js";
 import type { AutoApprovalConfig } from "../../src/config/schema.js";
 import type { ReconcileDeps } from "../../src/gatekeeper/handler.js";
 import { Scheduler } from "../../src/lib/scheduler.js";
-import type { RawCheckRun } from "../gatekeeper/gatekeeper-world.js";
+import {
+  ENABLED_BY_SELF,
+  HEAD,
+  OWNER,
+  PR_NUMBER,
+  REPO,
+  RENOVATE,
+  UNREMARKABLE_FILES,
+  approvalOctokit,
+  approvalPaginate,
+  associatedStub,
+  checksStubs,
+  livePullData,
+  parseConfig,
+  pullRequestStubs,
+  requireConfig,
+  runHeadChecks,
+  withAllowedBot,
+  type AutoMerge,
+  type PullRequestFacts,
+  type ReviewParams,
+} from "../support/approval-fixtures.js";
 import { fakeLogger, requireBuilt } from "../support/scenario.js";
 
-/** The head commit every scenario works on; re-approval assertions pin it. */
-export const HEAD = "abc123";
-
-export const RENOVATE = "renovate[bot]";
-
-/** The bot enabled auto-merge on its own pull request. */
-export const ENABLED_BY_SELF: AutoMerge = { enabled_by: { login: RENOVATE } };
-
-const OWNER = "acme";
-const REPO = "widgets";
-const PR_NUMBER = 7;
-/** The check run whose completion drives the reconcile. Never the white-glove one. */
-const CHILD_CHECK = "ci/test";
-
-/** Unremarkable changed files: none may match the default protected paths. */
-const UNREMARKABLE_FILES: FilePage = [
-  { filename: "src/index.ts", status: "modified" },
-  { filename: "README.md", status: "modified" },
-];
-
-export interface AutoMerge {
-  readonly enabled_by: { readonly login: string };
-}
-
-interface FilePageEntry {
-  readonly filename: string;
-  readonly status: string;
-}
-export type FilePage = readonly FilePageEntry[];
-
-/** The state of the head commit's checks; the white-glove run itself is never stored. */
-export type RunsState = "failing" | "passed" | "none";
-
-const RUNS: Record<RunsState, readonly RawCheckRun[]> = {
-  failing: [
-    {
-      name: CHILD_CHECK,
-      id: 200,
-      status: "completed",
-      conclusion: "failure",
-      started_at: "2026-01-01T00:00:00Z",
-    },
-  ],
-  passed: [
-    {
-      name: CHILD_CHECK,
-      id: 201,
-      status: "completed",
-      conclusion: "success",
-      started_at: "2026-01-02T00:00:00Z",
-    },
-  ],
-  none: [],
-};
+export { ENABLED_BY_SELF, HEAD, RENOVATE, parseConfig, requireConfig, withAllowedBot };
+export type { AutoMerge };
 
 /** The live pull request the approval pass re-reads on every evaluation. */
-export interface PullRequestFixture {
-  readonly number: number;
-  author: string;
-  draft: boolean;
-  readonly state: string;
-  readonly headSha: string;
+export interface PullRequestFixture extends PullRequestFacts {
   autoMerge: AutoMerge | null;
-  reviews: readonly unknown[];
-  /** The per-page changed-file listing; one unremarkable page by default. */
-  filePages: readonly FilePage[];
-  checks: RunsState;
-}
-
-interface ReviewParams {
-  readonly owner: string;
-  readonly repo: string;
-  readonly pull_number: number;
-  readonly event: string;
-  readonly commit_id: string;
-  readonly body: string;
-}
-
-/** Parse the auto-approval config the feature describes, so defaults apply as in production. */
-export function parseConfig(allowedActors: {
-  owners?: string[];
-  bots?: string[];
-}): AutoApprovalConfig {
-  return autoApprovalSchema.parse({ allowedActors });
-}
-
-/** Re-parse the config with one more allowed bot, so defaults still apply. */
-export function withAllowedBot(config: AutoApprovalConfig, bot: string): AutoApprovalConfig {
-  return autoApprovalSchema.parse({
-    ...config,
-    allowedActors: { ...config.allowedActors, bots: [bot] },
-  });
 }
 
 interface HarnessOptions {
@@ -133,80 +68,42 @@ interface HarnessOptions {
  * writes).
  */
 export function buildAutoApprovalHarness(fixture: PullRequestFixture, options: HarnessOptions) {
+  const { autoApproval, dryRun = false } = options;
   const config = woodhouseConfigSchema.parse({
     gatekeeper: { enabled: true },
-    autoApproval: options.autoApproval,
+    autoApproval,
   });
   const resolver = {
     resolve: vi.fn(async () => ({ config, sources: [], issues: [] })),
   } as unknown as ReconcileDeps["resolver"];
 
-  const listForRef = vi.fn(async () => ({ data: { check_runs: RUNS[fixture.checks] } }));
-  const create = vi.fn(async () => ({ data: {} }));
-  const update = vi.fn(async () => ({ data: {} }));
-
-  const listFiles = vi.fn(async (params: { page?: number } = {}) => ({
-    data: fixture.filePages[(params.page ?? 1) - 1] ?? [],
-  }));
-  const listReviews = vi.fn(async () => ({ data: fixture.reviews }));
+  const { listForRef, create, update } = checksStubs(fixture);
 
   // Recorded separately from the mock so a scenario can read the review body
   // without poking at vi.fn internals.
   const submitted: ReviewParams[] = [];
-  const createReview = vi.fn(async (params: ReviewParams) => {
-    submitted.push(params);
-    return { data: {} };
-  });
+  const { listFiles, listReviews, createReview } = pullRequestStubs(fixture, submitted);
 
   // The live pull request GET: the only source of the current auto-merge, draft
   // and author facts, so a scenario can toggle any of them after opening.
-  const get = vi.fn(async () => ({
-    data: {
-      number: fixture.number,
-      user: { login: fixture.author },
-      draft: fixture.draft,
-      state: fixture.state,
-      head: { sha: fixture.headSha },
-      auto_merge: fixture.autoMerge,
-    },
-  }));
+  const get = vi.fn(async () => ({ data: livePullData(fixture, fixture.autoMerge) }));
 
-  const listAssociated = vi.fn(async () => ({
-    data: [{ number: fixture.number, state: fixture.state }],
-  }));
+  const listAssociated = associatedStub(fixture);
 
   const knownRoutes = new Set<unknown>([listForRef, listFiles, listReviews, listAssociated]);
-  const paginate = vi.fn(
-    async (
-      route: (params: Record<string, unknown>) => Promise<{ data: unknown }>,
-      params: Record<string, unknown>,
-    ): Promise<unknown[]> => {
-      // An unrecognised route is a harness gap, not an empty listing.
-      if (!knownRoutes.has(route)) {
-        throw new Error("Unrecognised paginate route in the auto-approval harness");
-      }
-
-      const perPage = (params.per_page as number | undefined) ?? 100;
-      const rows: unknown[] = [];
-      for (let page = 1; ; page += 1) {
-        const { data } = await route({ ...params, page });
-        const batch = Array.isArray(data)
-          ? data
-          : ((data as { check_runs?: unknown[] }).check_runs ?? []);
-        rows.push(...batch);
-        if (batch.length < perPage) break;
-      }
-      return rows;
-    },
+  const paginate = approvalPaginate(
+    knownRoutes,
+    "Unrecognised paginate route in the auto-approval harness",
   );
 
-  const octokit = {
+  const octokit = approvalOctokit({
     paginate,
     pulls: { listFiles, listReviews, get, createReview },
-    repos: { listPullRequestsAssociatedWithCommit: listAssociated },
-    checks: { listForRef, create, update },
-    apps: { getAuthenticated: async () => ({ data: { slug: "woodhouse" } }) },
-  } as unknown as ReconcileDeps["octokit"];
+    listAssociated,
+    listForRef,
+    create,
+    update,
+  });
 
   const log = fakeLogger();
   // The scenarios call the production entry points directly rather than
@@ -217,8 +114,8 @@ export function buildAutoApprovalHarness(fixture: PullRequestFixture, options: H
     octokit,
     resolver,
     log,
-    dryRun: options.dryRun ?? false,
-    onSuccess: approvalPass(resolver, options.dryRun ?? false)(octokit, log),
+    dryRun,
+    onSuccess: approvalPass(resolver, dryRun)(octokit, log),
   };
 
   return {
@@ -272,10 +169,6 @@ export function world(): World {
   };
 }
 
-export function requireConfig(w: World): AutoApprovalConfig {
-  return requireBuilt(w.config, "The auto-approval configuration has not been built yet.");
-}
-
 export function harnessFor(w: World): Harness {
   if (w.harness === undefined) {
     w.harness = buildAutoApprovalHarness(w.fixture, {
@@ -327,18 +220,7 @@ export async function readyForReview(w: World): Promise<void> {
 /** CI finished on the head commit: flip the store, then run the production handler. */
 export async function checksPass(w: World): Promise<void> {
   w.fixture.checks = "passed";
-  const result = await handleCheckRunCompleted(depsFor(w), OWNER, REPO, {
-    name: CHILD_CHECK,
-    head_sha: HEAD,
-  });
-  if (result === undefined) {
-    throw new Error("reconcile returned undefined; the gatekeeper should be enabled.");
-  }
-  if (result.evaluation.outcome !== "success") {
-    throw new Error(
-      `The scenario expects passing checks, but the white-glove verdict was "${result.evaluation.outcome}".`,
-    );
-  }
+  await runHeadChecks(depsFor(w), "success", "passing checks");
 }
 
 /** Fire the scheduled re-check after the grace the first pass reported. */
