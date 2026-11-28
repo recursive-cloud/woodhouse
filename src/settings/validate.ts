@@ -16,7 +16,7 @@ import { SCHEMA_MODELINE } from "../config/json-schema.js";
 import { listChangedFiles } from "../github/pulls.js";
 import { syncMarkerComment } from "../github/comments.js";
 import { performWrite } from "../lib/dry-run.js";
-import type { ConfigResolver } from "../config/resolver.js";
+import type { ConfigResolver, ContentsClient } from "../config/resolver.js";
 import { couplingIssues } from "./coupling.js";
 
 type Api = Context<"pull_request">["octokit"];
@@ -254,7 +254,7 @@ export async function validatePullRequest(
   // in the baseline repository therefore never sees its own PR-time dress-code
   // flip; ADR 0015 records that limitation.
   const { config } = await deps.resolver.resolve(
-    deps.octokit as never,
+    deps.octokit as ContentsClient,
     owner,
     repo,
     deps.log,

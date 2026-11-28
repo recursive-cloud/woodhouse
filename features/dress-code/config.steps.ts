@@ -53,6 +53,10 @@ repository:
   allow_merge_commit: false
 `;
 
+/** The success scenario's settings phrase, shared by its step text and the mapping. */
+const COUPLED_CONTENTS =
+  "with dressCode enabled, squash merges carrying the PR title, and rebase and merge-commit merges disallowed";
+
 /**
  * Map a `<contents>` cell to the settings document it names and the coupling
  * issues that document must produce. The phrases are fixed by the feature; an
@@ -98,7 +102,7 @@ repository:
 `,
         issues: [SQUASH_TITLE],
       };
-    case "with dressCode enabled, squash merges carrying the PR title, and rebase and merge-commit merges disallowed":
+    case COUPLED_CONTENTS:
       return { source: COUPLED_SOURCE, issues: [] };
     default:
       throw new Error(`Unrecognised dress-code settings phrase: ${JSON.stringify(cell)}`);
@@ -197,12 +201,9 @@ describeFeature(feature, ({ Scenario, ScenarioOutline }) => {
     const state = newScenario();
     let capture: Capture | undefined;
 
-    Given(
-      `a pull request changing a settings file with dressCode enabled, squash merges carrying the PR title, and rebase and merge-commit merges disallowed`,
-      () => {
-        change(state, LOCAL_PATH, COUPLED_SOURCE);
-      },
-    );
+    Given(`a pull request changing a settings file ${COUPLED_CONTENTS}`, () => {
+      change(state, LOCAL_PATH, parseCouplingContents(COUPLED_CONTENTS).source);
+    });
     When(`the configuration validation runs`, async () => {
       capture = await runValidation(state);
     });

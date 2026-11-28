@@ -253,4 +253,32 @@ repository:
     expect(getContent).not.toHaveBeenCalled();
     expect(createCheck).not.toHaveBeenCalled();
   });
+
+  it("keeps the invalid-file title while also listing coupling issues", async () => {
+    // The resolver reads `.yml` before `.yaml`, so the `.yaml` document is
+    // validated without contributing to the cascade: a schema-invalid file and
+    // a coupling verdict can therefore coexist in one run.
+    const { deps, createCheck } = makeValidationDeps(
+      {
+        [`widgets:${LOCAL_PATH}`]: `dressCode:
+  enabled: true
+repository:
+  allow_rebase_merge: true
+`,
+        "widgets:.github/woodhouse.yaml": "gatekeeper:\n  enabled: definitely\n",
+      },
+      [LOCAL_PATH, ".github/woodhouse.yaml"],
+    );
+
+    const result = await validatePullRequest(deps, "acme", "widgets", 1, "headsha");
+
+    expect(result).toBe("failure");
+    const params = createCheck.mock.calls[0]?.[0] as CheckRunParams;
+    expect(params.output?.title).toBe("1 configuration file invalid");
+    const summary = checkSummary(createCheck);
+    expect(summary).toContain("`.github/woodhouse.yaml`");
+    expect(summary).toContain("(resolved configuration)");
+    expect(summary).toContain("Merge settings required by dress-code:");
+    expect(summary).toContain("`repository.allow_rebase_merge`");
+  });
 });
