@@ -3,10 +3,13 @@ import { loadFeature, describeFeature } from "@amiceli/vitest-cucumber";
 import { CONFIG_CHECK_NAME, RESOLVED_CONFIGURATION_PATH } from "../../src/settings/validate.js";
 import {
   change,
+  expectConfigSuccess,
   newScenario,
   runValidation,
   setBaseline,
   LOCAL_PATH,
+  OWNER,
+  REPO,
   type Capture,
 } from "../config/validation-world.js";
 import { readCell } from "../support/scenario.js";
@@ -115,7 +118,7 @@ interface CheckRunParams {
   readonly output?: { readonly title?: string; readonly summary?: string };
 }
 
-function requireSummary(capture: Capture | undefined): string {
+function requireValidationSummary(capture: Capture | undefined): string {
   if (capture === undefined) throw new Error("The configuration validation has not run yet.");
   const params = (
     capture.createCheck.mock.calls[0] as unknown as [CheckRunParams] | undefined
@@ -137,7 +140,7 @@ function expectFailure(capture: Capture | undefined, expected: readonly IssueExp
     }),
   );
 
-  const summary = requireSummary(capture);
+  const summary = requireValidationSummary(capture);
   expect(summary).toContain(RESOLVED_CONFIGURATION_PATH);
   for (const issue of expected) {
     expect(summary).toContain(`\`${issue.path}\``);
@@ -189,7 +192,7 @@ describeFeature(feature, ({ Scenario, ScenarioOutline }) => {
 
         // The other three settings still come from the baseline, so the local
         // override must not turn them into extra failures.
-        const summary = requireSummary(capture);
+        const summary = requireValidationSummary(capture);
         expect(summary).not.toContain("`repository.allow_squash_merge`");
         expect(summary).not.toContain("`repository.squash_merge_commit_title`");
         expect(summary).not.toContain("`repository.allow_merge_commit`");
@@ -208,17 +211,8 @@ describeFeature(feature, ({ Scenario, ScenarioOutline }) => {
       capture = await runValidation(state);
     });
     Then(`the "woodhouse/config" check reports success`, () => {
-      if (capture === undefined) throw new Error("The configuration validation has not run yet.");
-      expect(capture.createCheck).toHaveBeenCalledOnce();
-      expect(capture.createCheck).toHaveBeenCalledWith(
-        expect.objectContaining({
-          owner: "acme",
-          repo: "widgets",
-          name: CONFIG_CHECK_NAME,
-          conclusion: "success",
-        }),
-      );
-      expect(requireSummary(capture)).not.toContain("dress-code requires");
+      expectConfigSuccess(capture, { owner: OWNER, repo: REPO });
+      expect(requireValidationSummary(capture)).not.toContain("dress-code requires");
     });
   });
 });

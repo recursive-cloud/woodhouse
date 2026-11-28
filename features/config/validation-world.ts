@@ -9,10 +9,10 @@
  * This module is not a vitest entry: `validation.steps.ts` imports it.
  */
 
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 import type { Logger } from "pino";
 import { ConfigResolver, DEFAULT_BASELINE_REPO } from "../../src/config/resolver.js";
-import { validatePullRequest } from "../../src/settings/validate.js";
+import { CONFIG_CHECK_NAME, validatePullRequest } from "../../src/settings/validate.js";
 import { fakeLogger, paginateFake } from "../support/scenario.js";
 
 type Deps = Parameters<typeof validatePullRequest>[0];
@@ -141,6 +141,29 @@ export async function runValidation(state: ScenarioState): Promise<Capture> {
   const deps: Deps = { octokit: fake.octokit, resolver, log, dryRun: state.dryRun };
   const result = await validatePullRequest(deps, OWNER, REPO, PR_NUMBER, HEAD_SHA);
   return { ...fake, log, result };
+}
+
+/**
+ * Assert the configuration check reported success for the pull request.
+ *
+ * Every acceptance suite that drives `validatePullRequest` shares this
+ * assertion, so the check-run contract is written down once.
+ */
+export function expectConfigSuccess(
+  capture: Capture | undefined,
+  expected: { readonly owner: string; readonly repo: string; readonly headSha?: string },
+): void {
+  if (capture === undefined) throw new Error("The configuration validation has not run yet.");
+  expect(capture.createCheck).toHaveBeenCalledOnce();
+  expect(capture.createCheck).toHaveBeenCalledWith(
+    expect.objectContaining({
+      owner: expected.owner,
+      repo: expected.repo,
+      name: CONFIG_CHECK_NAME,
+      ...(expected.headSha === undefined ? {} : { head_sha: expected.headSha }),
+      conclusion: "success",
+    }),
+  );
 }
 
 interface ContentsExpectation {

@@ -17,6 +17,7 @@ import { findLatestRun, truncate, type ExistingRun } from "../gatekeeper/handler
 import { resolveCheckWrite } from "../gatekeeper/write-decision.js";
 import { performWrite } from "../lib/dry-run.js";
 import { KeyedMutex } from "../lib/mutex.js";
+import type { GuardedApp } from "../security/guard.js";
 import {
   DRESS_CODE_CHECK_NAME,
   DRESS_CODE_DISABLED_REASON,
@@ -291,4 +292,86 @@ export async function reRequestDressCodeCheck(
 
     await writeDecision(deps, owner, repo, sha, decideDressCode(title), existing);
   });
+}
+
+/** The app-level dependencies a dress-code write needs, less the octokit. */
+export type DressCodeAppDeps = Omit<DressCodeDeps, "octokit">;
+
+/** Builds the per-delivery dependencies from the delivery's scoped log. */
+export type DressCodeDepsFactory = (log: Logger) => DressCodeAppDeps;
+
+/**
+ * Register the dress-code listeners.
+ *
+ * Registration goes through `GuardedApp`, so the installation allowlist
+ * remains the first thing every delivery passes.
+ */
+export function registerDressCodeListeners(guarded: GuardedApp, deps: DressCodeDepsFactory): void {
+  // The title check shares the white-glove write mechanics through
+  // `findLatestRun`/`resolveCheckWrite`, so every event converges on one run
+  // per head commit.
+  guarded.on(
+    ["pull_request.opened", "pull_request.reopened", "pull_request.synchronize"],
+    "dress-code",
+    async (context, scope) => {
+      if (scope.repo === undefined) return;
+
+      await runDressCodeCheck(
+        { octokit: context.octokit, ...deps(scope.log) },
+        {
+          owner: scope.owner,
+          repo: scope.repo,
+          sha: context.payload.pull_request.head.sha,
+          title: context.payload.pull_request.title,
+        },
+      );
+    },
+  );
+
+  // A title edit is the only `pull_request.edited` payload that can change the
+  // verdict; body, label and base changes are ignored.
+  guarded.on("pull_request.edited", "dress-code", async (context, scope) => {
+    if (scope.repo === undefined) return;
+    if (context.payload.changes?.title === undefined) return;
+
+    await runDressCodeCheck(
+      { octokit: context.octokit, ...deps(scope.log) },
+      {
+        owner: scope.owner,
+        repo: scope.repo,
+        sha: context.payload.pull_request.head.sha,
+        title: context.payload.pull_request.title,
+      },
+    );
+  });
+
+  // Manual re-run from the Checks tab or "Re-run all checks". GitHub sends
+  // only `check_suite.rerequested` for a whole-suite re-run, and that payload
+  // names no single check, so it is always handled: the suite re-queued our
+  // run and `reRequestDressCodeCheck` completes it (or explains why it stays
+  // neutral). A `check_run.rerequested` names one run, so other checks are
+  // none of dress-code's business.
+  guarded.on(
+    ["check_run.rerequested", "check_suite.rerequested"],
+    "dress-code",
+    async (context, scope) => {
+      if (scope.repo === undefined) return;
+
+      const payload = context.payload;
+      const sha =
+        "check_run" in payload
+          ? payload.check_run.name === DRESS_CODE_CHECK_NAME
+            ? payload.check_run.head_sha
+            : undefined
+          : payload.check_suite.head_sha;
+      if (sha === undefined) return;
+
+      await reRequestDressCodeCheck(
+        { octokit: context.octokit, ...deps(scope.log) },
+        scope.owner,
+        scope.repo,
+        sha,
+      );
+    },
+  );
 }

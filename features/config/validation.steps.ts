@@ -16,6 +16,7 @@ import {
   REPO,
   VALID_SOURCE,
   change,
+  expectConfigSuccess,
   newScenario,
   parseContents,
   replaceAllContents,
@@ -147,17 +148,7 @@ describeFeature(feature, ({ ScenarioOutline, Scenario }) => {
       capture = await runValidation(state);
     });
     Then(`the "woodhouse/config" check reports success`, () => {
-      if (capture === undefined) throw new Error("The configuration validation has not run yet.");
-      expect(capture.createCheck).toHaveBeenCalledOnce();
-      expect(capture.createCheck).toHaveBeenCalledWith(
-        expect.objectContaining({
-          owner: OWNER,
-          repo: REPO,
-          name: CONFIG_CHECK_NAME,
-          head_sha: HEAD_SHA,
-          conclusion: "success",
-        }),
-      );
+      expectConfigSuccess(capture, { owner: OWNER, repo: REPO, headSha: HEAD_SHA });
     });
   });
 

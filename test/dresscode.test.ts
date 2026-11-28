@@ -1,10 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import type { Logger } from "pino";
+import { describe, expect, it } from "vitest";
 import {
   decideDressCode,
   reRequestDressCodeCheck,
   runDressCodeCheck,
-  type DressCodeDeps,
 } from "../src/dresscode/check.js";
 import {
   DRESS_CODE_CHECK_NAME,
@@ -12,145 +10,7 @@ import {
   DRESS_CODE_NO_PULL_REQUEST_REASON,
 } from "../src/dresscode/constants.js";
 import { titlePatternDescription } from "../src/conventional/parse.js";
-import { woodhouseConfigSchema } from "../src/config/schema.js";
-
-const OWNER = "acme";
-const REPO = "widgets";
-const SHA = "1111111111111111111111111111111111111111";
-const NEW_SHA = "2222222222222222222222222222222222222222";
-
-interface StoredRun {
-  readonly id: number;
-  readonly head_sha: string;
-  readonly name: string;
-  status: string;
-  conclusion: string | null;
-  started_at?: string;
-  output?: { title?: string; summary?: string };
-}
-
-interface FakePull {
-  readonly number: number;
-  readonly state: string;
-  readonly title: string;
-  readonly head: { readonly sha: string };
-}
-
-interface BuildOptions {
-  readonly enabled?: boolean;
-  readonly dryRun?: boolean;
-  readonly runs?: readonly StoredRun[];
-  readonly pullRequests?: readonly FakePull[];
-}
-
-function storedRun(overrides: Partial<StoredRun> = {}): StoredRun {
-  return {
-    id: 77,
-    head_sha: SHA,
-    name: DRESS_CODE_CHECK_NAME,
-    status: "completed",
-    conclusion: "success",
-    started_at: "2026-01-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
-/**
- * A stateful fake octokit: the Checks API store is mutated by create/update so
- * listForRef reflects what GitHub would return, which is what makes the
- * update-in-place assertions meaningful.
- */
-function build(options: BuildOptions = {}) {
-  const runs: StoredRun[] = structuredClone([...(options.runs ?? [])]);
-  const pullRequests: FakePull[] = structuredClone([...(options.pullRequests ?? [])]);
-  let nextId = 100;
-
-  const create = vi.fn(async (params: Record<string, unknown>) => {
-    const run: StoredRun = {
-      id: nextId++,
-      head_sha: String(params.head_sha),
-      name: String(params.name),
-      status: String(params.status),
-      conclusion: (params.conclusion as string | null | undefined) ?? null,
-      output: params.output as StoredRun["output"],
-    };
-    runs.push(run);
-    return { data: run };
-  });
-
-  const update = vi.fn(async (params: Record<string, unknown>) => {
-    const run = runs.find((candidate) => candidate.id === params.check_run_id);
-    if (run === undefined) {
-      throw new Error(`No fake check run with id ${String(params.check_run_id)}`);
-    }
-    run.status = String(params.status);
-    run.conclusion = (params.conclusion as string | null | undefined) ?? null;
-    run.output = params.output as StoredRun["output"];
-    return { data: run };
-  });
-
-  const listForRef = vi.fn(async (params: { ref: string; check_name?: string | undefined }) => ({
-    data: {
-      check_runs: runs.filter(
-        (run) =>
-          run.head_sha === params.ref &&
-          (params.check_name === undefined || run.name === params.check_name),
-      ),
-    },
-  }));
-
-  const listPullRequestsAssociatedWithCommit = vi.fn(async (_params: Record<string, unknown>) => ({
-    data: pullRequests,
-  }));
-
-  // Mirrors `octokit.paginate` over the associated-pull-request listing.
-  const paginate = vi.fn(async (target: unknown, params?: Record<string, unknown>) => {
-    if (target !== listPullRequestsAssociatedWithCommit) {
-      throw new Error(`Unexpected paginate target: ${String(target)}`);
-    }
-    const response = await listPullRequestsAssociatedWithCommit(params ?? {});
-    return response.data;
-  });
-
-  const octokit = {
-    checks: { create, update, listForRef },
-    repos: { listPullRequestsAssociatedWithCommit },
-    paginate,
-  } as unknown as DressCodeDeps["octokit"];
-
-  const log = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  } as unknown as Logger;
-
-  const config = woodhouseConfigSchema.parse({
-    dressCode: { enabled: options.enabled ?? true },
-  });
-  const resolver = {
-    resolve: vi.fn(async () => ({ config, sources: [], issues: [] })),
-  } as unknown as DressCodeDeps["resolver"];
-
-  const deps: DressCodeDeps = {
-    octokit,
-    resolver,
-    log,
-    dryRun: options.dryRun ?? false,
-  };
-
-  return {
-    deps,
-    log,
-    runs,
-    pullRequests,
-    create,
-    update,
-    listForRef,
-    listPullRequestsAssociatedWithCommit,
-    paginate,
-  };
-}
+import { NEW_SHA, OWNER, REPO, SHA, build, storedRun } from "./dresscode-harness.js";
 
 const CONVENTIONAL_TITLES = [
   "feat(settings): add the environments section",
